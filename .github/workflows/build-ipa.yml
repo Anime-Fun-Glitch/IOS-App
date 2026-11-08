@@ -2,6 +2,11 @@ name: Build IPA
 
 on:
   workflow_dispatch:
+    inputs:
+      island:
+        description: 'Додати Dynamic Island (вимкніть, щоб зібрати просту версію)'
+        type: boolean
+        default: true
   push:
     branches: [main, master]
 
@@ -54,6 +59,7 @@ jobs:
 
       - name: Add Dynamic Island (optional, falls back to plain build)
         id: island
+        if: ${{ github.event.inputs.island != 'false' }}
         continue-on-error: true
         run: |
           (gem install xcodeproj --no-document || sudo gem install xcodeproj --no-document)
@@ -67,15 +73,16 @@ jobs:
         run: |
           SCHEME=$(basename "$PROJ" .xcodeproj)
           build() {
+            SIGN_ALLOWED="${1:-NO}"   # з Dynamic Island розширення теж має бути підписане ad-hoc, інакше ValidateEmbeddedBinary падає
             rm -rf build/dd
             xcodebuild -project "$PROJ" -scheme "$SCHEME" \
               -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
               -derivedDataPath build/dd \
-              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="-" EXPANDED_CODE_SIGN_IDENTITY="-" \
+              CODE_SIGNING_ALLOWED=$SIGN_ALLOWED CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="-" EXPANDED_CODE_SIGN_IDENTITY="-" \
               build
           }
           if [ "${{ steps.island.outcome }}" = "success" ]; then
-            if build; then
+            if build YES; then
               echo "::notice::Збірка з Dynamic Island успішна"
             else
               echo "::warning::Збірка з Dynamic Island не вдалась — збираю звичайну версію без нього"
