@@ -1,0 +1,114 @@
+name: Build IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Select newest Xcode 26
+        run: |
+          X=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          echo "Using: $X"
+          if [ -n "$X" ]; then sudo xcode-select -s "$X/Contents/Developer"; fi
+          xcodebuild -version
+
+      - name: Install Briefcase
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install briefcase
+
+      - name: Create Xcode project
+        run: briefcase create iOS --no-input
+
+      - name: Allow local HTTP in WebView (Info.plist)
+        run: |
+          PLIST=$(find build -name Info.plist -not -path "*/Pods/*" -not -path "*/app_packages*" -not -path "*/Python*" -maxdepth 6 | head -1)
+          echo "Info.plist: $PLIST"
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent bool true" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes:0 string audio" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Print" "$PLIST"
+
+      - name: Remember plain project (fallback)
+        run: |
+          PROJ=$(find build -name "*.xcodeproj" -maxdepth 6 | head -1)
+          PLIST=$(find build -name Info.plist -not -path "*/Pods/*" -not -path "*/app_packages*" -not -path "*/Python*" -maxdepth 6 | head -1)
+          echo "PROJ=$PROJ" >> "$GITHUB_ENV"
+          echo "PLIST=$PLIST" >> "$GITHUB_ENV"
+          rm -rf /tmp/plain.xcodeproj && cp -R "$PROJ" /tmp/plain.xcodeproj
+          cp "$PLIST" /tmp/plain.Info.plist
+
+      - name: Add Dynamic Island (optional, falls back to plain build)
+        id: island
+        continue-on-error: true
+        run: |
+          (gem install xcodeproj --no-document || sudo gem install xcodeproj --no-document)
+          XDIR=$(dirname "$PROJ")
+          rm -rf "$XDIR/LiveIsland" && cp -R LiveIsland "$XDIR/LiveIsland"
+          ruby LiveIsland/add_island.rb "$PROJ" "$(basename "$PROJ" .xcodeproj)"
+          /usr/libexec/PlistBuddy -c "Add :NSSupportsLiveActivities bool true" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :NSSupportsLiveActivitiesFrequentUpdates bool true" "$PLIST" || true
+
+      - name: Build for iPhone (unsigned)
+        run: |
+          SCHEME=$(basename "$PROJ" .xcodeproj)
+          build() {
+            rm -rf build/dd
+            xcodebuild -project "$PROJ" -scheme "$SCHEME" \
+              -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+              -derivedDataPath build/dd \
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="-" EXPANDED_CODE_SIGN_IDENTITY="-" \
+              build
+          }
+          if [ "${{ steps.island.outcome }}" = "success" ]; then
+            if build; then
+              echo "::notice::Збірка з Dynamic Island успішна"
+            else
+              echo "::warning::Збірка з Dynamic Island не вдалась — збираю звичайну версію без нього"
+              rm -rf "$PROJ" && cp -R /tmp/plain.xcodeproj "$PROJ"
+              cp /tmp/plain.Info.plist "$PLIST"
+              build
+            fi
+          else
+            echo "::warning::Крок Dynamic Island не пройшов — збираю без нього"
+            rm -rf "$PROJ" && cp -R /tmp/plain.xcodeproj "$PROJ"
+            cp /tmp/plain.Info.plist "$PLIST"
+            build
+          fi
+
+      - name: Package .ipa
+        run: |
+          APP=$(find build/dd/Build/Products -path "*Release-iphoneos/*.app" -maxdepth 4 | head -1)
+          echo "App: $APP"
+          rm -rf ipa-out && mkdir -p ipa-out/Payload
+          cp -R "$APP" ipa-out/Payload/
+          (cd ipa-out && zip -qry ../Anime.ipa Payload)
+          ls -lh Anime.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Anime-ipa
+          path: Anime.ipa
+          if-no-files-found: error
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            briefcase.*.log
+          if-no-files-found: ignore
