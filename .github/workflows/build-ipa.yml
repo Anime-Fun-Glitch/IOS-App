@@ -2,6 +2,11 @@ name: Build IPA
 
 on:
   workflow_dispatch:
+    inputs:
+      island:
+        description: 'Додати Dynamic Island (вимкніть, щоб зібрати просту версію)'
+        type: boolean
+        default: true
   push:
     branches: [main, master]
 
@@ -54,6 +59,7 @@ jobs:
 
       - name: Add Dynamic Island (optional, falls back to plain build)
         id: island
+        if: ${{ github.event.inputs.island != 'false' }}
         continue-on-error: true
         run: |
           (gem install xcodeproj --no-document || sudo gem install xcodeproj --no-document)
