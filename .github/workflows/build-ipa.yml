@@ -45,7 +45,7 @@ jobs:
       - name: Remember plain project (fallback)
         run: |
           PROJ=$(find build -name "*.xcodeproj" -maxdepth 6 | head -1)
-          PLIST=$(find build -name Info.plist -not -path "*/Pods/*" -not -path "*/app_packages*" -not -path "*/Python*" -maxdepth 6 | head -1)
+          PLIST=$(find build -name Info.plist -not -path "*/Pods/*" -not -path "*/app_packages*" -not -path "*/Python*" | head -1)
           echo "PROJ=$PROJ" >> "$GITHUB_ENV"
           echo "PLIST=$PLIST" >> "$GITHUB_ENV"
           rm -rf /tmp/plain.xcodeproj && cp -R "$PROJ" /tmp/plain.xcodeproj
