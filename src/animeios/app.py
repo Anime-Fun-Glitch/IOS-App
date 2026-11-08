@@ -99,7 +99,15 @@ def _setup_native_info(anime_app):
                     top = top.presentedViewController
                 pop = avc.popoverPresentationController
                 if pop is not None:
+                    # popover (iPad-подібний режим, також у LiveContainer): по центру екрана, без стрілки — інакше вікно з'їжджає за край
                     pop.sourceView = top.view
+                    try:
+                        from rubicon.objc.types import CGPoint, CGRect, CGSize
+                        b = top.view.bounds
+                        pop.sourceRect = CGRect(CGPoint(b.size.width / 2, b.size.height / 2), CGSize(1, 1))
+                        pop.permittedArrowDirections = 0
+                    except Exception:
+                        traceback.print_exc()
                 top.presentViewController(avc, animated=True, completion=None)
             except Exception:
                 traceback.print_exc()
