@@ -2,18 +2,17 @@
 requires = ["briefcase"]
 
 [tool.briefcase]
-project_name = "Anime"
+project_name = "AniSync"
 bundle = "com.animeoffline"
-version = "1.0.0"
-url = "https://example.com/anime"
+version = "0.8"
+url = "https://github.com/Anime-Fun-Glitch/IOS-App"
 license = "LicenseRef-Personal-Use"
 license-files = ["LICENSE"]
-author = "Me"
-author_email = "me@example.com"
+author = "SberKon"
 
 [tool.briefcase.app.animeios]
-formal_name = "Anime"
-description = "Особистий офлайн-застосунок для аніме"
+formal_name = "AniSync"
+description = "All anime websites together"
 icon = "resources/animeios"
 sources = ["src/animeios"]
 requires = ["requests"]
