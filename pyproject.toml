@@ -1,0 +1,25 @@
+[build-system]
+requires = ["briefcase"]
+
+[tool.briefcase]
+project_name = "Anime"
+bundle = "com.animeoffline"
+version = "1.0.0"
+url = "https://example.com/anime"
+license = "LicenseRef-Personal-Use"
+license-files = ["LICENSE"]
+author = "Me"
+author_email = "me@example.com"
+
+[tool.briefcase.app.animeios]
+formal_name = "Anime"
+description = "Особистий офлайн-застосунок для аніме"
+icon = "resources/animeios"
+sources = ["src/animeios"]
+requires = ["requests"]
+
+[tool.briefcase.app.animeios.iOS]
+requires = ["toga-iOS"]
+info."UIFileSharingEnabled" = true
+info."LSSupportsOpeningDocumentsInPlace" = true
+info."UIUserInterfaceStyle" = "Dark"
