@@ -5512,6 +5512,8 @@ def _pause_save():
 def api_dl_pause(on):
   on = bool(on)
   PAUSE['on'] = on
+  if not on:
+    PAUSED_KIDS.clear()  # «Продовжити» повертає все, включно з окремо призупиненими аніме
   _pause_save()
   if not on:
     if INTERRUPTED:
@@ -6153,7 +6155,7 @@ def net_state():
 SETTINGS = {'mobile_download': False, 'auto_skip': False, 'auto_skip_opening': True, 'auto_skip_ending': True, 'auto_next': True,
             'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': False, 'ios_player': True, 'np_ep_cover': True,
             'bg_keep': True, 'bg_check': False, 'island': True, 'island_dl': True, 'island_check': False,
-            'skip_mode': 'instant', 'vol_max': 100,
+            'skip_mode': 'instant', 'vol_max': 100, 'client': {},
             'site_order': ['aniliberty', 'yummyani', 'animevost', 'animru'], 'view': {}}
 
 
@@ -8492,9 +8494,13 @@ button:active,.card:active,.btn:active,.ib:active,#tabs a:active,.dchip:active{t
 .job .st{align-items:flex-start;overflow-wrap:anywhere;word-break:break-word;line-height:1.35}
 .job .st .i{margin-top:2px}
 .job .st .tx{min-width:0}
-#jobacts{position:sticky;bottom:0;z-index:2;display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:8px -16px calc(-1 * (18px + var(--bot)));padding:12px 16px calc(14px + var(--bot));background:linear-gradient(to top,var(--s1) 82%,transparent)}
-#jobacts .btn{width:100%;min-height:48px;border-radius:14px}#jobacts .jgbtn.wide{grid-column:1/-1}#jobacts:empty{display:none}
-.jgp{position:relative;overflow:hidden}.jgp .pi{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .3s}.jgp .pi.ld{opacity:1}.jgp[data-p]:not([data-p='']){cursor:pointer}
+.sheet[data-kind=jobs] #sb{display:flex;flex-direction:column;overflow:hidden;padding-bottom:0}
+.sheet[data-kind=jobs] #joblist{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;margin:0 -16px;padding:0 16px 8px}
+.sheet[data-kind=jobs] #jobempty{flex:none}
+#jobacts{flex:none;display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0 -16px;padding:12px 16px calc(12px + var(--bot));background:var(--s1);border-top:1px solid #ffffff10}
+#jobacts .btn{width:100%;min-height:46px;border-radius:14px}#jobacts .btn:nth-last-child(1):nth-child(odd),#jobacts .jgbtn.wide{grid-column:1/-1}#jobacts:empty{display:none}
+.jg{contain:layout paint}
+.jgp{position:relative;overflow:hidden}.jgp{background:#ffffff0d}.jgp .pi{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.jgp[data-p]:not([data-p='']){cursor:pointer}
 .jgpb{width:40px;padding:0}
 .jgf{padding:0 12px 12px}.jgf:empty{display:none}
 .jgbtn{width:100%;min-height:42px;border-radius:12px;background:transparent;border:1px solid #ffffff1f;color:var(--mu);font:inherit;font-weight:600;font-size:13.5px}
@@ -8892,6 +8898,7 @@ function render() {
   else root.innerHTML = html;
   const rchg = S.lastRender !== rkey;
   S.lastRender = rkey;
+  if (rchg) S.hdrHide = false;
   if (r.name === 'detail' && (rchg || S.chipFix)) { S.chipFix = false; requestAnimationFrame(centerChips); setTimeout(centerChips, 350); }
   if (ENTER) [...root.children].forEach(c => c.classList.add('enter-page'));
   if (window.__fitBar) window.__fitBar();
@@ -9967,7 +9974,7 @@ function renderSheet() {
     $('#sb').innerHTML = inner;  // тільки вміст — шторка не «перезапускається»
   }
   if (keepVal !== null && $('#addurl')) $('#addurl').value = keepVal;
-  if (s.kind === 'jobs') updateJobs();
+  if (s.kind === 'jobs') { updateJobs(); pollJobs(); }
 }
 async function checkInterrupted() {  // додаток закрився посеред завантаження: питаємо, чи продовжувати (недокачане збережено)
   try {
@@ -10016,7 +10023,7 @@ function addHTML() {
 }
 
 function jobsHTML() {
-  return `<h3>Завантаження</h3><div class="jsum" id="jobsum"></div><div id="joblist"></div><p id="jobempty" style="color:var(--mu)">Черга порожня.</p>
+  return `<h3>Завантаження</h3><div class="jsum" id="jobsum"></div><div id="joblist"></div><p id="jobempty" style="color:var(--mu)">Завантажую…</p>
     <div class="row2" id="jobacts"></div>`;
 }
 function jobStatus(j) {
@@ -10055,7 +10062,7 @@ const JG_CONF = {};
 const JG_SK = `<div class="jgh" data-act="jgtog"><div class="jgp" data-act="jgopen"></div><div class="jgt"><b></b><span></span></div><button class="btn sm jgpb" data-act="jgpause" hidden></button><span class="jga">${ico('chev')}</span></div><div class="jgb"><div><div class="jgi"></div><div class="jgf"></div></div></div>`;
 function jgHead(g, kid, arr, cx) {
   const it = item(kid), live = arr.filter(j => j.status === 'running' || j.status === 'queued'), run = arr.find(j => j.status === 'running');
-  const done = arr.filter(j => j.status === 'done').length, kp = arr.some(j => j.kpaused) && live.length > 0;
+  const done = arr.filter(j => j.status === 'done').length, kp = (arr.some(j => j.kpaused) || !!S.dlPaused) && live.length > 0;
   const p = it && it.meta && it.meta.poster ? it.meta.poster : '';
   const pct = run && run.total ? Math.min(100, Math.round(run.done * 100 / run.total)) : 0;
   const bytesLeft = live.reduce((a, j) => a + Math.max(0, (j.bytes_total || 0) - (j.status === 'running' ? (j.bytes || 0) : 0)), 0);
@@ -10085,7 +10092,7 @@ function updateJobs() {
   const list = $('#joblist'); if (!list) return;  // шторка закрита
   const js = [...S.jobs].reverse();
   const groups = new Map();  // скасоване — окремі групи під рискою
-  js.forEach(j => { const cx = j.status === 'cancelled', key = j.kid + (cx ? '~x' : ''); if (!groups.has(key)) groups.set(key, {key, kid: j.kid, cx, arr: []}); groups.get(key).arr.push(j); });
+  js.forEach(j => { const cx = j.status === 'cancelled' || !!j.cancelling, key = j.kid + (cx ? '~x' : ''); if (!groups.has(key)) groups.set(key, {key, kid: j.kid, cx, arr: []}); groups.get(key).arr.push(j); });
   [...list.querySelectorAll('.jg')].forEach(g => { if (!groups.has(g.dataset.k)) g.remove(); });
   const rank = G => G.cx ? 3 : G.arr.some(j => j.status === 'running') ? 0 : G.arr.some(j => j.status === 'queued') ? 1 : 2;  // зверху те, що качається зараз
   const order = [...groups.values()].map(G => (G.arr.reverse(), G)).sort((x, y) => rank(x) - rank(y));
@@ -10093,10 +10100,9 @@ function updateJobs() {
   let div = list.querySelector('.jdiv');
   if (hasCx && !div) { div = document.createElement('div'); div.className = 'jdiv'; div.innerHTML = '<span>Скасовані</span>'; }
   if (!hasCx && div) { div.remove(); div = null; }
-  let prevG = null;
+  let prevG = null, divDone = false;
   order.forEach(G => {
-    if (G.cx && div && div.previousElementSibling !== prevG) { list.insertBefore(div, prevG ? prevG.nextSibling : list.firstChild); }
-    if (G.cx && div) prevG = div;
+    if (G.cx && div && !divDone) { divDone = true; if (div.previousElementSibling !== prevG || div.parentNode !== list) list.insertBefore(div, prevG ? prevG.nextSibling : list.firstChild); prevG = div; }
     let g = [...list.querySelectorAll('.jg')].find(x => x.dataset.k === G.key);
     if (!g) { g = document.createElement('div'); g.className = 'jg' + (G.cx ? ' cx' : ''); g.dataset.k = G.key; g.innerHTML = JG_SK; }
     if (g.previousElementSibling !== prevG || g.parentNode !== list) list.insertBefore(g, prevG ? prevG.nextSibling : list.firstChild);
@@ -10131,7 +10137,7 @@ function updateJobs() {
     });
   });
   const je = $('#jobempty');
-  je.textContent = (S.dlPaused && S.dlIntr > 0) ? `Призупинено: серій у черзі — ${S.dlIntr}. Натисніть «Продовжити».` : 'Черга порожня.';
+  je.textContent = !S.jobsT ? 'Завантажую…' : (S.dlPaused && S.dlIntr > 0) ? `Призупинено: серій у черзі — ${S.dlIntr}. Натисніть «Продовжити».` : 'Черга порожня.';
   je.style.display = js.length ? 'none' : '';
   const sm = S.jobsum, se2 = $('#jobsum');
   if (se2) {
@@ -10174,6 +10180,13 @@ async function applyImported() {  // після відновлення одра�
   try {
     const j = await api('/api/settings');
     S.set = j; syncAuto();
+    const c = j.client || {};  // уподобання, що живуть лише в браузері (вкладка бібліотеки, вигляд серій, сайт новинок, гучність)
+    try {
+      if (c.libTab) S.libTab = c.libTab;
+      if (c.epv) { S.epView = c.epv; localStorage.setItem('epv', c.epv); }
+      if (c.nwsite) { S.nw.site = c.nwsite; localStorage.setItem('nwsite', c.nwsite); }
+      if (c.pvol != null) localStorage.setItem('pvol', String(c.pvol));
+    } catch (e) {}
     if (j.view && Object.keys(j.view).length) { S.view = {...VIEW_DEF, ...j.view}; try { localStorage.setItem('libview', JSON.stringify(S.view)); } catch (e) {} }
     S._libSig = null;
     await loadLib();
@@ -10256,7 +10269,7 @@ let pollTimer = null, lastDone = -1;
 async function pollJobs() {
   try {
     const j = await api('/api/jobs');
-    S.jobs = j.jobs; S.activeJobs = j.active; S.jobsum = j.summary; S.dlPaused = !!j.paused; S.dlIntr = (j.interrupted || []).reduce((a, x) => a + x.n.length, 0);
+    S.jobsT = Date.now(); S.jobs = j.jobs; S.activeJobs = j.active; S.jobsum = j.summary; S.dlPaused = !!j.paused; S.dlIntr = (j.interrupted || []).reduce((a, x) => a + x.n.length, 0);
     const done = j.jobs.filter(x => x.status === 'done').length;
     if (lastDone >= 0 && done !== lastDone) await loadLib();
     lastDone = done;
@@ -10642,7 +10655,7 @@ const A = {
     pollJobs();
   },
   bkmode(el) { S_bkMode = el.dataset.m; bkTick(false); },
-  async bkexport() { try { await api('/api/export', {mode: S_bkMode}); } catch (e) { toast(e.message, true); } bkTick(false); },
+  async bkexport() { try { await api('/api/settings', {view: S.view, client: {libTab: S.libTab, epv: S.epView, nwsite: nwSite(), pvol: volGet()}}); await api('/api/export', {mode: S_bkMode}); } catch (e) { toast(e.message, true); } bkTick(false); },
   async bkcancel() { try { await api('/api/backup_cancel', {}); } catch (e) {} bkTick(true); },
   async bkimport(el) {
     if (!(await askConfirm('Відновити зі збереження?', 'Бібліотека буде доповнена, налаштування з файлу застосуються.', 'Відновити'))) return;
@@ -11411,22 +11424,47 @@ function closePlayer() {
 }
 
 
+/* ---------- шторка не віддає прокрутку сторінці під нею ---------- */
+(function () {
+  let y0 = 0, x0 = 0;
+  const L = document.getElementById('layer');
+  L.addEventListener('touchstart', e => { y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; }, {passive: true});
+  L.addEventListener('touchmove', e => {
+    const sc = e.target.closest('#joblist, #sb');
+    if (!sc) { e.preventDefault(); return; }
+    if (e.target.closest('textarea, input')) return;
+    const dy = e.touches[0].clientY - y0, dx = e.touches[0].clientX - x0;
+    if (Math.abs(dx) > Math.abs(dy)) return;  // горизонтальні жести не чіпаємо
+    const atTop = sc.scrollTop <= 0, atBot = sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 1;
+    if ((dy > 0 && atTop) || (dy < 0 && atBot)) e.preventDefault();
+  }, {passive: false});
+})();
+
 /* ---------- панель фільтрів: ховається при прокрутці вниз, з'являється при прокрутці вгору ---------- */
 (function () {
   let ly = 0, acc = 0, busy = false;
   const fit = () => { const b = document.querySelector('.bar'); if (b) { const h = b.offsetHeight + 'px'; if (document.documentElement.style.getPropertyValue('--barh') !== h) document.documentElement.style.setProperty('--barh', h); } };
-  window.__fitBar = fit;
+  const apply = (h, hide, instant) => {
+    if (h.classList.contains('hide') === hide) return;
+    if (instant) { h.style.transition = 'none'; h.classList.toggle('hide', hide); void h.offsetHeight; h.style.transition = ''; } else h.classList.toggle('hide', hide);
+  };
+  window.__fitBar = () => { fit(); const h = document.querySelector('.hdr2'); if (h) apply(h, !!S.hdrHide && window.scrollY > 70, true); };  // після перемальовування сторінки стан панелі не скидається
   addEventListener('scroll', () => {
     if (busy) return; busy = true;
     requestAnimationFrame(() => {
       busy = false;
-      const h = document.querySelector('.hdr2'); const y = Math.max(0, window.scrollY); const d = y - ly; ly = y;
+      const h = document.querySelector('.hdr2');
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      const y = window.scrollY;
+      if (y < 0 || y > max + 1) return;  // «гумова» відскока на краях — ігноруємо
+      const d = y - ly; ly = y;
       if (!h) { acc = 0; return; }
       fit();
-      if (y < 70) { acc = 0; h.classList.remove('hide'); return; }
+      if (y < 90) { acc = 0; S.hdrHide = false; apply(h, false); return; }
       if (acc * d < 0) acc = 0;  // напрямок змінився
       acc += d;
-      if (acc > 28) h.classList.add('hide'); else if (acc < -14) h.classList.remove('hide');
+      if (acc > 70 && !S.hdrHide) { S.hdrHide = true; apply(h, true); }
+      else if (acc < -45 && S.hdrHide) { S.hdrHide = false; apply(h, false); }
     });
   }, {passive: true});
 })();
