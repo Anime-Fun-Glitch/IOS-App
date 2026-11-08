@@ -26,15 +26,16 @@ jobs:
       - name: Install Briefcase
         run: |
           python -m pip install --upgrade pip
-          python -m pip install briefcase
+          python -m pip install "briefcase>=0.3.20,<0.4"
 
       - name: Create Xcode project
         run: briefcase create iOS --no-input
 
       - name: Allow local HTTP in WebView (Info.plist)
         run: |
-          PLIST=$(find build -name Info.plist -not -path "*/Pods/*" -not -path "*/app_packages*" -not -path "*/Python*" -maxdepth 6 | head -1)
+          PLIST=$(find build -maxdepth 7 -name "*Info.plist" -not -path "*/Pods/*" -not -path "*/app_packages*" -not -path "*/Python*" -not -path "*/support/*" | head -1)
           echo "Info.plist: $PLIST"
+          if [ -z "$PLIST" ]; then echo "Info.plist not found; project tree:"; find build -maxdepth 6 -not -path "*/app_packages*" -not -path "*/Python*" | head -80; exit 1; fi
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent bool true" "$PLIST" || true
@@ -45,7 +46,7 @@ jobs:
       - name: Remember plain project (fallback)
         run: |
           PROJ=$(find build -name "*.xcodeproj" -maxdepth 6 | head -1)
-          PLIST=$(find build -name Info.plist -not -path "*/Pods/*" -not -path "*/app_packages*" -not -path "*/Python*" | head -1)
+          PLIST=$(find build -maxdepth 7 -name "*Info.plist" -not -path "*/Pods/*" -not -path "*/app_packages*" -not -path "*/Python*" -not -path "*/support/*" | head -1)
           echo "PROJ=$PROJ" >> "$GITHUB_ENV"
           echo "PLIST=$PLIST" >> "$GITHUB_ENV"
           rm -rf /tmp/plain.xcodeproj && cp -R "$PROJ" /tmp/plain.xcodeproj
