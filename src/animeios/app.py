@@ -99,15 +99,22 @@ def _setup_native_info(anime_app):
                     top = top.presentedViewController
                 pop = avc.popoverPresentationController
                 if pop is not None:
-                    # popover (iPad-подібний режим, також у LiveContainer): по центру екрана, без стрілки — інакше вікно з'їжджає за край
-                    pop.sourceView = top.view
+                    # popover (регулярний розмір вікна, зокрема в LiveContainer): прив'язуємо до центру ВІКНА (координати екрана),
+                    # а не до виду Toga, який може мати інший розмір/зсув; без стрілки, щоб вікно не з'їжджало в кут
+                    win = ObjCClass('UIApplication').sharedApplication.keyWindow
                     try:
                         from rubicon.objc.types import CGPoint, CGRect, CGSize
-                        b = top.view.bounds
-                        pop.sourceRect = CGRect(CGPoint(b.size.width / 2, b.size.height / 2), CGSize(1, 1))
+                        wb = win.bounds
+                        pop.sourceView = win
+                        pop.sourceRect = CGRect(CGPoint(wb.size.width / 2, wb.size.height / 2), CGSize(1, 1))
                         pop.permittedArrowDirections = 0
                     except Exception:
                         traceback.print_exc()
+                        pop.sourceView = win
+                    try:
+                        avc.preferredContentSize = CGSize(min(wb.size.width - 40, 420), min(wb.size.height - 120, 560))
+                    except Exception:
+                        pass
                 top.presentViewController(avc, animated=True, completion=None)
             except Exception:
                 traceback.print_exc()
@@ -178,7 +185,7 @@ class _KeepAlive:
         try:
             from rubicon.objc import ObjCClass
             if want:
-                self._category(not video_playing)
+                self._category(False)  # категорія завжди та сама, що й при запуску: зміна режиму (mix ↔ ні) під час відео перериває його — звідси «саме зупиняється після секунди»
                 if self.player is None:
                     NSURL = ObjCClass('NSURL')
                     self.path = self._wav()

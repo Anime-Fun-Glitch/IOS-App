@@ -5610,6 +5610,8 @@ def api_download(kid, ordinals, quality, dub=_UNSET):
     lib_save()
   dub = e.get('dubbing') if dub is _UNSET else dub
   added = 0
+  PAUSED_KIDS.discard(kid)  # нове завантаження цього аніме знімає його окрему паузу
+  _pause_autoclear()  # а якщо нічого іншого не качається — і глобальну
   with JOB_LOCK:
     busy = {(j['kid'], j['n'], j.get('dub')) for j in JOBS if j['status'] in ('queued', 'running')}
     for o in sorted(_num_arg(x) for x in ordinals):
@@ -5986,9 +5988,27 @@ def api_kid_pause(kid, on):
   return {'ok': True, 'paused': kid in PAUSED_KIDS}
 
 
+def _pause_autoclear():
+  """Глобальна пауза не має «залипати», коли качати вже нічого: інакше нове аніме не стартує."""
+  with JOB_LOCK:
+    live = any(j['status'] in ('queued', 'running') and not j['cancel'].is_set() for j in JOBS)
+  if not live and (PAUSE['on'] or PAUSED_KIDS):
+    PAUSE['on'] = False
+    PAUSED_KIDS.clear()
+    _pause_save()
+
+
 def api_cancel(job_id=None, kid=None):
   if kid is not None:
     PAUSED_KIDS.discard(kid)
+  if job_id is None and kid is None:  # «скасувати все» — знімаємо і паузу, і перервані
+    PAUSE['on'] = False
+    PAUSED_KIDS.clear()
+    try:
+      INTERRUPTED.clear()
+    except Exception:
+      pass
+    _pause_save()
   with JOB_LOCK:
     for j in JOBS:
       if (job_id is None or j['id'] == job_id) and (kid is None or j['kid'] == kid) and j['status'] in ('queued', 'running'):
@@ -6003,6 +6023,7 @@ def api_cancel(job_id=None, kid=None):
         else:
           j['stage'] = 'Скасовую…'
   _jobs_persist()
+  _pause_autoclear()
   return {'ok': True}
 
 
@@ -8136,6 +8157,7 @@ body.pressing,body.pressing *{-webkit-user-select:none!important;user-select:non
 .cm{display:flex;flex-direction:column;gap:6px;margin-top:4px}
 .cm button{display:flex;align-items:center;gap:12px;width:100%;border:0;background:var(--s1);color:inherit;font:inherit;font-size:15.5px;font-weight:600;text-align:left;padding:14px;border-radius:14px;cursor:pointer}
 .cm button .i{width:20px;height:20px;color:var(--ac2)}
+.cm button,[data-lp]{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}.card.sr{-webkit-touch-callout:none}
 .cm button:active{background:var(--s2)}
 .cm button.dng,.cm button.dng .i{color:var(--err,#ff6b7a)}
 .cm button.dng,.cm button.dng .i{color:#ff6b6b}
@@ -8501,7 +8523,9 @@ button:active,.card:active,.btn:active,.ib:active,#tabs a:active,.dchip:active{t
 #jobacts .btn{width:100%;min-height:46px;border-radius:14px}#jobacts .btn:nth-last-child(1):nth-child(odd),#jobacts .jgbtn.wide{grid-column:1/-1}#jobacts:empty{display:none}
 .jg{contain:layout paint}
 .jgp{position:relative;overflow:hidden}.jgp{background:#ffffff0d}.jgp .pi{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.jgp[data-p]:not([data-p='']){cursor:pointer}
-.jgpb{width:40px;padding:0}
+.jgpb{width:40px;padding:0}.jgpb[hidden]{display:none!important}
+#hdrtog{position:fixed;right:12px;top:calc(var(--barh,58px) + 8px);z-index:19;width:40px;height:40px;border-radius:50%;border:1px solid #ffffff1f;background:rgba(13,14,19,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);color:var(--tx,#fff);display:none;align-items:center;justify-content:center;padding:0}
+#hdrtog.on{display:flex}#hdrtog svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .jgf{padding:0 12px 12px}.jgf:empty{display:none}
 .jgbtn{width:100%;min-height:42px;border-radius:12px;background:transparent;border:1px solid #ffffff1f;color:var(--mu);font:inherit;font-weight:600;font-size:13.5px}
 .jgbtn.res{color:var(--tx,#fff)}.jgbtn.conf{border-color:var(--err);color:var(--err);background:#ff6b6b14}
@@ -8894,8 +8918,10 @@ function render() {
   if (ENTER) { if (ENTERED.has(ekey)) ENTER = false; else ENTERED.add(ekey); }  // анімація появи — раз за сесію для кожної сторінки/вкладки
   const html = (pages[r.name] || homeHTML)();
   const rkey = r.name + ':' + (r.id || '');
+  const keepY = (!ENTER && S.lastRender === rkey) ? window.scrollY : -1;  // та сама сторінка перемальовується (напр. «Пам'ять» під час збереження) — не стрибаємо вгору
   if (!ENTER && S.lastRender === rkey && (r.name === 'detail' || r.name === 'home' || r.name === 'group' || r.name === 'new' || r.name === 'search') && root.firstChild) { try { morphInto(root, html); } catch (e) { root.innerHTML = html; } }
   else root.innerHTML = html;
+  if (keepY > 0 && Math.abs(window.scrollY - keepY) > 1) window.scrollTo(0, keepY);
   const rchg = S.lastRender !== rkey;
   S.lastRender = rkey;
   if (rchg) S.hdrHide = false;
@@ -9504,7 +9530,7 @@ function homeHTML() {
   return `
   ${S.reorder ? `<div class="bar"><h1>Редагування</h1><button class="btn pri sm" data-act="reorder">${ico('check')} Готово</button></div>
   <p style="margin:0 16px 4px;color:var(--mu);font-size:13px">Торкайтесь карток, щоб вибрати кілька. Утримайте й перетягніть — змінити порядок; потримайте картку над серединою іншої — згрупувати (вибрані поїдуть разом; другим пальцем можна додати ще й гортати). Правий кут — «переглянуті», лівий — видалити з бібліотеки. Або користуйтесь стрілками.</p>` : `<div class="bar"><h1>Мої аніме</h1>${netHTML()}
-    <button class="ib" data-act="notifs" aria-label="Повідомлення">${ico('bell')}${S.notifs.unread ? `<span class="dot">${S.notifs.unread > 99 ? '99+' : S.notifs.unread}</span>` : ''}</button>
+    <button class="ib" data-act="notifs" data-lp="bellall" aria-label="Повідомлення">${ico('bell')}${S.notifs.unread ? `<span class="dot">${S.notifs.unread > 99 ? '99+' : S.notifs.unread}</span>` : ''}</button>
     <button class="ib" data-act="checkall" aria-label="Перевірити нові серії">${ico(S.checking ? 'spinner' : 'refresh')}</button>
     <button class="ib" data-act="jobs" aria-label="Завантаження">${ico('download')}${dlBadge ? `<span class="dot">${dlBadge}</span>` : ''}</button>
     <button class="ib pri" data-act="add" aria-label="Додати">${ico('plus')}</button>
@@ -9654,7 +9680,7 @@ function detailHTML(id) {
   ${(it.dubs || []).length > 1 ? `<div class="dubs${S.busy.has('sw') ? ' dis' : ''}">${it.dubs.map(d => `<button class="dchip${d.active ? ' on' : ''}" data-act="setdub" data-dub="${esc(d.name)}">${esc(d.name)}${d.count ? `<em class="dcnt">${d.count} сер.</em>` : ''}${d.downloaded ? `<small>${ico('download')}${d.downloaded}</small>` : ''}</button>`).join('')}</div>` : ''}
   <div class="acts">
     <button class="btn pri" data-act="playnext" ${nx || it.episodes.length ? '' : 'disabled'}>${ico('play')} ${nx ? (nx.pos > 5 ? 'Продовжити · серія ' + esc(nx.n) : 'Дивитись · серія ' + esc(nx.n)) : 'Дивитись спочатку'}</button>
-    ${tmp && it.preview_of && item(it.preview_of) ? `<button class="btn ok" data-act="openlib" data-id="${esc(it.preview_of)}">${ico('book')} Відкрити в бібліотеці</button>` : tmp ? `<button class="btn ok" data-act="keep" ${S.busy.has('keep') ? 'disabled' : ''}>${ico('plus')} В бібліотеку</button><button class="btn" data-act="keepseen" ${S.busy.has('keep') ? 'disabled' : ''}>${ico('check')} Переглянуте</button>`
+    ${tmp && it.preview_of && item(it.preview_of) ? `<button class="btn ok" data-act="openlib" data-id="${esc(it.preview_of)}">${ico('book')} Відкрити в бібліотеці</button>` : tmp ? `<button class="btn ok" data-act="keep" data-lp="gpick" data-cx="tmp" data-m="lib" ${S.busy.has('keep') ? 'disabled' : ''}>${ico('plus')} В бібліотеку</button><button class="btn" data-act="keepseen" data-lp="gpick" data-cx="tmp" data-m="seen" ${S.busy.has('keep') ? 'disabled' : ''}>${ico('check')} Переглянуте</button>`
           : `<button class="btn" data-act="check" ${checking ? 'disabled' : ''}>${ico(checking ? 'spinner' : 'refresh')} Нові</button>`}
     <button class="btn" data-act="site" data-id="${it.id}" aria-label="Відкрити сайт (подвійний тап — скопіювати посилання)">${ico('globe')}</button>
   </div>
@@ -9939,6 +9965,12 @@ function renderSheet() {
   if (s.kind === 'add') inner = addHTML();
   else if (s.kind === 'jobs') inner = jobsHTML();
   else if (s.kind === 'notifs') inner = notifsHTML();
+  else if (s.kind === 'cmenu' && s.res) inner = `<h3>${esc(s.res.title)}</h3><div class="cm">
+     <button data-act="rsshare">${ico('share')} Поділитись</button>
+     <button data-act="rslib" data-lp="gpick" data-m="lib">${ico('plus')} Додати в Бібліотеку</button>
+     <button data-act="rsseen" data-lp="gpick" data-m="seen">${ico('check')} Додати в Переглянуте</button></div>
+     <p class="hint" style="margin:8px 4px 0;font-size:12px">Затисніть «Бібліотеку» чи «Переглянуте», щоб додати до наявної групи.</p>`;
+  else if (s.kind === 'gpick') inner = gpickHTML();
   else if (s.kind === 'cmenu' && s.gid) { const m = groupMembers(s.gid), nm = S.view.gtitle === false ? '' : gname(m); inner = `<h3>${esc(nm || 'Група')}</h3><div class="cm">
      <button data-act="gmshare" data-g="${esc(s.gid)}">${ico('share')} Поділитись</button>
      <button data-act="gmrename" data-g="${esc(s.gid)}">${ico('edit')} Перейменувати</button>
@@ -9947,7 +9979,7 @@ function renderSheet() {
   else if (s.kind === 'cmenu') { const it = item(s.id) || {}; inner = `<h3>${esc(lname(it))}</h3><div class="cm">
      <button data-act="cmshare" data-id="${s.id}">${ico('share')} Поділитись</button>
      <button data-act="cmrename" data-id="${s.id}">${ico('edit')} Перейменувати</button>
-     <button data-act="cmarc" data-id="${s.id}">${ico(it.archived ? 'refresh' : 'check')} ${it.archived ? 'У бібліотеку' : 'У переглянуте'}</button>
+     <button data-act="cmarc" data-lp="gpick" data-id="${s.id}">${ico(it.archived ? 'refresh' : 'check')} ${it.archived ? 'У бібліотеку' : 'У переглянуте'}</button>
      ${it.group ? '' : `<button data-act="cmgroup" data-id="${s.id}">${ico('plus')} Створити групу</button>`}
      <button class="dng" data-act="cmdel" data-id="${s.id}">${ico('trash')} Видалити</button></div>`; }
   else if (s.kind === 'group') inner = groupSheetHTML(s.gid);
@@ -10060,6 +10092,18 @@ const JG_OPEN = {};  // що користувач відкрив/закрив в
 function jgOpen(kid, arr) { return kid in JG_OPEN ? JG_OPEN[kid] : arr.some(j => j.status === 'running'); }  // за замовчуванням відкрите лише те, що качається зараз
 const JG_CONF = {};
 const JG_SK = `<div class="jgh" data-act="jgtog"><div class="jgp" data-act="jgopen"></div><div class="jgt"><b></b><span></span></div><button class="btn sm jgpb" data-act="jgpause" hidden></button><span class="jga">${ico('chev')}</span></div><div class="jgb"><div><div class="jgi"></div><div class="jgf"></div></div></div>`;
+const JG_IMGS = {};  // обкладинки черги живуть між відкриттями шторки: уже завантажене й розкодоване зображення не вантажиться знову
+function jgImg(p) {
+  let im = JG_IMGS[p];
+  if (!im) {
+    im = new Image(); im.className = 'pi'; im.decoding = 'async'; im.alt = ''; im.dataset.o = p;
+    im.onload = () => im.classList.add('ld'); im.onerror = () => imgErr(im);
+    im.src = '/img?u=' + encodeURIComponent(p);
+    JG_IMGS[p] = im;
+  }
+  return im;
+}
+function jgPreload() { try { new Set((S.jobs || []).map(j => j.kid)).forEach(k => { const it = item(k), p = it && it.meta && it.meta.poster; if (p) jgImg(p); }); } catch (e) {} }
 function jgHead(g, kid, arr, cx) {
   const it = item(kid), live = arr.filter(j => j.status === 'running' || j.status === 'queued'), run = arr.find(j => j.status === 'running');
   const done = arr.filter(j => j.status === 'done').length, kp = (arr.some(j => j.kpaused) || !!S.dlPaused) && live.length > 0;
@@ -10070,20 +10114,20 @@ function jgHead(g, kid, arr, cx) {
   const parts = cx ? [`скасовано ${arr.length}`] : [live.length ? `у черзі ${live.length}` : null, done ? `готово ${done}` : null, bytesLeft ? `≈${fmtSize(bytesLeft)}` : null, live.length && eta ? `~${fmtDur(eta)}` : null, kp ? 'призупинено' : (run ? `${pct}%` : null)].filter(Boolean);
   // каркас створюється один раз; оновлюється лише те, що справді змінилось — нічого не блимає і кнопки не підміняються під пальцем
   const pe = g.querySelector('.jgp');
-  if (pe.dataset.p !== p) { pe.dataset.p = p; pe.innerHTML = p ? `<img class="pi" decoding="async" alt="" src="/img?u=${encodeURIComponent(p)}" data-o="${esc(p)}" onload="this.classList.add('ld')" onerror="imgErr(this)">` : ''; }
+  if (pe.dataset.p !== p) { pe.dataset.p = p; pe.textContent = ''; if (p) pe.appendChild(jgImg(p)); }
   const tb = g.querySelector('.jgt b'), tt = it ? lname(it) : arr[0].title;
   if (tb.textContent !== tt) tb.textContent = tt;
   const sp = g.querySelector('.jgt span'), st = parts.join(' · ');
   if (sp.textContent !== st) sp.textContent = st;
-  const pb = g.querySelector('.jgpb'), show = !cx && live.length > 0;
+  const pb = g.querySelector('.jgpb'), show = cx || live.length > 0;
   if (pb.hidden !== !show) pb.hidden = !show;
-  const ps = kp ? 'p' : 'r';
-  if (show && pb.dataset.s !== ps) { pb.dataset.s = ps; pb.dataset.k = kid; pb.innerHTML = ico(kp ? 'play' : 'pause'); pb.setAttribute('aria-label', kp ? 'Продовжити' : 'Пауза'); }
+  const ps = cx ? 'x' : (kp ? 'p' : 'r');
+  if (show && pb.dataset.s !== ps) { pb.dataset.s = ps; pb.dataset.k = kid; pb.dataset.act = cx ? 'jgresume' : 'jgpause'; pb.innerHTML = ico(cx ? 'refresh' : (kp ? 'play' : 'pause')); pb.setAttribute('aria-label', cx ? 'Перезапустити завантаження' : (kp ? 'Продовжити' : 'Пауза')); }
   const ft = g.querySelector('.jgf'), cf = !!JG_CONF[kid];
   const fs = (cx ? 'x' : (live.length ? 'l' : '')) + (cf ? 'c' : '');
   if (ft.dataset.s !== fs) {
     ft.dataset.s = fs;
-    ft.innerHTML = cx ? `<button class="jgbtn res${cf ? ' conf' : ''}" data-act="jgresume" data-k="${esc(kid)}">${cf ? 'Натисніть ще раз — продовжити' : 'Продовжити завантаження'}</button>`
+    ft.innerHTML = cx ? `<button class="jgbtn res${cf ? ' conf' : ''}" data-act="jgresume" data-k="${esc(kid)}">Перезапустити завантаження</button>`
       : (live.length ? `<button class="jgbtn${cf ? ' conf' : ''}" data-act="jgcancel" data-k="${esc(kid)}">${cf ? 'Натисніть ще раз — скасувати' : 'Скасувати завантаження'}</button>` : '');
   }
   g.classList.toggle('open', jgOpen(g.dataset.k, arr));
@@ -10269,7 +10313,7 @@ let pollTimer = null, lastDone = -1;
 async function pollJobs() {
   try {
     const j = await api('/api/jobs');
-    S.jobsT = Date.now(); S.jobs = j.jobs; S.activeJobs = j.active; S.jobsum = j.summary; S.dlPaused = !!j.paused; S.dlIntr = (j.interrupted || []).reduce((a, x) => a + x.n.length, 0);
+    S.jobsT = Date.now(); S.jobs = j.jobs; jgPreload(); S.activeJobs = j.active; S.jobsum = j.summary; S.dlPaused = !!j.paused; S.dlIntr = (j.interrupted || []).reduce((a, x) => a + x.n.length, 0);
     const done = j.jobs.filter(x => x.status === 'done').length;
     if (lastDone >= 0 && done !== lastDone) await loadLib();
     lastDone = done;
@@ -10331,12 +10375,58 @@ async function openAnime(url, title, explicit, sources) {
   } catch (e) { if (!O.off) { S.opening = null; hideOpening(); toast(e.message, true); } }
 }
 
+function gpickHTML() {
+  const gs = [], seen = new Set();
+  S.items.forEach(x => { if (x.group && !seen.has(x.group)) { seen.add(x.group); gs.push(x.group); } });
+  const c = (S.sheet && S.sheet.ctx) || {};
+  const what = c.arch ? 'у переглянуте' : 'у бібліотеку';
+  return `<h3>Додати до групи</h3><p style="color:var(--mu);font-size:13px;margin:0 0 6px">Аніме буде додано ${what} і в обрану групу.</p>` + (gs.length
+    ? `<div class="cm">${gs.map(g => { const m = groupMembers(g), nm = gname(m) || m.slice(0, 2).map(lname).join(' · '); return `<button data-act="gpickgo" data-g="${esc(g)}">${ico('plus')}<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(nm || 'Група')}</span><span style="color:var(--mu);font-weight:500">${m.length}</span></button>`; }).join('')}</div>`
+    : `<p style="color:var(--mu)">У бібліотеці ще немає груп. Групу можна створити в меню аніме в бібліотеці.</p>`)
+    + `<div class="row2" style="margin-top:10px"><button class="btn" data-act="dlg-no" style="flex:1">Скасувати</button></div>`;
+}
+async function resolveAnime(r0) {  // знаходимо/створюємо запис аніме без переходу на його сторінку
+  const r = await api('/api/open', {url: r0.srcs[0].url, explicit: r0.explicit, sources: r0.srcs});
+  let id = r.id; const t0 = Date.now();
+  while (!id) {
+    if (Date.now() - t0 > 90000) throw new Error('Сайт довго відповідає — спробуйте ще раз');
+    const st = await api('/api/lookup_status?task=' + r.task);
+    if (st.done) { if (st.error) throw new Error(st.error); id = st.result.id; break; }
+    await new Promise(r2 => setTimeout(r2, 350));
+  }
+  return id;
+}
+async function addTo(ctx, gid) {  // ctx: {type: res|tmp|item, ...}; arch — додати в «Переглянуте»; gid — ще й у наявну групу
+  try {
+    let id;
+    if (ctx.type === 'res') { toast('Додаю…', false, 'spinner'); id = await resolveAnime(ctx.res); await loadLib(true); } else id = ctx.id;
+    const it = item(id);
+    if (it && it.temp) await api('/api/keep', {id, archived: !!ctx.arch});
+    else if (it && !!it.archived !== !!ctx.arch) await api('/api/archive', {id, value: !!ctx.arch});
+    if (gid) await api('/api/group', {ids: [id], gid});
+    await loadLib();
+    toast((ctx.arch ? 'У переглянутих' : 'У бібліотеці') + (gid ? ' · у групі' : ''), false, 'check');
+  } catch (e) { toast(e.message, true); try { await loadLib(); } catch (e2) {} }
+}
 async function copyText(t) {
   try { await navigator.clipboard.writeText(t); return true; } catch (e) {
     try { const x = document.createElement('textarea'); x.value = t; x.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(x); x.select(); const ok = document.execCommand('copy'); x.remove(); return ok; } catch (e2) { return false; }
   }
 }
 const A = {
+  gpick(el) {
+    const m = el.dataset.m;
+    let ctx;
+    if (S.sheet && S.sheet.res) ctx = {type: 'res', res: S.sheet.res, arch: m === 'seen'};
+    else if (el.dataset.cx === 'tmp') ctx = {type: 'tmp', id: route().id, arch: m === 'seen'};
+    else { const it = item(el.dataset.id); if (!it) return; ctx = {type: 'item', id: it.id, arch: !it.archived}; }
+    openSheet('gpick', {ctx});
+  },
+  async gpickgo(el) { const c = S.sheet && S.sheet.ctx; closeSheet(); if (c) await addTo(c, el.dataset.g); },
+  async rsshare() { const r = S.sheet && S.sheet.res; closeSheet(); if (!r) return; const ok = await copyText(r.srcs[0].url); toast(ok ? 'Посилання скопійовано' : 'Не вдалося скопіювати: ' + r.srcs[0].url, !ok, ok ? 'check' : null); },
+  async rslib() { const r = S.sheet && S.sheet.res; closeSheet(); if (r) await addTo({type: 'res', res: r, arch: false}); },
+  async rsseen() { const r = S.sheet && S.sheet.res; closeSheet(); if (r) await addTo({type: 'res', res: r, arch: true}); },
+  async bellall() { try { S.notifs = await api('/api/notifs_read', {}); renderSheet(); render(); toast('Усі повідомлення прочитано', false, 'check'); } catch (e) { toast(e.message, true); } },
   async cmgroup(el) {
     const id = el.dataset.id; closeSheet();
     try { await api('/api/group', {ids: [id], name: ''}); await loadLib(); toast('Групу створено — додайте до неї інші аніме перетягуванням', false, 'check'); } catch (e) { toast(e.message, true); }
@@ -10685,8 +10775,7 @@ const A = {
   },
   async jgresume(el) {
     const k = el.dataset.k;
-    if (!JG_CONF[k]) { JG_CONF[k] = setTimeout(() => { delete JG_CONF[k]; updateJobs(); }, 3500); updateJobs(); return; }
-    clearTimeout(JG_CONF[k]); delete JG_CONF[k];
+    if (!(await askConfirm('Перезапустити завантаження?', 'Скасовані серії цього аніме буде поставлено в чергу знову.', 'Перезапустити'))) return;
     try { const r = await api('/api/jobs_retry', {kid: k}); startPoll(); toast('Поставлено в чергу: ' + r.queued, false, 'download'); } catch (e) { toast(e.message, true); }
     pollJobs();
   },
@@ -11045,6 +11134,32 @@ const unpress = () => setTimeout(() => document.body.classList.remove('pressing'
 document.addEventListener('pointerup', unpress, true); document.addEventListener('pointercancel', unpress, true); document.addEventListener('touchend', unpress, true);
 document.addEventListener('selectstart', ev => { if (document.body.classList.contains('pressing')) ev.preventDefault(); }, true);
 document.addEventListener('contextmenu', ev => { if (document.body.classList.contains('pressing')) ev.preventDefault(); }, true);
+/* довге натискання: на кнопках з data-lp (дія з A) і на картках Пошуку/Новинок (меню картки) */
+const GP = {t: 0, timer: null, fired: false, x: 0, y: 0};
+function gpHaptic() { try { getSelection().removeAllRanges(); } catch (e) {} if (navigator.vibrate) try { navigator.vibrate(15); } catch (e) {} }
+function cardRes(c) {
+  if (c.dataset.act === 'openres') { const v = S.search.vis && S.search.vis[Number(c.dataset.g)]; if (!v) return null; return {title: S.search.sel.size ? v.its[0].title : v.g.title, srcs: v.g.items.map(x => ({url: x.url, title: x.title})), explicit: S.search.sel.size > 0}; }
+  if (c.dataset.act === 'bopen') { const x = nwD().items[Number(c.dataset.i)]; if (!x) return null; return {title: x.title, srcs: x.srcs || [{url: x.url, title: x.title}], explicit: nwSite() !== 'mix'}; }
+  return null;
+}
+document.addEventListener('pointerdown', ev => {
+  const t = ev.target; if (!t || !t.closest) return;
+  const rn = route().name;
+  const card = (rn === 'search' || rn === 'new') && !S.sheet && !S.cur ? t.closest('.card.sr') : null;
+  const el = card ? null : t.closest('[data-lp]');
+  if (!card && !el) return;
+  clearTimeout(GP.timer); GP.x = ev.clientX; GP.y = ev.clientY; GP.fired = false;
+  if (card) document.body.classList.add('pressing');
+  GP.timer = setTimeout(() => {
+    GP.timer = null;
+    if (card) { const r = cardRes(card); if (!r) return; GP.fired = true; GP.t = Date.now(); LP.t = GP.t; gpHaptic(); openSheet('cmenu', {res: r, rect: card.getBoundingClientRect()}); }
+    else { const f = A[el.dataset.lp]; if (!f) return; GP.fired = true; GP.t = Date.now(); gpHaptic(); f(el); }
+  }, card ? 480 : 520);
+}, true);
+document.addEventListener('pointermove', ev => { if (GP.timer && Math.hypot(ev.clientX - GP.x, ev.clientY - GP.y) > 9) { clearTimeout(GP.timer); GP.timer = null; } }, true);
+['pointerup', 'pointercancel'].forEach(t => document.addEventListener(t, () => { clearTimeout(GP.timer); GP.timer = null; if (GP.fired) { GP.t = Date.now(); GP.fired = false; } }, true));
+addEventListener('scroll', () => { clearTimeout(GP.timer); GP.timer = null; }, true);
+addEventListener('click', ev => { if (Date.now() - GP.t < 400) { ev.preventDefault(); ev.stopPropagation(); ev.stopImmediatePropagation(); } }, true);  // відпускання після довгого натискання не вважаємо кліком
 function lpCancel() { clearTimeout(LP.timer); LP.timer = null; }
 document.addEventListener('pointerdown', ev => {
   if (route().name !== 'detail' || S.cur) return;
@@ -11443,12 +11558,28 @@ function closePlayer() {
 /* ---------- панель фільтрів: ховається при прокрутці вниз, з'являється при прокрутці вгору ---------- */
 (function () {
   let ly = 0, acc = 0, busy = false;
+  const tog = document.createElement('button');
+  tog.id = 'hdrtog'; tog.setAttribute('aria-label', 'Панель фільтрів');
+  document.body.appendChild(tog);
   const fit = () => { const b = document.querySelector('.bar'); if (b) { const h = b.offsetHeight + 'px'; if (document.documentElement.style.getPropertyValue('--barh') !== h) document.documentElement.style.setProperty('--barh', h); } };
-  const apply = (h, hide, instant) => {
-    if (h.classList.contains('hide') === hide) return;
-    if (instant) { h.style.transition = 'none'; h.classList.toggle('hide', hide); void h.offsetHeight; h.style.transition = ''; } else h.classList.toggle('hide', hide);
+  const sync = () => {  // кнопка-ручка: показуємо лише коли панель сховалась (щоб розкрити) або закріплена відкритою (щоб сховати)
+    const h = document.querySelector('.hdr2');
+    const show = !!h && (S.hdrPin || h.classList.contains('hide'));
+    tog.classList.toggle('on', show);
+    if (show) { const k = S.hdrPin ? 'up' : 'down'; if (tog.dataset.k !== k) { tog.dataset.k = k; tog.innerHTML = `<svg viewBox="0 0 24 24"><path d="${k === 'up' ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'}"/></svg>`; tog.setAttribute('aria-label', k === 'up' ? 'Сховати панель' : 'Показати панель'); } }
   };
-  window.__fitBar = () => { fit(); const h = document.querySelector('.hdr2'); if (h) apply(h, !!S.hdrHide && window.scrollY > 70, true); };  // після перемальовування сторінки стан панелі не скидається
+  const apply = (h, hide, instant) => {
+    if (h.classList.contains('hide') !== hide) {
+      if (instant) { h.style.transition = 'none'; h.classList.toggle('hide', hide); void h.offsetHeight; h.style.transition = ''; } else h.classList.toggle('hide', hide);
+    }
+    sync();
+  };
+  tog.addEventListener('click', () => {
+    const h = document.querySelector('.hdr2'); if (!h) return;
+    if (S.hdrPin) { S.hdrPin = false; S.hdrHide = window.scrollY > 90; apply(h, !!S.hdrHide); }
+    else { S.hdrPin = true; S.hdrHide = false; apply(h, false); }
+  });
+  window.__fitBar = () => { fit(); const h = document.querySelector('.hdr2'); if (h) apply(h, !!S.hdrHide && !S.hdrPin && window.scrollY > 70, true); else sync(); };  // після перемальовування сторінки стан панелі не скидається
   addEventListener('scroll', () => {
     if (busy) return; busy = true;
     requestAnimationFrame(() => {
@@ -11460,11 +11591,11 @@ function closePlayer() {
       const d = y - ly; ly = y;
       if (!h) { acc = 0; return; }
       fit();
+      if (S.hdrPin) { apply(h, false); return; }  // закріплена вручну — не чіпаємо
       if (y < 90) { acc = 0; S.hdrHide = false; apply(h, false); return; }
-      if (acc * d < 0) acc = 0;  // напрямок змінився
+      if (d <= 0) { acc = 0; return; }  // вгору сама не з'являється — лише ручка (так панель не блимає)
       acc += d;
       if (acc > 70 && !S.hdrHide) { S.hdrHide = true; apply(h, true); }
-      else if (acc < -45 && S.hdrHide) { S.hdrHide = false; apply(h, false); }
     });
   }, {passive: true});
 })();
