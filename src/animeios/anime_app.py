@@ -6174,7 +6174,7 @@ def net_state():
 
 
 SETTINGS = {'mobile_download': False, 'auto_skip': False, 'auto_skip_opening': True, 'auto_skip_ending': True, 'auto_next': True,
-            'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': False, 'ios_player': True, 'np_ep_cover': True,
+            'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': True, 'ios_player': True, 'np_ep_cover': True,
             'bg_keep': True, 'bg_check': False, 'island': True, 'island_dl': True, 'island_check': False,
             'skip_mode': 'instant', 'vol_max': 100, 'client': {},
             'site_order': ['aniliberty', 'yummyani', 'animevost', 'animru'], 'view': {}}
@@ -7996,8 +7996,8 @@ body{padding-bottom:calc(84px + var(--bot))}
 .bar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:8px;
   padding:calc(10px + var(--top)) 14px 10px;background:rgba(13,14,19,.82);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d}
-.hdr2{position:sticky;top:var(--barh,58px);z-index:19;background:rgba(13,14,19,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d;max-height:55vh;overflow-y:auto;transition:transform .28s cubic-bezier(.2,.8,.2,1),opacity .2s}
-.hdr2.hide{transform:translateY(calc(-100% - var(--barh,58px)));opacity:0;pointer-events:none}
+.hdr2{position:sticky;top:var(--barh,58px);z-index:19;background:rgba(13,14,19,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d;max-height:55vh;overflow-y:auto;will-change:transform,opacity;transition:transform .42s cubic-bezier(.22,1,.36,1),opacity .3s ease,filter .3s ease}
+.hdr2.hide{transform:translateY(calc(-100% - var(--barh,58px) + 6px)) scale(.97);opacity:0;filter:blur(4px);pointer-events:none}
 .bar h1{font-size:22px;margin:0;flex:1;letter-spacing:-.3px}
 .bar .back{font-size:15px;color:var(--ac);background:none;border:0;padding:8px 4px}
 .ib{position:relative;width:42px;height:42px;border-radius:13px;border:0;background:var(--s2);
@@ -8524,8 +8524,8 @@ button:active,.card:active,.btn:active,.ib:active,#tabs a:active,.dchip:active{t
 .jg{contain:layout paint}
 .jgp{position:relative;overflow:hidden}.jgp{background:#ffffff0d}.jgp .pi{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.jgp[data-p]:not([data-p='']){cursor:pointer}
 .jgpb{width:40px;padding:0}.jgpb[hidden]{display:none!important}
-#hdrtog{position:fixed;right:12px;top:calc(var(--barh,58px) + 8px);z-index:19;width:40px;height:40px;border-radius:50%;border:1px solid #ffffff1f;background:rgba(13,14,19,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);color:var(--tx,#fff);display:none;align-items:center;justify-content:center;padding:0}
-#hdrtog.on{display:flex}#hdrtog svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+#hdrtog{position:fixed;left:50%;top:calc(var(--barh,58px) + 8px);z-index:19;width:58px;height:28px;border-radius:14px;border:1px solid #ffffff22;background:rgba(13,14,19,.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);color:var(--tx,#fff);display:flex;align-items:center;justify-content:center;padding:0;opacity:0;visibility:hidden;pointer-events:none;transform:translate(-50%,-10px) scale(.9);transition:opacity .3s ease,transform .42s cubic-bezier(.22,1,.36,1),visibility 0s .42s}
+#hdrtog.on{opacity:1;visibility:visible;pointer-events:auto;transform:translate(-50%,0) scale(1);transition:opacity .3s ease .18s,transform .42s cubic-bezier(.22,1,.36,1) .18s,visibility 0s}#hdrtog:active{transform:translate(-50%,0) scale(.92)}#hdrtog svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 .jgf{padding:0 12px 12px}.jgf:empty{display:none}
 .jgbtn{width:100%;min-height:42px;border-radius:12px;background:transparent;border:1px solid #ffffff1f;color:var(--mu);font:inherit;font-weight:600;font-size:13.5px}
 .jgbtn.res{color:var(--tx,#fff)}.jgbtn.conf{border-color:var(--err);color:var(--err);background:#ff6b6b14}
@@ -8676,7 +8676,7 @@ const S = {
   sel: new Set(), q: ls.get('q', '720p'), descOpen: false,
   sheet: null, busy: new Set(), checking: false, lookup: null, addErr: '',
   cur: null, // що зараз грає: {id, n}
-  net: {state: 'unknown'}, set: {site_order: ['aniliberty', 'yummyani', 'animevost', 'animru'], mobile_download: false, auto_next: true, auto_check: true, auto_check_hours: 3, blur_thumbs: false, logging: false, multitask: false, ios_player: true}, st: {data: null, t: 0, loading: false},
+  net: {state: 'unknown'}, set: {site_order: ['aniliberty', 'yummyani', 'animevost', 'animru'], mobile_download: false, auto_next: true, auto_check: true, auto_check_hours: 3, blur_thumbs: false, logging: false, multitask: true, ios_player: true}, st: {data: null, t: 0, loading: false},
   epView: (function () { try { return localStorage.getItem('epv') || 'list'; } catch (e) { return 'list'; } })(), reorder: false, acOpen: false, ac: null,
 };
 
@@ -10097,8 +10097,9 @@ function jgImg(p) {
   let im = JG_IMGS[p];
   if (!im) {
     im = new Image(); im.className = 'pi'; im.decoding = 'async'; im.alt = ''; im.dataset.o = p;
-    im.onload = () => im.classList.add('ld'); im.onerror = () => imgErr(im);
-    im.src = '/img?u=' + encodeURIComponent(p);
+    im.onload = () => im.classList.add('ld');
+    if (p.startsWith('/')) im.src = p;  // meta.poster уже адреса нашого сервера (/poster/… чи /img?u=…): раніше її загортали в /img вдруге — звідси довгі «порожні» обкладинки в черзі
+    else { im.onerror = () => imgErr(im); im.src = '/img?u=' + encodeURIComponent(p); }
     JG_IMGS[p] = im;
   }
   return im;
@@ -11557,7 +11558,7 @@ function closePlayer() {
 
 /* ---------- панель фільтрів: ховається при прокрутці вниз, з'являється при прокрутці вгору ---------- */
 (function () {
-  let ly = 0, acc = 0, busy = false;
+  let ly = 0, acc = 0, busy = false, hideT = 0, lastChg = 0;
   const tog = document.createElement('button');
   tog.id = 'hdrtog'; tog.setAttribute('aria-label', 'Панель фільтрів');
   document.body.appendChild(tog);
@@ -11576,10 +11577,11 @@ function closePlayer() {
   };
   tog.addEventListener('click', () => {
     const h = document.querySelector('.hdr2'); if (!h) return;
-    if (S.hdrPin) { S.hdrPin = false; S.hdrHide = window.scrollY > 90; apply(h, !!S.hdrHide); }
+    lastChg = Date.now();
+    if (S.hdrPin) { S.hdrPin = false; S.hdrHide = window.scrollY > 150; apply(h, !!S.hdrHide); }
     else { S.hdrPin = true; S.hdrHide = false; apply(h, false); }
   });
-  window.__fitBar = () => { fit(); const h = document.querySelector('.hdr2'); if (h) apply(h, !!S.hdrHide && !S.hdrPin && window.scrollY > 70, true); else sync(); };  // після перемальовування сторінки стан панелі не скидається
+  window.__fitBar = () => { fit(); const h = document.querySelector('.hdr2'); if (h) apply(h, !!S.hdrHide && !S.hdrPin && window.scrollY > 30, true); else sync(); };  // після перемальовування сторінки стан панелі не скидається
   addEventListener('scroll', () => {
     if (busy) return; busy = true;
     requestAnimationFrame(() => {
@@ -11592,10 +11594,12 @@ function closePlayer() {
       if (!h) { acc = 0; return; }
       fit();
       if (S.hdrPin) { apply(h, false); return; }  // закріплена вручну — не чіпаємо
-      if (y < 90) { acc = 0; S.hdrHide = false; apply(h, false); return; }
-      if (d <= 0) { acc = 0; return; }  // вгору сама не з'являється — лише ручка (так панель не блимає)
+      if (y < 30) { acc = 0; clearTimeout(hideT); hideT = 0; if (S.hdrHide) { S.hdrHide = false; apply(h, false); } return; }  // лише біля самого верху (між 30 і 150 стан не змінюється — без дрижання)
+      if (d <= 0) { acc = 0; clearTimeout(hideT); hideT = 0; return; }  // вгору сама не з'являється — лише ручка
       acc += d;
-      if (acc > 70 && !S.hdrHide) { S.hdrHide = true; apply(h, true); }
+      if (acc > 90 && y > 150 && !S.hdrHide && !hideT && Date.now() - lastChg > 500) {  // ховаємо з невеликою затримкою: коротка прокрутка панель не чіпає
+        hideT = setTimeout(() => { hideT = 0; if (S.hdrPin || S.hdrHide || window.scrollY <= 150) return; S.hdrHide = true; lastChg = Date.now(); const h2 = document.querySelector('.hdr2'); if (h2) apply(h2, true); }, 180);
+      }
     });
   }, {passive: true});
 })();
