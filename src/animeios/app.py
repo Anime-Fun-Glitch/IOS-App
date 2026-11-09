@@ -92,11 +92,19 @@ def _setup_native_info(anime_app):
             try:
                 from rubicon.objc import ObjCClass
                 url = ObjCClass('NSURL').fileURLWithPath(str(path))
-                avc = ObjCClass('UIActivityViewController').alloc().initWithActivityItems([url], applicationActivities=None)
                 root = ObjCClass('UIApplication').sharedApplication.keyWindow.rootViewController
                 top = root
                 while top.presentedViewController is not None:
                     top = top.presentedViewController
+                try:
+                    # «Зберегти у Файли»: системний вибір папки на весь екран (модально) — не залежить від popover-вікна «Поділитись»,
+                    # яке в режимі iPad/LiveContainer з'їжджало в куток
+                    pk = ObjCClass('UIDocumentPickerViewController').alloc().initForExportingURLs([url], asCopy=True)
+                    top.presentViewController(pk, animated=True, completion=None)
+                    return
+                except Exception:
+                    traceback.print_exc()
+                avc = ObjCClass('UIActivityViewController').alloc().initWithActivityItems([url], applicationActivities=None)
                 pop = avc.popoverPresentationController
                 if pop is not None:
                     # popover (регулярний розмір вікна, зокрема в LiveContainer): прив'язуємо до центру ВІКНА (координати екрана),

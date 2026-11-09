@@ -7996,8 +7996,8 @@ body{padding-bottom:calc(84px + var(--bot))}
 .bar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:8px;
   padding:calc(10px + var(--top)) 14px 10px;background:rgba(13,14,19,.82);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d}
-.hdr2{position:sticky;top:var(--barh,58px);z-index:19;background:rgba(13,14,19,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d;max-height:55vh;overflow-y:auto;will-change:transform,opacity;transition:transform .42s cubic-bezier(.22,1,.36,1),opacity .3s ease,filter .3s ease}
-.hdr2.hide{transform:translateY(calc(-100% - var(--barh,58px) + 6px)) scale(.97);opacity:0;filter:blur(4px);pointer-events:none}
+.hdr2{position:sticky;top:var(--barh,58px);z-index:19;background:rgba(13,14,19,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d;max-height:55vh;overflow-y:auto;will-change:transform,opacity;transition:transform .55s cubic-bezier(.32,.72,0,1),opacity .45s ease}
+.hdr2.hide{transform:translateY(calc(-100% - var(--barh,58px)));opacity:0;pointer-events:none}
 .bar h1{font-size:22px;margin:0;flex:1;letter-spacing:-.3px}
 .bar .back{font-size:15px;color:var(--ac);background:none;border:0;padding:8px 4px}
 .ib{position:relative;width:42px;height:42px;border-radius:13px;border:0;background:var(--s2);
@@ -8524,8 +8524,8 @@ button:active,.card:active,.btn:active,.ib:active,#tabs a:active,.dchip:active{t
 .jg{contain:layout paint}
 .jgp{position:relative;overflow:hidden}.jgp{background:#ffffff0d}.jgp .pi{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.jgp[data-p]:not([data-p='']){cursor:pointer}
 .jgpb{width:40px;padding:0}.jgpb[hidden]{display:none!important}
-#hdrtog{position:fixed;left:50%;top:calc(var(--barh,58px) + 8px);z-index:19;width:58px;height:28px;border-radius:14px;border:1px solid #ffffff22;background:rgba(13,14,19,.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);color:var(--tx,#fff);display:flex;align-items:center;justify-content:center;padding:0;opacity:0;visibility:hidden;pointer-events:none;transform:translate(-50%,-10px) scale(.9);transition:opacity .3s ease,transform .42s cubic-bezier(.22,1,.36,1),visibility 0s .42s}
-#hdrtog.on{opacity:1;visibility:visible;pointer-events:auto;transform:translate(-50%,0) scale(1);transition:opacity .3s ease .18s,transform .42s cubic-bezier(.22,1,.36,1) .18s,visibility 0s}#hdrtog:active{transform:translate(-50%,0) scale(.92)}#hdrtog svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+#hdrtog{position:fixed;left:50%;top:var(--tgt,calc(var(--barh,58px) + 8px));z-index:19;width:58px;height:28px;border-radius:14px;border:1px solid #ffffff22;background:rgba(13,14,19,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);color:var(--tx,#fff);display:flex;align-items:center;justify-content:center;padding:0;opacity:0;visibility:hidden;pointer-events:none;transform:translate(-50%,-14px);transition:opacity .35s ease,transform .55s cubic-bezier(.32,.72,0,1),top .55s cubic-bezier(.32,.72,0,1),visibility 0s .55s}
+#hdrtog.on{opacity:1;visibility:visible;pointer-events:auto;transform:translate(-50%,0);transition:opacity .4s ease .12s,transform .55s cubic-bezier(.32,.72,0,1) .12s,top .55s cubic-bezier(.32,.72,0,1),visibility 0s}#hdrtog:active{transform:translate(-50%,0) scale(.92)}#hdrtog svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 .jgf{padding:0 12px 12px}.jgf:empty{display:none}
 .jgbtn{width:100%;min-height:42px;border-radius:12px;background:transparent;border:1px solid #ffffff1f;color:var(--mu);font:inherit;font-weight:600;font-size:13.5px}
 .jgbtn.res{color:var(--tx,#fff)}.jgbtn.conf{border-color:var(--err);color:var(--err);background:#ff6b6b14}
@@ -11567,6 +11567,11 @@ function closePlayer() {
     const h = document.querySelector('.hdr2');
     const show = !!h && (S.hdrPin || h.classList.contains('hide'));
     tog.classList.toggle('on', show);
+    if (h) {  // ручка завжди під панеллю (або під шапкою, коли панель сховалась) — не накриває вміст панелі
+      const bar = document.querySelector('.bar'), bb = bar ? bar.getBoundingClientRect().bottom : 58;
+      const hid = h.classList.contains('hide');
+      tog.style.setProperty('--tgt', Math.round(bb + (hid ? 0 : h.offsetHeight) + 8) + 'px');
+    }
     if (show) { const k = S.hdrPin ? 'up' : 'down'; if (tog.dataset.k !== k) { tog.dataset.k = k; tog.innerHTML = `<svg viewBox="0 0 24 24"><path d="${k === 'up' ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'}"/></svg>`; tog.setAttribute('aria-label', k === 'up' ? 'Сховати панель' : 'Показати панель'); } }
   };
   const apply = (h, hide, instant) => {
@@ -11575,6 +11580,7 @@ function closePlayer() {
     }
     sync();
   };
+  setInterval(() => { if (tog.classList.contains('on') && !document.hidden) sync(); }, 400);  // панель може змінити висоту (відкрили фільтри) — ручка йде за її нижнім краєм
   tog.addEventListener('click', () => {
     const h = document.querySelector('.hdr2'); if (!h) return;
     lastChg = Date.now();
