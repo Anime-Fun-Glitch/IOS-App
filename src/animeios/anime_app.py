@@ -6769,6 +6769,7 @@ class Handler(BaseHTTPRequestHandler):
           '/api/remove': lambda: api_remove(b.get('id')),
           '/api/delete_file': lambda: api_delete_file(b.get('id'), b.get('n')),
           '/api/beat': lambda: api_beat(b.get('closed')),
+          '/api/diag': lambda: api_diag(b),
           '/api/progress': lambda: api_progress(b.get('id'), b.get('n'), b.get('t', 0)),
           '/api/download': lambda: api_download(b.get('id'), b.get('episodes') or [], b.get('quality') or '720p'),
           '/api/cancel': lambda: api_cancel(b.get('job'), b.get('kid')),
@@ -7629,6 +7630,19 @@ def _mem_avail_mb():
 
 
 _MEM_MIN = [None]
+DIAG = {}
+
+
+def api_diag(b):
+  # стан сторінки з боку JS: потрапляє в alive.json; подія webview_reload (сторінку перезавантажено без нашого наміру) — у окремий звіт
+  try:
+    ev = b.get('ev')
+    DIAG.update({k: b.get(k) for k in ('player', 'plays', 'hash', 'lib', 'imgs') if k in b}); DIAG['t'] = time.time()
+    if ev:
+      crash_report('webview_' + str(ev)[:20], json.dumps(b, ensure_ascii=False)[:600])
+  except Exception:
+    pass
+  return {'ok': True}
 
 
 def _mem_trim():
@@ -7716,7 +7730,7 @@ def _heartbeat_loop():
       if not SETTINGS.get('logging'):
         raise OSError  # логування вимкнено — «пульс» на диск не пишемо
       with open(p, 'w', encoding='utf8') as f:
-        json.dump({'t': time.time(), 'mem': _mem_mb(), 'avail_mb': av, 'avail_min_mb': _MEM_MIN[0], 'threads': threading.active_count(), 'inflight': _inflight_list(), 'recent': list(RECENT)[-20:]}, f, ensure_ascii=False)
+        json.dump({'t': time.time(), 'mem': _mem_mb(), 'avail_mb': av, 'avail_min_mb': _MEM_MIN[0], 'threads': threading.active_count(), 'inflight': _inflight_list(), 'page': dict(DIAG), 'recent': list(RECENT)[-20:]}, f, ensure_ascii=False)
     except Exception:
       pass
     time.sleep(5)
@@ -7759,6 +7773,7 @@ def crash_init():
         age = time.time() - j.get('t', 0)
         txt = ("Попередній запуск обірвався (наприклад, iOS закрив Carnets через нестачу пам'яті, або клітинку зупинили).\n"
                f"Останній подих: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(j.get('t', 0)))} ({int(age // 60)} хв тому)\n"
+               f"стан сторінки (JS): {j.get('page')}\n"
                f"пам'ять (пік): {j.get('mem')} МБ, вільно до ліміту iOS: {j.get('avail_mb')} МБ (мінімум {j.get('avail_min_mb')}), потоків: {j.get('threads')}\nвиконувалось у момент обриву: {j.get('inflight')}\nостанні запити:\n  " + '\n  '.join(j.get('recent') or []))
         crash_report('previous_run_ended', txt)
       except Exception:
@@ -8408,7 +8423,9 @@ body.dragging{-webkit-user-select:none;user-select:none;-webkit-touch-callout:no
 .vsl input::-moz-range-track{background:transparent;height:36px}.vsl input::-moz-range-thumb{width:26px;height:26px;border:0;border-radius:50%;background:#fff}
 .vsl .v100{position:absolute;top:9px;width:2px;height:18px;border-radius:1px;background:#ffffffaa;z-index:1;pointer-events:none;display:none}
 .vc .mid3{gap:16px}
-@media (orientation:landscape){.vc .mid3{gap:40px}}
+@media (orientation:landscape){.vc .mid3{gap:40px}
+#player .top{padding-top:calc(6px + min(var(--top),8px));padding-bottom:6px}  /* у горизонтальному режимі верхній відступ портретного екрана не потрібен */
+.vc .sk{bottom:calc(0px + min(var(--bot),6px));padding:6px 12px}}
 #player .top .ib{color:#fff}
 .selmenu{z-index:120}
 .selmenu .sheet{padding-bottom:calc(10px + var(--bot))}
@@ -11276,9 +11293,11 @@ $('#vvp').addEventListener('click', ev => ev.stopPropagation());
 V.addEventListener('playing', () => { if (AUD && AUD.ctx.state !== 'running') AUD.ctx.resume().catch(() => {}); });
 function volRestore() { const p = volGet(); if (p !== 100 || AUD) volApply(p); }
 
+let clrT = 0, PLAYS = 0, RELOADING = false;
 async function play(id, n) {
+  clearTimeout(clrT);
   const it = item(id); if (!it) return;
-  S.cur = {id, n};
+  S.cur = {id, n}; PLAYS++;
   const e = it.episodes.find(x => x.n === n);
   $('#player').classList.remove('hide'); vcIcon(); VC.classList.remove('off');
   document.body.style.overflow = 'hidden';
@@ -11552,13 +11571,33 @@ setInterval(() => { if (S.cur && !V.paused) skipTick(); }, 400);
 V.addEventListener('loadedmetadata', vcSync);
 function closePlayer() {
   nxCancel(); savePos(true);
-  try { if (V.webkitDisplayingFullscreen && V.webkitExitFullscreen) V.webkitExitFullscreen(); } catch (e) {}
+  let wasFs = false;
+  try { if (V.webkitDisplayingFullscreen && V.webkitExitFullscreen) { wasFs = true; V.webkitExitFullscreen(); } } catch (e) {}
   document.title = 'Мої аніме'; V.removeAttribute('poster');
   try { if ('mediaSession' in navigator) navigator.mediaSession.metadata = null; } catch (e) {}
-  V.pause(); V.removeAttribute('src'); V.load();
+  V.pause();
+  clearTimeout(clrT);
+  // джерело знімаємо не одразу, а коли системний повноекранний плеєр вже закрився: зняття src під час його анімації могло вбивати програму
+  if (wasFs) clrT = setTimeout(() => { if (!S.cur) { V.removeAttribute('src'); V.load(); } }, 600); else { V.removeAttribute('src'); V.load(); }
   $('#player').classList.add('hide'); document.body.style.overflow = '';
   S.cur = null; beat(true); loadLib().catch(() => {});
+  // кожні 8 переглянутих серій WebView чиститься перезавантаженням: WebContent накопичує пам'ять, і iOS рано чи пізно вбиває його разом із застосунком
+  if (PLAYS >= 8 && !RELOADING) { RELOADING = true; try { sessionStorage.setItem('ourReload', '1'); } catch (e) {} setTimeout(() => { if (!S.cur) location.reload(); else RELOADING = false; }, 900); }
 }
+/* діагностика: стан сторінки в alive.json і відстеження перезавантажень WebView */
+function diagSend(ev) {
+  try {
+    const b = {player: !!S.cur, plays: PLAYS, hash: location.hash, lib: (S.items || []).length, imgs: Object.keys(JG_IMGS).length};
+    if (ev) b.ev = ev;
+    fetch('/api/diag', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(b)}).catch(() => {});
+  } catch (e) {}
+}
+(function () {
+  let was = null, ours = null;
+  try { was = sessionStorage.getItem('boot'); ours = sessionStorage.getItem('ourReload'); sessionStorage.setItem('boot', String(Date.now())); sessionStorage.removeItem('ourReload'); } catch (e) {}
+  if (was && !ours) setTimeout(() => diagSend('reload_unexpected'), 1500);  // сторінка піднялась сама: WebContent, імовірно, вбито системою
+  setInterval(() => diagSend(), 10000);
+})();
 
 
 /* ---------- шторка не віддає прокрутку сторінці під нею ---------- */
