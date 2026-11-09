@@ -137,6 +137,15 @@ def _setup_native_info(anime_app):
         """Wi-Fi / мобільні дані / немає мережі — через SCNetworkReachability (так само, як це бачить iOS)."""
         import ctypes
         import ctypes.util
+        import threading
+        if not hasattr(net, '_lock'):
+            net._lock = threading.Lock()
+        with net._lock:
+            return _net_locked(net)
+
+    def _net_locked(net):
+        import ctypes
+        import ctypes.util
         lib = getattr(net, '_lib', None)
         if lib is None:
             lib = ctypes.CDLL(ctypes.util.find_library('SystemConfiguration') or '/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration')
@@ -162,7 +171,7 @@ class _KeepAlive:
     def __init__(self):
         self.player = None
         self.on = False
-        self.mix = None
+        self.mix = False  # сесію вже налаштовано на старті (_audio_session) — не чіпаємо її під час відео
         self.path = None
 
     def _wav(self):
@@ -193,7 +202,8 @@ class _KeepAlive:
         try:
             from rubicon.objc import ObjCClass
             if want:
-                self._category(False)  # категорія завжди та сама, що й при запуску: зміна режиму (mix ↔ ні) під час відео перериває його — звідси «саме зупиняється після секунди»
+                if video_playing and not self.on:
+                    return  # відео вже саме тримає програму живою; запуск «тихого» плеєра в момент старту відео перебиває його (пауза через секунду на першому запуску)
                 if self.player is None:
                     NSURL = ObjCClass('NSURL')
                     self.path = self._wav()
@@ -321,13 +331,14 @@ async def _inset_loop(app, wv, view):
                 # Dynamic Island є лише в iPhone 14 Pro і новіших (верхній відступ ≥ 51 pt) і лише якщо в збірку додано Swift-міст
                 if not getattr(_inset_loop, '_isl_checked', False) or float(ins.top) >= 51:
                     _inset_loop._isl_checked = True
-                    try:
-                        from rubicon.objc import ObjCClass as _OC
-                        _OC('AnimeLive')
-                        has_bridge = True
-                    except Exception:
-                        has_bridge = False
-                    anime_app.ISLAND_OK['v'] = bool(has_bridge and float(ins.top) >= 51)
+                    if not hasattr(_inset_loop, '_bridge'):
+                        try:
+                            from rubicon.objc import ObjCClass as _OC
+                            _OC('AnimeLive')
+                            _inset_loop._bridge = True
+                        except Exception:
+                            _inset_loop._bridge = False
+                    anime_app.ISLAND_OK['v'] = bool(_inset_loop._bridge and float(ins.top) >= 51)
             if cur != last or tick % 10 == 0:
                 last = cur
                 wv.evaluateJavaScript('window.__insets&&window.__insets(%d,%d,%d,%d)' % cur, completionHandler=None)
