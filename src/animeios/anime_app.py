@@ -5366,12 +5366,25 @@ def api_beat(closed=False):
   return {'ok': True}
 
 
+_WATCH = {}  # kid -> {'last': час останнього «пульсу» програвання, 'acc': скільки секунд реально дивились}
+
+
 def api_progress(kid, n, t):
-  BG_LAST['play'] = time.time()
+  now = time.time()
+  BG_LAST['play'] = now
   key, e = _find(kid)
+  w = _WATCH.setdefault(key, {'last': now, 'acc': 0.0})
+  dt = now - w['last']
+  w['last'] = now
+  if dt > 900:
+    w['acc'] = 0.0  # довга перерва — новий «підхід»
+  elif dt < 20:
+    w['acc'] += dt  # пульс приходить кожні кілька секунд, поки відео грає; пауза/перемотка в нуль не рахується
+  need = max(0, int(SETTINGS.get('recent_min', 3) or 0)) * 60
   with LOCK:
     e.setdefault('progress', {})[str(_num_arg(n))] = round(float(t), 1)
-    e['last_watch'] = int(time.time())
+    if need == 0 or w['acc'] >= need:  # «Недавній перегляд»: аніме потрапляє нагору, лише коли його дивились достатньо довго
+      e['last_watch'] = int(now)
   lib_save()
   return {'ok': True}
 
@@ -6176,7 +6189,7 @@ def net_state():
 SETTINGS = {'mobile_download': False, 'auto_skip': False, 'auto_skip_opening': True, 'auto_skip_ending': True, 'auto_next': True,
             'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': True, 'ios_player': True, 'np_ep_cover': True,
             'bg_keep': True, 'bg_check': False, 'island': True, 'island_dl': True, 'island_check': False,
-            'skip_mode': 'instant', 'vol_max': 100, 'client': {},
+            'skip_mode': 'instant', 'vol_max': 100, 'recent_min': 3, 'client': {},
             'site_order': ['aniliberty', 'yummyani', 'animevost', 'animru'], 'view': {}}
 
 
@@ -6220,6 +6233,8 @@ def api_settings(data=None):
               SETTINGS[k] = data[k]
           elif k == 'skip_mode':
             SETTINGS[k] = 'soft' if data[k] == 'soft' else 'instant'
+          elif k == 'recent_min':
+            SETTINGS[k] = max(0, min(120, int(float(data[k] or 0))))
           elif k == 'vol_max':
             SETTINGS[k] = 200 if int(float(data[k] or 0)) >= 200 else 100
           elif isinstance(SETTINGS[k], list):
@@ -7998,7 +8013,7 @@ body{padding-bottom:calc(84px + var(--bot))}
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d}
 html,body,#root{overflow-anchor:none}/* перемальовування списку (морфінг) не має зсувати прокрутку «якорем» браузера */
 .hdr2{position:sticky;top:var(--barh,58px);z-index:19;background:rgba(13,14,19,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d;max-height:55vh;overflow-y:auto;will-change:transform,opacity;transition:transform .55s cubic-bezier(.32,.72,0,1),opacity .45s ease}
-.hdr2.hide{transform:translateY(calc(-100% - var(--barh,58px)));opacity:0;pointer-events:none}
+.hdr2.hdr-off{transform:translateY(calc(-100% - var(--barh,58px)));opacity:0;pointer-events:none}
 .bar h1{font-size:22px;margin:0;flex:1;letter-spacing:-.3px}
 .bar .back{font-size:15px;color:var(--ac);background:none;border:0;padding:8px 4px}
 .ib{position:relative;width:42px;height:42px;border-radius:13px;border:0;background:var(--s2);
@@ -8268,7 +8283,7 @@ body.dragging{-webkit-user-select:none;user-select:none;-webkit-touch-callout:no
 /* ---------- пошук ---------- */
 .poster .pi{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .3s}
 .poster .pi.ld{opacity:1}
-.sform{display:flex;gap:8px;padding:12px 14px 4px}
+.sform{display:flex;gap:8px;padding:8px 14px 4px}
 .sbox{flex:1;display:flex;align-items:center;gap:8px;background:var(--s2);border-radius:14px;padding:0 6px 0 12px;min-width:0}
 .sbox .i{width:19px;height:19px;color:var(--mu);flex:none}
 .sbox input{flex:1;min-width:0;background:none;border:0;outline:0;font-size:16px;padding:12px 0}
@@ -8526,7 +8541,8 @@ button:active,.card:active,.btn:active,.ib:active,#tabs a:active,.dchip:active{t
 .jgp{position:relative;overflow:hidden}.jgp{background:#ffffff0d}.jgp .pi{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.jgp[data-p]:not([data-p='']){cursor:pointer}
 .jgpb{width:40px;padding:0}.jgpb[hidden]{display:none!important}
 #hdrtog{position:fixed;left:50%;top:var(--tgt,calc(var(--barh,58px) + 8px));z-index:19;width:58px;height:28px;border-radius:14px;border:1px solid #ffffff22;background:rgba(13,14,19,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);color:var(--tx,#fff);display:flex;align-items:center;justify-content:center;padding:0;opacity:0;visibility:hidden;pointer-events:none;transform:translate(-50%,-14px);transition:opacity .35s ease,transform .55s cubic-bezier(.32,.72,0,1),top .55s cubic-bezier(.32,.72,0,1),visibility 0s .55s}
-#hdrtog.on{opacity:1;visibility:visible;pointer-events:auto;transform:translate(-50%,0);transition:opacity .4s ease .12s,transform .55s cubic-bezier(.32,.72,0,1) .12s,top .55s cubic-bezier(.32,.72,0,1),visibility 0s}#hdrtog:active{transform:translate(-50%,0) scale(.92)}#hdrtog svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+#hdrtog.on.sc{opacity:0!important;pointer-events:none!important;transition:opacity .2s ease!important}
+#hdrtog.on{opacity:.88;visibility:visible;pointer-events:auto;transform:translate(-50%,0);transition:opacity .4s ease .12s,transform .55s cubic-bezier(.32,.72,0,1) .12s,top .55s cubic-bezier(.32,.72,0,1),visibility 0s}#hdrtog:active{transform:translate(-50%,0) scale(.92)}#hdrtog svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 .jgf{padding:0 12px 12px}.jgf:empty{display:none}
 .jgbtn{width:100%;min-height:42px;border-radius:12px;background:transparent;border:1px solid #ffffff1f;color:var(--mu);font:inherit;font-weight:600;font-size:13.5px}
 .jgbtn.res{color:var(--tx,#fff)}.jgbtn.conf{border-color:var(--err);color:var(--err);background:#ff6b6b14}
@@ -9383,6 +9399,9 @@ function settingsHTML() {
             <span class="d">Лагідна — кнопка «Пропустити» з відліком на пару секунд, і лише потім перемотка. Натиснути її можна й раніше.</span></div>
         </div></div>
       </div>
+      <div class="row col"><b>«Недавній перегляд» рахувати після</b>
+        <div class="pch">${[[0, 'Одразу'], [3, '3 хв'], [10, '10 хв'], [20, '20 хв']].map(([m, l]) => `<button data-act="recmin" data-m="${m}" class="${Number(S.set.recent_min == null ? 3 : S.set.recent_min) === m ? 'on' : ''}">${l}</button>`).join('')}</div>
+        <span class="d">Аніме піднімається нагору списку, лише коли ви реально дивились його вказаний час (пауза не рахується). «Одразу» — досить відкрити серію.</span></div>
       <div class="row col"><b>Максимальна гучність у плеєрі</b>
         <div class="pch"><button data-act="volmax" data-m="100" class="${volMax() === 100 ? 'on' : ''}">100%</button><button data-act="volmax" data-m="200" class="${volMax() === 200 ? 'on' : ''}">200%</button></div>
         <span class="d">Власний повзунок гучності в плеєрі працює окремо від кнопок iPhone. 200% підсилює звук вдвічі — корисно для тихих серій (може хрипіти).</span></div>
@@ -10763,6 +10782,7 @@ const A = {
   async bkshare(el) {
     try { const r = await api('/api/backup_share', {rel: el.dataset.r}); if (!r.shared) toast('Не вдалося відкрити «Поділитись»', true); } catch (e) { toast(e.message, true); }
   },
+  recmin(el) { setOpt('recent_min', Number(el.dataset.m)); render(); },
   skmode(el) { setOpt('skip_mode', el.dataset.m); render(); },
   volmax(el) { setOpt('vol_max', Number(el.dataset.m)); if (volMax() < 200 && volGet() > 100) volApply(100); render(); volPaint(); },
   jgtog(el, ev) {
@@ -11566,22 +11586,22 @@ function closePlayer() {
   const fit = () => { const b = document.querySelector('.bar'); if (b) { const h = b.offsetHeight + 'px'; if (document.documentElement.style.getPropertyValue('--barh') !== h) document.documentElement.style.setProperty('--barh', h); } };
   const sync = () => {  // кнопка-ручка: показуємо лише коли панель сховалась (щоб розкрити) або закріплена відкритою (щоб сховати)
     const h = document.querySelector('.hdr2');
-    const show = !!h && (S.hdrPin || h.classList.contains('hide'));
+    const show = !!h && (S.hdrPin || h.classList.contains('hdr-off'));
     tog.classList.toggle('on', show);
     if (h) {  // ручка завжди під панеллю (або під шапкою, коли панель сховалась) — не накриває вміст панелі
       const bar = document.querySelector('.bar'), bb = bar ? bar.getBoundingClientRect().bottom : 58;
-      const hid = h.classList.contains('hide');
+      const hid = h.classList.contains('hdr-off');
       tog.style.setProperty('--tgt', Math.round(bb + (hid ? 0 : h.offsetHeight) + 8) + 'px');
     }
     if (show) { const k = S.hdrPin ? 'up' : 'down'; if (tog.dataset.k !== k) { tog.dataset.k = k; tog.innerHTML = `<svg viewBox="0 0 24 24"><path d="${k === 'up' ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'}"/></svg>`; tog.setAttribute('aria-label', k === 'up' ? 'Сховати панель' : 'Показати панель'); } }
   };
   const apply = (h, hide, instant) => {
-    if (h.classList.contains('hide') !== hide) {
-      if (instant) { h.style.transition = 'none'; h.classList.toggle('hide', hide); void h.offsetHeight; h.style.transition = ''; } else h.classList.toggle('hide', hide);
+    if (h.classList.contains('hdr-off') !== hide) {
+      if (instant) { h.style.transition = 'none'; h.classList.toggle('hdr-off', hide); void h.offsetHeight; h.style.transition = ''; } else h.classList.toggle('hdr-off', hide);
     }
     sync();
   };
-  setInterval(() => { if (tog.classList.contains('on') && !document.hidden) sync(); }, 400);  // панель може змінити висоту (відкрили фільтри) — ручка йде за її нижнім краєм
+  setInterval(() => { if (!document.hidden) { fit(); if (tog.classList.contains('on')) sync(); } }, 400);  // панель може змінити висоту (відкрили фільтри) — ручка йде за її нижнім краєм
   tog.addEventListener('click', () => {
     const h = document.querySelector('.hdr2'); if (!h) return;
     lastChg = Date.now();
@@ -11589,7 +11609,9 @@ function closePlayer() {
     else { S.hdrPin = true; S.hdrHide = false; apply(h, false); }
   });
   window.__fitBar = () => { fit(); const h = document.querySelector('.hdr2'); if (h) apply(h, !!S.hdrHide && !S.hdrPin && window.scrollY > 30, true); else sync(); };  // після перемальовування сторінки стан панелі не скидається
-  addEventListener('scroll', () => {
+  let scT = 0;
+  addEventListener('scroll', () => {  // під час прокрутки ручка зникає, щоб не лізти на фільтри, і повертається, коли сторінка зупинилась
+    tog.classList.add('sc'); clearTimeout(scT); scT = setTimeout(() => tog.classList.remove('sc'), 650);
     if (busy) return; busy = true;
     requestAnimationFrame(() => {
       busy = false;
