@@ -5585,11 +5585,19 @@ def api_jobs_resume():
   return {'queued': n, 'errors': list(dict.fromkeys(errs))}
 
 
+_worker_kid = {}  # потік → аніме, яке він качає просто зараз
+
+
+def _active_workers():
+  """Потоки, що не застрягли на призупиненому аніме: тільки вони займають «слот» черги."""
+  return [t for t in _worker['threads'] if t.is_alive() and _worker_kid.get(t) not in PAUSED_KIDS]
+
+
 def _spawn_workers():
   """(під JOB_LOCK) Доганяє кількість робочих потоків черги: 1 у звичайному режимі, 3 — у «Багатозадачності»."""
   _worker['threads'] = [t for t in _worker['threads'] if t.is_alive()]
-  queued = sum(1 for j in JOBS if j['status'] == 'queued')
-  need = min(_lim('jobs') - len(_worker['threads']), queued)
+  queued = sum(1 for j in JOBS if j['status'] == 'queued' and j['kid'] not in PAUSED_KIDS)
+  need = min(_lim('jobs') - len(_active_workers()), queued)
   for _ in range(max(0, need)):
     t = threading.Thread(target=_worker_loop, daemon=True)
     _worker['threads'].append(t)
@@ -5747,7 +5755,7 @@ def _run_job(j):
   _tl.stage = lambda m: j.__setitem__('stage', m)
   try:
     j['phase'], j['stage'] = 'resolve', 'Отримую посилання…'
-    tm = threading.Timer(90, lambda: None if PAUSE['on'] else (j.__setitem__('timeout', True), j['cancel'].set()))  # сайт «мовчить» — не висимо вічно
+    tm = threading.Timer(90, lambda: None if (PAUSE['on'] or j['kid'] in PAUSED_KIDS) else (j.__setitem__('timeout', True), j['cancel'].set()))  # сайт «мовчить» — не висимо вічно
     tm.daemon = True
     tm.start()
     try:
@@ -5889,7 +5897,8 @@ def _worker_loop():
   while True:
     with JOB_LOCK:
       now = time.time()
-      alive = [t for t in _worker['threads'] if t.is_alive()]
+      _worker_kid.pop(me, None)
+      alive = _active_workers()
       if me in alive and alive.index(me) >= _lim('jobs'):  # режим вимкнули — зайві потоки йдуть, коли звільняться
         _worker['threads'] = [t for t in _worker['threads'] if t is not me]
         return
@@ -5908,6 +5917,7 @@ def _worker_loop():
         return
       if j:
         j['status'] = 'running'
+        _worker_kid[me] = j['kid']
         j['retry_in'] = 0
         if _BATCH['t0'] is None:
           _BATCH['t0'] = time.time()
@@ -5935,7 +5945,7 @@ def _worker_loop():
           j['status'], j['message'] = 'cancelled', 'Скасовано'
           ex = None
         else:
-          j['cancel'] = threading.Event()
+          ne = threading.Event(); ne.kid = j['kid']; j['cancel'] = ne
           ex = RuntimeError('Сайт не відповів за 90 с')
       if ex is None:
         pass
@@ -5997,7 +6007,7 @@ def api_kid_pause(kid, on):
     PAUSED_KIDS.add(kid)
   else:
     PAUSED_KIDS.discard(kid)
-    _worker_watch()
+  _worker_watch()  # призупинений потік звільняє слот — решта черги качається далі
   return {'ok': True, 'paused': kid in PAUSED_KIDS}
 
 
@@ -6189,7 +6199,7 @@ def net_state():
 SETTINGS = {'mobile_download': False, 'auto_skip': False, 'auto_skip_opening': True, 'auto_skip_ending': True, 'auto_next': True,
             'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': True, 'ios_player': True, 'np_ep_cover': True,
             'bg_keep': True, 'bg_check': False, 'island': True, 'island_dl': True, 'island_check': False,
-            'skip_mode': 'instant', 'vol_max': 100, 'recent_min': 3, 'client': {},
+            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'recent_min': 3, 'client': {},
             'site_order': ['aniliberty', 'yummyani', 'animevost', 'animru'], 'view': {}}
 
 
@@ -9396,32 +9406,39 @@ function settingsHTML() {
     </div></div>
   </div>
   <div class="grp ${S.pOpen ? 'open' : ''}" id="pgrp">
-    <button class="gh" data-act="ptog"><div class="tx"><b>Плеєр</b><span>Автоматична наступна серія та пропуск інтро / аутро</span></div>${ico('chev')}</button>
+    <button class="gh" data-act="ptog"><div class="tx"><b>Плеєр</b><span>Наступна серія, автопропуск, гучність</span></div>${ico('chev')}</button>
     <div class="fold"><div>
-      <div class="row"><div class="tx"><b>Автоматично наступна серія</b><span class="d">Після завершення серії вмикає наступну.</span></div>
+      <div class="row"><div class="tx"><b>Автоматично наступна серія</b><span class="d">Сама вмикає наступну серію.</span></div>
         <label class="sw"><input type="checkbox" data-set="auto_next" ${S.set.auto_next !== false ? 'checked' : ''}></label></div>
-      <div class="row"><div class="tx"><b>Обкладинка серії на екрані блокування</b><span class="d">Увімкнено — кадр самої серії; вимкнено — обкладинка аніме. Видно в Центрі керування й на екрані блокування.</span></div>
+      <div class="row"><div class="tx"><b>Обкладинка серії на екрані блокування</b><span class="d">Кадр серії замість обкладинки аніме.</span></div>
         <label class="sw"><input type="checkbox" data-set="np_ep_cover" ${S.set.np_ep_cover !== false ? 'checked' : ''}></label></div>
-      ${IOS_APP ? `<div class="row"><div class="tx"><b>Віддавати перевагу плеєру iOS</b><span class="d">Відео відкривається в стандартному плеєрі iOS: Picture-in-Picture, AirPlay, керування з екрана блокування. Вимкніть, щоб грати у вбудованому плеєрі застосунку.</span></div>
+      ${IOS_APP ? `<div class="row"><div class="tx"><b>Віддавати перевагу плеєру iOS</b><span class="d">Стандартний плеєр iOS: PiP, AirPlay, екран блокування.</span></div>
         <label class="sw"><input type="checkbox" data-set="ios_player" ${S.set.ios_player !== false ? 'checked' : ''}></label></div>` : ''}
-      <div class="skg ${S.skOpen !== false && S.set.auto_skip ? 'open' : ''}" id="skg">
-        <div class="skh" data-act="sktog"><div class="tx"><b>Автопропуск</b><span class="d">Сам пропускає вибрані частини серії.</span></div>
+      <div class="skg ${S.skOpen === true && S.set.auto_skip ? 'open' : ''}" id="skg">
+        <div class="skh" data-act="sktog"><div class="tx"><b>Автопропуск</b><span class="d">Пропускає інтро та аутро.</span></div>
           <label class="sw"><input type="checkbox" id="skmaster" ${S.set.auto_skip ? 'checked' : ''}></label>
           <button class="arr" aria-label="Розгорнути">${ico('chev')}</button></div>
         <div class="fold"><div>
-          <label class="row sub ${S.set.auto_skip ? '' : 'dis'}"><input type="checkbox" data-set="auto_skip_opening" ${S.set.auto_skip_opening ? 'checked' : ''}><div class="tx"><b>Пропускати інтро</b><span class="d">Опенінг пропускається, щойно починається.</span></div></label>
-          <label class="row sub ${S.set.auto_skip ? '' : 'dis'}"><input type="checkbox" data-set="auto_skip_ending" ${S.set.auto_skip_ending ? 'checked' : ''}><div class="tx"><b>Пропускати аутро</b><span class="d">Якщо після титрів є уривок серії — перемотає до нього, інакше піде далі.</span></div></label>
+          <label class="row sub ${S.set.auto_skip ? '' : 'dis'}"><input type="checkbox" data-set="auto_skip_opening" ${S.set.auto_skip_opening ? 'checked' : ''}><div class="tx"><b>Пропускати інтро</b><span class="d">Одразу перемотує опенінг.</span></div></label>
+          <label class="row sub ${S.set.auto_skip ? '' : 'dis'}"><input type="checkbox" data-set="auto_skip_ending" ${S.set.auto_skip_ending ? 'checked' : ''}><div class="tx"><b>Пропускати аутро</b><span class="d">Перемотує до уривку або далі.</span></div></label>
           <div class="row col ${S.set.auto_skip ? '' : 'dis'}"><b>Тип перемотки</b>
             <div class="pch"><button data-act="skmode" data-m="instant" class="${S.set.skip_mode === 'soft' ? '' : 'on'}">Миттєва</button><button data-act="skmode" data-m="soft" class="${S.set.skip_mode === 'soft' ? 'on' : ''}">Лагідна</button></div>
-            <span class="d">Лагідна — кнопка «Пропустити» з відліком на пару секунд, і лише потім перемотка. Натиснути її можна й раніше.</span></div>
+            <span class="d">Лагідна — кнопка «Пропустити» з відліком.</span></div>
         </div></div>
       </div>
       <div class="row col"><b>«Недавній перегляд» рахувати після</b>
         <div class="pch">${[[0, 'Одразу'], [3, '3 хв'], [10, '10 хв'], [20, '20 хв']].map(([m, l]) => `<button data-act="recmin" data-m="${m}" class="${Number(S.set.recent_min == null ? 3 : S.set.recent_min) === m ? 'on' : ''}">${l}</button>`).join('')}</div>
-        <span class="d">Аніме піднімається нагору списку, лише коли ви реально дивились його вказаний час (пауза не рахується). «Одразу» — досить відкрити серію.</span></div>
-      <div class="row col"><b>Максимальна гучність у плеєрі</b>
-        <div class="pch"><button data-act="volmax" data-m="100" class="${volMax() === 100 ? 'on' : ''}">100%</button><button data-act="volmax" data-m="200" class="${volMax() === 200 ? 'on' : ''}">200%</button></div>
-        <span class="d">Власний повзунок гучності в плеєрі працює окремо від кнопок iPhone. 200% підсилює звук вдвічі — корисно для тихих серій (може хрипіти).</span></div>
+        <span class="d">Нагору списку — коли реально дивились цей час.</span></div>
+      <div class="skg ${S.ovOpen === true && S.set.own_vol ? 'open' : ''}" id="ovg">
+        <div class="skh" data-act="ovtog"><div class="tx"><b>Власна гучність</b><span class="d">Повзунок гучності в плеєрі.</span></div>
+          <label class="sw"><input type="checkbox" id="ovmaster" ${S.set.own_vol ? 'checked' : ''}></label>
+          <button class="arr" aria-label="Розгорнути">${ico('chev')}</button></div>
+        <div class="fold"><div>
+          <div class="row col ${S.set.own_vol ? '' : 'dis'}"><b>Максимальна гучність</b>
+            <div class="pch"><button data-act="volmax" data-m="100" class="${volMax() === 100 ? 'on' : ''}">100%</button><button data-act="volmax" data-m="200" class="${volMax() === 200 ? 'on' : ''}">200%</button></div>
+            <span class="d">200% підсилює звук (може хрипіти). Вимкнено — гучність регулюють кнопки iPhone.</span></div>
+        </div></div>
+      </div>
     </div></div>
   </div>
   <div class="grp ${S.acOpen ? 'open' : ''}" id="acgrp">
@@ -9443,20 +9460,20 @@ function settingsHTML() {
       <label class="row sub"><input type="checkbox" data-set="bg_check" ${S.set.bg_check ? 'checked' : ''}><div class="tx"><b>Також для перевірки нових серій</b><span class="d">Програма працює постійно, поки є зв'язок із Python (помітніше розряджає батарею). Потрібна автоперевірка вище.</span></div></label>
     </div></div>
   </div>
-  ${S.set.island_ok ? `<div class="grp"><div class="skg ${S.isOpen !== false && S.set.island !== false ? 'open' : ''}" id="isg">
-    <div class="skh" data-act="istog" style="border-top:0"><div class="tx"><b>Dynamic Island</b><span class="d">Живий індикатор на острові й екрані блокування.</span></div>
+  ${S.set.island_ok ? `<div class="grp"><div class="skg ${S.isOpen === true && S.set.island !== false ? 'open' : ''}" id="isg">
+    <div class="skh" data-act="istog" style="border-top:0"><div class="tx"><b>Dynamic Island</b><span class="d">Індикатор на острові й екрані блокування.</span></div>
       <label class="sw"><input type="checkbox" id="ismaster" ${S.set.island !== false ? 'checked' : ''}></label>
       <button class="arr" aria-label="Розгорнути">${ico('chev')}</button></div>
     <div class="fold"><div>
-      <label class="row sub ${S.set.island !== false ? '' : 'dis'}"><input type="checkbox" data-set="island_dl" ${S.set.island_dl !== false ? 'checked' : ''}><div class="tx"><b>Завантаження</b><span class="d">Прогрес завантаження серій; у розгорнутому вигляді — пауза та скасування (скасування з підтвердженням).</span></div></label>
-      <label class="row sub ${S.set.island !== false ? '' : 'dis'}"><input type="checkbox" data-set="island_check" ${S.set.island_check ? 'checked' : ''}><div class="tx"><b>Таймер перевірки</b><span class="d">Лише відлік до наступної перевірки нових серій.</span></div></label>
+      <label class="row sub ${S.set.island !== false ? '' : 'dis'}"><input type="checkbox" data-set="island_dl" ${S.set.island_dl !== false ? 'checked' : ''}><div class="tx"><b>Завантаження</b><span class="d">Прогрес, пауза й скасування.</span></div></label>
+      <label class="row sub ${S.set.island !== false ? '' : 'dis'}"><input type="checkbox" data-set="island_check" ${S.set.island_check ? 'checked' : ''}><div class="tx"><b>Таймер перевірки</b><span class="d">Відлік до наступної перевірки.</span></div></label>
     </div></div>
   </div></div>` : ''}` : ''}
   <div class="set"><div class="tx"><b>Розмивати скріншоти серій</b><span>Захист від спойлерів у картковому вигляді серій.</span></div>
     <label class="sw"><input type="checkbox" data-set="blur_thumbs" ${S.set.blur_thumbs ? 'checked' : ''}></label></div>
-  <div class="set"><div class="tx"><b>Вести логи</b><span>Журнали помилок і збоїв для діагностики. Вимкнені за замовчуванням — нічого не пишеться на диск.</span></div>
+  <div class="set"><div class="tx"><b>Вести логи</b><span>Журнали збоїв для діагностики.</span></div>
     <label class="sw"><input type="checkbox" data-set="logging" ${S.set.logging ? 'checked' : ''}></label></div>
-  <div class="set"><div class="tx"><b>Багатозадачність</b><span>Експеримент: до 3 серій качаються одночасно, а запити сторінок, пошуку й картинок виконуються паралельно ширше. Швидше, але більше пам'яті та батареї; на iPhone iOS може закрити застосунок. Вимкнено — безпечний режим.</span></div>
+  <div class="set"><div class="tx"><b>Багатозадачність</b><span>До 3 серій одночасно й більше паралельних запитів. Швидше, але більше пам'яті й батареї.</span></div>
     <label class="sw"><input type="checkbox" data-set="multitask" ${S.set.multitask ? 'checked' : ''}></label></div>
   <div class="set"><div class="tx"><b>Мережа зараз</b><span>Визначається автоматично: Wi‑Fi, мобільна мережа чи офлайн.</span></div>${netHTML()}</div>`;
 }
@@ -10951,6 +10968,7 @@ const A = {
   },
   grptog(el) { const g = document.getElementById(el.dataset.id); if (!g) return; S[el.dataset.g] = !g.classList.contains('open'); g.classList.toggle('open', S[el.dataset.g]); },
   istog(el, ev) { if (ev && ev.target.closest('.sw')) return; S.isOpen = !$('#isg').classList.contains('open'); $('#isg').classList.toggle('open', S.isOpen); },
+  ovtog(el, ev) { if (ev && ev.target.closest('.sw')) return; S.ovOpen = !$('#ovg').classList.contains('open'); $('#ovg').classList.toggle('open', S.ovOpen); },
   sktog(el, ev) { if (ev && ev.target.closest('.sw')) return; S.skOpen = !$('#skg').classList.contains('open'); $('#skg').classList.toggle('open', S.skOpen); },
   ptog() { S.pOpen = !S.pOpen; const g = $('#pgrp'); if (g) g.classList.toggle('open', S.pOpen); },
   pprev() { stepPlayer(-1); },
@@ -11221,7 +11239,7 @@ document.addEventListener('click', ev => {
   const f = A[el.dataset.act];
   if (!f) return;
   if (el.tagName === 'A') return;
-  if ((el.dataset.act === 'sktog' || el.dataset.act === 'istog') && ev.target.closest('.sw')) return;
+  if ((el.dataset.act === 'sktog' || el.dataset.act === 'istog' || el.dataset.act === 'ovtog') && ev.target.closest('.sw')) return;
   ev.preventDefault();
   f(el, ev);
 });
@@ -11240,6 +11258,12 @@ document.addEventListener('change', ev => {
   if (ev.target.id === 'skmaster') {
     const v = ev.target.checked; setOpt('auto_skip', v);
     const g = $('#skg'); if (g) { g.classList.toggle('open', v); S.skOpen = v; g.querySelectorAll('.row.sub').forEach(r => r.classList.toggle('dis', !v)); }
+    return;
+  }
+  if (ev.target.id === 'ovmaster') {
+    const v = ev.target.checked; setOpt('own_vol', v);
+    const g = $('#ovg'); if (g) { g.classList.toggle('open', v); S.ovOpen = v; g.querySelectorAll('.row').forEach(r => r.classList.toggle('dis', !v)); }
+    if (!v) { const vp = $('#vvp'); if (vp) vp.classList.add('hide'); }
     return;
   }
   if (ev.target.id === 'ismaster') {
@@ -11264,9 +11288,11 @@ let pSaveT = 0, pMarked = false;
 const nativeHls = !!V.canPlayType('application/vnd.apple.mpegurl');
 /* ---------- власна гучність (окрема від системної; до 200%) ---------- */
 let AUD = null;  // Web Audio створюємо лише коли користувач змінив гучність (за 100% звук іде як є, найнадійніше для фону й PiP)
+const ownVol = () => !!(S.set && S.set.own_vol);
 function volMax() { return S.set && S.set.vol_max >= 200 ? 200 : 100; }
 function volGet() { let v = 100; try { v = parseInt(localStorage.getItem('pvol') || '100', 10); } catch (e) {} return Math.max(0, Math.min(volMax(), isNaN(v) ? 100 : v)); }
 function volApply(p) {
+  if (!ownVol()) return;  // власна гучність (Web Audio) вимкнена: звук іде напряму, як у старих стабільних версіях
   p = Math.max(0, Math.min(volMax(), p));
   try { localStorage.setItem('pvol', String(p)); } catch (e) {}
   if (!AUD && p === 100) return;
@@ -11291,7 +11317,7 @@ $('#vvol').addEventListener('click', ev => { ev.stopPropagation(); const v = $('
 $('#vvr').addEventListener('input', () => { volApply(parseInt($('#vvr').value, 10)); volPaint(); vcShow(); });
 $('#vvp').addEventListener('click', ev => ev.stopPropagation());
 V.addEventListener('playing', () => { if (AUD && AUD.ctx.state !== 'running') AUD.ctx.resume().catch(() => {}); });
-function volRestore() { const p = volGet(); if (p !== 100 || AUD) volApply(p); }
+function volRestore() { if (!ownVol()) return; const p = volGet(); if (p !== 100 || AUD) volApply(p); }
 
 let clrT = 0, PLAYS = 0, RELOADING = false;
 async function play(id, n) {
@@ -11300,6 +11326,7 @@ async function play(id, n) {
   S.cur = {id, n}; PLAYS++;
   const e = it.episodes.find(x => x.n === n);
   $('#player').classList.remove('hide'); vcIcon(); VC.classList.remove('off');
+  { const vb = $('#vvol'); if (vb) vb.classList.toggle('hide', !ownVol()); if (!ownVol()) $('#vvp').classList.add('hide'); }
   document.body.style.overflow = 'hidden';
   applyPlayerMode(); setNowPlaying(it, e, n);
   $('#ptitle').innerHTML = `Серія ${esc(n)}<small>${esc(it.title)}</small>`;
@@ -11582,7 +11609,7 @@ function closePlayer() {
   $('#player').classList.add('hide'); document.body.style.overflow = '';
   S.cur = null; beat(true); loadLib().catch(() => {});
   // кожні 2 переглянуті серії WebView чиститься перезавантаженням: WebContent накопичує пам'ять, і iOS рано чи пізно вбиває його разом із застосунком
-  if (PLAYS >= 2 && !RELOADING) { RELOADING = true; try { sessionStorage.setItem('ourReload', '1'); } catch (e) {} setTimeout(() => { if (!S.cur) location.reload(); else RELOADING = false; }, 900); }
+  if (PLAYS >= 1 && !RELOADING) { RELOADING = true; try { sessionStorage.setItem('ourReload', '1'); } catch (e) {} setTimeout(() => { if (!S.cur) location.reload(); else RELOADING = false; }, 900); }
 }
 /* діагностика: стан сторінки в alive.json і відстеження перезавантажень WebView */
 function diagSend(ev) {
@@ -11601,7 +11628,7 @@ function diagSend(ev) {
   let nav = 0;
   window.addEventListener('hashchange', () => {
     if (/^#\/a\//.test(location.hash)) nav++;
-    if (nav >= 4 && !S.cur && !RELOADING) { RELOADING = true; try { sessionStorage.setItem('ourReload', '1'); } catch (e) {} setTimeout(() => location.reload(), 250); }
+    if (nav >= 3 && !S.cur && !RELOADING) { RELOADING = true; try { sessionStorage.setItem('ourReload', '1'); } catch (e) {} setTimeout(() => location.reload(), 250); }
   });
 })();
 
@@ -11684,14 +11711,14 @@ function diagSend(ev) {
   const layer = $('#layer');
   layer.addEventListener('touchstart', e => {
     const sh = e.target.closest('.sheet'); if (!sh || e.touches.length !== 1) { sw = null; return; }
-    const sb = $('#sb');
-    sw = {y: e.touches[0].clientY, t: Date.now(), sh, drag: false, grab: !!e.target.closest('.grab'), atTop: !sb || sb.scrollTop <= 0, last: 0};
+    const sc = e.target.closest('#joblist') || $('#sb');  // у шторці завантажень прокручується #joblist, а не #sb
+    sw = {y: e.touches[0].clientY, t: Date.now(), sh, sc, drag: false, grab: !!e.target.closest('.grab'), atTop: !sc || sc.scrollTop <= 0, last: 0};
   }, {passive: true});
   layer.addEventListener('touchmove', e => {
     if (!sw) return;
-    const dy = e.touches[0].clientY - sw.y, sb = $('#sb');
+    const dy = e.touches[0].clientY - sw.y, sb = sw.sc || $('#sb');
     if (!sw.drag) {
-      if (dy > 8 && (sw.grab || (sw.atTop && sb.scrollTop <= 0))) { sw.drag = true; sw.sh.style.transition = 'none'; sw.sh.style.animation = 'none'; }
+      if (dy > 8 && (sw.grab || (sw.atTop && (!sb || sb.scrollTop <= 0)))) { sw.drag = true; sw.sh.style.transition = 'none'; sw.sh.style.animation = 'none'; }
       else { if (Math.abs(dy) > 8) sw = null; return; }
     }
     e.preventDefault();
