@@ -11581,8 +11581,8 @@ function closePlayer() {
   if (wasFs) clrT = setTimeout(() => { if (!S.cur) { V.removeAttribute('src'); V.load(); } }, 600); else { V.removeAttribute('src'); V.load(); }
   $('#player').classList.add('hide'); document.body.style.overflow = '';
   S.cur = null; beat(true); loadLib().catch(() => {});
-  // кожні 8 переглянутих серій WebView чиститься перезавантаженням: WebContent накопичує пам'ять, і iOS рано чи пізно вбиває його разом із застосунком
-  if (PLAYS >= 8 && !RELOADING) { RELOADING = true; try { sessionStorage.setItem('ourReload', '1'); } catch (e) {} setTimeout(() => { if (!S.cur) location.reload(); else RELOADING = false; }, 900); }
+  // кожні 2 переглянуті серії WebView чиститься перезавантаженням: WebContent накопичує пам'ять, і iOS рано чи пізно вбиває його разом із застосунком
+  if (PLAYS >= 2 && !RELOADING) { RELOADING = true; try { sessionStorage.setItem('ourReload', '1'); } catch (e) {} setTimeout(() => { if (!S.cur) location.reload(); else RELOADING = false; }, 900); }
 }
 /* діагностика: стан сторінки в alive.json і відстеження перезавантажень WebView */
 function diagSend(ev) {
@@ -11597,6 +11597,12 @@ function diagSend(ev) {
   try { was = sessionStorage.getItem('boot'); ours = sessionStorage.getItem('ourReload'); sessionStorage.setItem('boot', String(Date.now())); sessionStorage.removeItem('ourReload'); } catch (e) {}
   if (was && !ours) setTimeout(() => diagSend('reload_unexpected'), 1500);  // сторінка піднялась сама: WebContent, імовірно, вбито системою
   setInterval(() => diagSend(), 10000);
+  // перегляд багатьох сторінок аніме теж роздуває WebContent (постери, розкодовані зображення): кожні 4 відкриття чистимо WebView
+  let nav = 0;
+  window.addEventListener('hashchange', () => {
+    if (/^#\/a\//.test(location.hash)) nav++;
+    if (nav >= 4 && !S.cur && !RELOADING) { RELOADING = true; try { sessionStorage.setItem('ourReload', '1'); } catch (e) {} setTimeout(() => location.reload(), 250); }
+  });
 })();
 
 
