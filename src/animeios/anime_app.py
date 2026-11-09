@@ -7996,6 +7996,7 @@ body{padding-bottom:calc(84px + var(--bot))}
 .bar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:8px;
   padding:calc(10px + var(--top)) 14px 10px;background:rgba(13,14,19,.82);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d}
+html,body,#root{overflow-anchor:none}/* перемальовування списку (морфінг) не має зсувати прокрутку «якорем» браузера */
 .hdr2{position:sticky;top:var(--barh,58px);z-index:19;background:rgba(13,14,19,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d;max-height:55vh;overflow-y:auto;will-change:transform,opacity;transition:transform .55s cubic-bezier(.32,.72,0,1),opacity .45s ease}
 .hdr2.hide{transform:translateY(calc(-100% - var(--barh,58px)));opacity:0;pointer-events:none}
 .bar h1{font-size:22px;margin:0;flex:1;letter-spacing:-.3px}
