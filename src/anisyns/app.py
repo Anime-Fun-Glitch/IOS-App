@@ -375,28 +375,76 @@ async def _inset_loop(app, wv, view):
         await asyncio.sleep(0.4)
 
 
+def _darken(window):
+    """Темне тло вікна й усіх його корінних в'ю одразу: без білого спалаху між екраном запуску та сторінкою."""
+    try:
+        from rubicon.objc import ObjCClass
+        c = ObjCClass('UIColor').colorWithRed(0.051, green=0.055, blue=0.075, alpha=1.0)
+        impl = window._impl
+        win = impl.native
+        win.backgroundColor = c
+        views = []
+        for r in (getattr(win, 'rootViewController', None), getattr(impl, 'controller', None)):
+            if r is None:
+                continue
+            views.append(r)
+            for attr in ('topViewController', 'visibleViewController'):
+                try:
+                    v = getattr(r, attr)
+                    if v is not None:
+                        views.append(v)
+                except Exception:
+                    pass
+        for r in views:
+            try:
+                r.view.backgroundColor = c
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _boot_server(app_obj):
+    """Важка частина запуску (імпорт великого модуля й старт сервера) — поза головним потоком, щоб екран не «замерзав»."""
+    from anisyns import anime_app
+    anime_app.BASE_DIR = os.path.join(_documents_dir(app_obj), 'AniSyns')
+    anime_app.PORT = _free_port(8765)
+    anime_app.start()
+    return f'http://127.0.0.1:{anime_app.PORT}/'
+
+
 class AnimeApp(toga.App):
     def startup(self):
         self.main_window = toga.MainWindow(title=self.formal_name)
+        # одразу показуємо темне вікно (а не біле) — і лише потім вантажимо сервер
+        self.main_window.content = toga.Box(style=Pack(flex=1, background_color='#0d0e13'))
+        _darken(self.main_window)
+        self.main_window.show()
+        _hide_nav_bar(self.main_window)
+        _darken(self.main_window)
+        try:
+            self.add_background_task(self._boot)
+        except Exception:
+            import asyncio
+            asyncio.ensure_future(self._boot(self))
+
+    async def _boot(self, app=None, **kwargs):
+        import asyncio
+        loop = asyncio.get_event_loop()
         url = None
         err = None
         try:
-            from anisyns import anime_app
-            anime_app.BASE_DIR = os.path.join(_documents_dir(self), 'AniSyns')
-            anime_app.PORT = _free_port(8765)
-            anime_app.start()
-            url = f'http://127.0.0.1:{anime_app.PORT}/'
+            url = await loop.run_in_executor(None, _boot_server, self)
         except Exception:
             err = traceback.format_exc()
         if url is None:
             self.main_window.content = toga.MultilineTextInput(
                 readonly=True, value='Не вдалося запустити:\n\n' + err, style=Pack(flex=1))
-            self.main_window.show()
             return
+        self._attach(url)
+
+    def _attach(self, url):
         from anisyns import anime_app
-        self.main_window.content = toga.Box()
-        self.main_window.show()
-        _hide_nav_bar(self.main_window)
         try:
             import asyncio
             anime_app.UI_LOOP = asyncio.get_event_loop()
@@ -415,7 +463,6 @@ class AnimeApp(toga.App):
                 asyncio.ensure_future(_inset_loop(self, wv, view))
         except Exception:
             # запасний варіант: вбудований WebView Toga + розрахунок відступів у самій сторінці
-            from anisyns import anime_app
             anime_app.IOS_APP = True
             self.webview = toga.WebView(url=url, style=Pack(flex=1))
             try:
