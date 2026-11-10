@@ -15,6 +15,7 @@ author_email = "noreply@users.noreply.github.com"
 formal_name = "AniSyns"
 description = "The way to watch Anime with comfort!"
 icon = "resources/anisyns"
+splash_background_color = "#0d0e13"
 sources = ["src/anisyns"]
 requires = ["requests"]
 

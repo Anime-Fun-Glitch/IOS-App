@@ -8627,15 +8627,15 @@ input,select,textarea{font-size:16px}
 /* ---------- заставка при першому запуску (лише в iPhone-застосунку) ---------- */
 #splash{position:fixed;inset:0;z-index:99999;background:#0d0e13;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .55s ease,transform .55s ease;overflow:hidden}
 #splash.out{opacity:0;transform:scale(1.06);pointer-events:none}
-#splash .glow{position:absolute;left:50%;top:44%;width:520px;height:520px;margin:-260px 0 0 -260px;border-radius:50%;background:radial-gradient(circle,#6d4cff55 0%,#4b6fe022 38%,transparent 70%);opacity:0;animation:spGlow 2.4s ease-out .1s forwards}
+#splash .glow{position:absolute;left:50%;top:50%;width:520px;height:520px;margin:-260px 0 0 -260px;border-radius:50%;background:radial-gradient(circle,#6d4cff55 0%,#4b6fe022 38%,transparent 70%);opacity:0;animation:spGlow 2.4s ease-out .1s forwards}
 #splash svg{width:176px;height:176px;position:relative;filter:drop-shadow(0 10px 30px #6d4cff66);animation:spPop .9s cubic-bezier(.2,.9,.25,1.15) .1s both}
 #splash svg .pa,#splash svg .pb,#splash svg .pc{transform-box:fill-box;transform-origin:center}
 #splash svg .pa{animation:spRise .7s cubic-bezier(.2,.8,.2,1) .15s both}
 #splash svg .pb{animation:spSwoosh .8s cubic-bezier(.2,.8,.2,1) .45s both}
 #splash svg .pc{animation:spPlay .7s cubic-bezier(.2,1.2,.3,1) .75s both,spBeat 1.4s ease-in-out 1.5s infinite}
-#splash .nm{position:relative;margin-top:26px;font:700 30px/1 -apple-system,'SF Pro Display',Helvetica,Arial,sans-serif;letter-spacing:1px;color:#fff;opacity:0;animation:spFade .7s ease 1s forwards}
+#splash .nm{position:absolute;left:0;right:0;text-align:center;top:calc(50% + 112px);font:700 30px/1 -apple-system,'SF Pro Display',Helvetica,Arial,sans-serif;letter-spacing:1px;color:#fff;opacity:0;animation:spFade .7s ease 1s forwards}
 #splash .nm i{font-style:normal;background:linear-gradient(90deg,#9b6bff,#5fb0ff);-webkit-background-clip:text;background-clip:text;color:transparent}
-#splash .tg{position:relative;margin-top:10px;font:500 13px/1.3 -apple-system,Helvetica,Arial,sans-serif;color:#9aa0b8;opacity:0;animation:spFade .7s ease 1.25s forwards;text-align:center;padding:0 24px}
+#splash .tg{position:absolute;left:0;right:0;top:calc(50% + 156px);font:500 13px/1.3 -apple-system,Helvetica,Arial,sans-serif;color:#9aa0b8;opacity:0;animation:spFade .7s ease 1.25s forwards;text-align:center;padding:0 24px}
 #splash .ld{position:absolute;left:50%;bottom:calc(64px + env(safe-area-inset-bottom));width:120px;height:3px;margin-left:-60px;border-radius:2px;background:#ffffff14;overflow:hidden;opacity:0;animation:spFade .5s ease 1s forwards}
 #splash .ld::after{content:'';position:absolute;top:0;bottom:0;width:45%;border-radius:2px;background:linear-gradient(90deg,#7a3bcb,#66a2d3);animation:spRun 1.2s ease-in-out infinite}
 @keyframes spGlow{0%{opacity:0;transform:scale(.6)}60%{opacity:1}100%{opacity:.75;transform:scale(1)}}
