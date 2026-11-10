@@ -46,12 +46,24 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent bool true" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes:0 string audio" "$PLIST" || true
-          # Екран запуску: шаблонний (біле тло + голий квадрат іконки) прибираємо; системний темний екран запуску без зайвого білого спалаху
-          /usr/libexec/PlistBuddy -c "Delete :UILaunchStoryboardName" "$PLIST" || true
-          /usr/libexec/PlistBuddy -c "Delete :UILaunchScreen" "$PLIST" || true
-          /usr/libexec/PlistBuddy -c "Add :UILaunchScreen dict" "$PLIST" || true
-          /usr/libexec/PlistBuddy -c "Add :UIUserInterfaceStyle string Dark" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Print" "$PLIST"
+
+      - name: Dark launch screen (no white flash)
+        run: |
+          python3 - <<'PY'
+          import glob, re
+          dark = '<color key="backgroundColor" red="0.051" green="0.055" blue="0.075" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>'
+          files = [f for f in glob.glob('build/**/*.storyboard', recursive=True) if '/Pods/' not in f and 'app_packages' not in f]
+          print('storyboards:', files)
+          for f in files:
+              s = open(f, encoding='utf8').read()
+              n = len(re.findall(r'<color key="backgroundColor"[^>]*/>', s))
+              s = re.sub(r'<color key="backgroundColor"[^>]*/>', dark, s)
+              if n == 0:  # колір тла не заданий явно (системний білий) — додаємо свій після safeArea
+                  s = re.sub(r'(<viewLayoutGuide key="safeArea"[^>]*/>)', lambda m: m.group(1) + '\n' + dark, s, count=1)
+              open(f, 'w', encoding='utf8').write(s)
+              print('patched', f, 'background colors replaced:', n)
+          PY
 
       - name: Remember plain project (fallback)
         run: |
