@@ -46,6 +46,11 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent bool true" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes:0 string audio" "$PLIST" || true
+          # Екран запуску: шаблонний (біле тло + голий квадрат іконки) прибираємо; системний темний екран запуску без зайвого білого спалаху
+          /usr/libexec/PlistBuddy -c "Delete :UILaunchStoryboardName" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Delete :UILaunchScreen" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :UILaunchScreen dict" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :UIUserInterfaceStyle string Dark" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Print" "$PLIST"
 
       - name: Remember plain project (fallback)
@@ -103,13 +108,13 @@ jobs:
           echo "App: $APP"
           rm -rf ipa-out && mkdir -p ipa-out/Payload
           cp -R "$APP" ipa-out/Payload/
-          (cd ipa-out && zip -qry ../Anime.ipa Payload)
-          ls -lh Anime.ipa
+          (cd ipa-out && zip -qry ../AniSyns.ipa Payload)
+          ls -lh AniSyns.ipa
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Anime-ipa
-          path: Anime.ipa
+          name: AniSyns-ipa
+          path: AniSyns.ipa
           if-no-files-found: error
 
       - name: Upload build log on failure
