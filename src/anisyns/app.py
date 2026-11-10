@@ -477,6 +477,8 @@ class AnimeApp(toga.App):
             _setup_native_info(anime_app)
             anime_app.IOS_APP = True  # сторінка знає, що вона в iPhone-застосунку (меню, плеєр iOS, відступи)
             _audio_session()
+            if anime_app.SETTINGS.get('plain_wv'):
+                raise RuntimeError('plain_wv')  # режим діагностики: штатний WebView Toga без власних надбудов
             self._native_wv, view = _native_webview(self, url)
             wv = self._native_wv
 

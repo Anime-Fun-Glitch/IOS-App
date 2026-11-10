@@ -6201,7 +6201,7 @@ def net_state():
 SETTINGS = {'mobile_download': False, 'auto_skip': False, 'auto_skip_opening': True, 'auto_skip_ending': True, 'auto_next': True,
             'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': True, 'ios_player': True, 'np_ep_cover': True,
             'bg_keep': True, 'bg_check': False, 'island': True, 'island_dl': True, 'island_check': False,
-            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'recent_min': 3, 'client': {},
+            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'recent_min': 3, 'client': {},
             'site_order': ['aniliberty', 'yummyani', 'animevost', 'animru'], 'view': {}}
 
 
@@ -8050,6 +8050,7 @@ body{padding-bottom:calc(84px + var(--bot))}
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d}
 html,body,#root{overflow-anchor:none}/* перемальовування списку (морфінг) не має зсувати прокрутку «якорем» браузера */
 .hdr2{position:sticky;top:var(--barh,58px);z-index:19;background:rgba(13,14,19,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d;max-height:55vh;overflow-y:auto;will-change:transform,opacity;transition:transform .55s cubic-bezier(.32,.72,0,1),opacity .45s ease}
+.hdr2.hdr-fast{transition:transform .22s cubic-bezier(.3,.8,.2,1),opacity .18s ease!important}
 .hdr2.hdr-off{transform:translateY(calc(-100% - var(--barh,58px)));opacity:0;pointer-events:none}
 .bar h1{font-size:22px;margin:0;flex:1;letter-spacing:-.3px}
 .bar .back{font-size:15px;color:var(--ac);background:none;border:0;padding:8px 4px}
@@ -8580,6 +8581,7 @@ button:active,.card:active,.btn:active,.ib:active,#tabs a:active,.dchip:active{t
 .jgp{position:relative;overflow:hidden}.jgp{background:#ffffff0d}.jgp .pi{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.jgp[data-p]:not([data-p='']){cursor:pointer}
 .jgpb{width:40px;padding:0}.jgpb[hidden]{display:none!important}
 #hdrtog{position:fixed;left:50%;top:var(--tgt,calc(var(--barh,58px) + 8px));z-index:19;width:58px;height:28px;border-radius:14px;border:1px solid #ffffff22;background:rgba(13,14,19,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);color:var(--tx,#fff);display:flex;align-items:center;justify-content:center;padding:0;opacity:0;visibility:hidden;pointer-events:none;transform:translate(-50%,-14px);transition:opacity .35s ease,transform .55s cubic-bezier(.32,.72,0,1),top .55s cubic-bezier(.32,.72,0,1),visibility 0s .55s}
+#hdrtog.fast{transition:opacity .15s ease,transform .22s ease,top .22s ease!important}
 #hdrtog.on.sc{opacity:0!important;pointer-events:none!important;transition:opacity .2s ease!important}
 #hdrtog.on{opacity:.88;visibility:visible;pointer-events:auto;transform:translate(-50%,0);transition:opacity .4s ease .12s,transform .55s cubic-bezier(.32,.72,0,1) .12s,top .55s cubic-bezier(.32,.72,0,1),visibility 0s}#hdrtog:active{transform:translate(-50%,0) scale(.92)}#hdrtog svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 .jgf{padding:0 12px 12px}.jgf:empty{display:none}
@@ -8925,12 +8927,13 @@ function tabsHTML(cur) {
   return TABS.map(t => `<a href="${t[1]}" class="${t[0] === cur ? 'on' : ''}">${ico(t[2])}${t[3]}</a>`).join('');
 }
 fillIcons();
-const SCR = {};  // збережена прокрутка списків (бібліотека, група, пошук…) — щоб після закриття аніме лишатись там, де були
+const SCR = {}, SCRHH = {};  // збережена прокрутка списків (бібліотека, група, пошук…) — щоб після закриття аніме лишатись там, де були
 window.addEventListener('hashchange', () => {
-  if (S.lastRender) SCR[S.lastRender] = window.scrollY;
+  if (S.lastRender) { SCR[S.lastRender] = window.scrollY; SCRHH[S.lastRender] = !!S.hdrHide; }
   const rr = route(); S.dtab = (rr.name === 'detail' && S.dtabMap[rr.id]) || 'eps'; S.sel.clear(); S.selMode = false; S.descOpen = false; fx(); render();
   const key = rr.name + ':' + (rr.id || ''), y = rr.name !== 'detail' && SCR[key];
   window.scrollTo(0, y || 0);
+  if (y) { try { window.__hdrJump && window.__hdrJump(y); } catch (e) {} }
   if (y) { requestAnimationFrame(() => window.scrollTo(0, y)); setTimeout(() => { if (Math.abs(window.scrollY - y) > 2) window.scrollTo(0, y); }, 120); }
 });
 // тримає на місці картку, що була вгорі екрана, поки список перемальовується (вхід/вихід з редагування)
@@ -9019,7 +9022,7 @@ function render() {
   if (keepY > 0 && Math.abs(window.scrollY - keepY) > 1) window.scrollTo(0, keepY);
   const rchg = S.lastRender !== rkey;
   S.lastRender = rkey;
-  if (rchg) S.hdrHide = false;
+  if (rchg) S.hdrHide = !!(SCRHH[rkey] && SCR[rkey] > 150);
   if (r.name === 'detail' && (rchg || S.chipFix)) { S.chipFix = false; requestAnimationFrame(centerChips); setTimeout(centerChips, 350); }
   if (ENTER) [...root.children].forEach(c => c.classList.add('enter-page'));
   if (window.__fitBar) window.__fitBar();
@@ -9524,6 +9527,8 @@ function settingsHTML() {
     <label class="sw"><input type="checkbox" data-set="blur_thumbs" ${S.set.blur_thumbs ? 'checked' : ''}></label></div>
   <div class="set"><div class="tx"><b>Вести логи</b><span>Журнали збоїв для діагностики.</span></div>
     <label class="sw"><input type="checkbox" data-set="logging" ${S.set.logging ? 'checked' : ''}></label></div>
+  ${IOS_APP ? `<div class="set"><div class="tx"><b>Штатний WebView (діагностика)</b><span>Замість власної оболонки — стандартний WebView Toga, без фонових циклів. Діє після перезапуску застосунку.</span></div>
+    <label class="sw"><input type="checkbox" data-set="plain_wv" ${S.set.plain_wv ? 'checked' : ''}></label></div>` : ''}
   <div class="set"><div class="tx"><b>Багатозадачність</b><span>До 3 серій одночасно й більше паралельних запитів. Швидше, але більше пам'яті й батареї.</span></div>
     <label class="sw"><input type="checkbox" data-set="multitask" ${S.set.multitask ? 'checked' : ''}></label></div>
   <div class="set"><div class="tx"><b>Мережа зараз</b><span>Визначається автоматично: Wi‑Fi, мобільна мережа чи офлайн.</span></div>${netHTML()}</div>`;
@@ -11666,7 +11671,7 @@ function closePlayer() {
 function softReload(delay) {
   // перезавантаження WebView «непомітне»: запам'ятовуємо маршрут і прокрутку, бібліотеку беремо з кеша
   RELOADING = true;
-  try { sessionStorage.setItem('ourReload', '1'); sessionStorage.setItem('ourScroll', JSON.stringify({h: location.hash, y: window.scrollY})); } catch (e) {}
+  try { sessionStorage.setItem('ourReload', '1'); if (S.lastRender) SCR[S.lastRender] = window.scrollY; sessionStorage.setItem('ourScroll', JSON.stringify({h: location.hash, y: window.scrollY, hh: !!S.hdrHide, scr: SCR})); } catch (e) {}
   setTimeout(() => { if (!S.cur) location.reload(); else RELOADING = false; }, delay);
 }
 function diagSend(ev) {
@@ -11737,6 +11742,7 @@ function diagSend(ev) {
     if (S.hdrPin) { S.hdrPin = false; S.hdrHide = window.scrollY > 150; apply(h, !!S.hdrHide); }
     else { S.hdrPin = true; S.hdrHide = false; apply(h, false); }
   });
+  window.__hdrJump = y => { ly = y; acc = 0; lastChg = Date.now(); clearTimeout(hideT); hideT = 0; const h = document.querySelector('.hdr2'); if (h && S.hdrHide && !S.hdrPin && y > 30) apply(h, true, true); };  // стрибок прокрутки (повернулись зі сторінки аніме) — не вважати його жестом
   window.__fitBar = () => { fit(); const h = document.querySelector('.hdr2'); if (h) apply(h, !!S.hdrHide && !S.hdrPin && window.scrollY > 30, true); else sync(); };  // після перемальовування сторінки стан панелі не скидається
   let scT = 0;
   addEventListener('scroll', () => {  // під час прокрутки ручка зникає, щоб не лізти на фільтри, і повертається, коли сторінка зупинилась
@@ -11752,7 +11758,8 @@ function diagSend(ev) {
       if (!h) { acc = 0; return; }
       fit();
       if (S.hdrPin) { apply(h, false); return; }  // закріплена вручну — не чіпаємо
-      if (y < 30) { acc = 0; clearTimeout(hideT); hideT = 0; if (S.hdrHide) { S.hdrHide = false; apply(h, false); } return; }  // лише біля самого верху (між 30 і 150 стан не змінюється — без дрижання)
+      if (y < 30) { acc = 0; clearTimeout(hideT); hideT = 0; if (S.hdrHide || h.classList.contains('hdr-off')) { S.hdrHide = false; h.classList.add('hdr-fast'); tog.classList.add('fast'); setTimeout(() => { h.classList.remove('hdr-fast'); tog.classList.remove('fast'); }, 350); apply(h, false); } return; }
+      if (S.hdrHide && !h.classList.contains('hdr-off')) { apply(h, true, true); return; }  // стан «схована» має збігатись з виглядом (після повернення зі сторінки аніме)  // лише біля самого верху (між 30 і 150 стан не змінюється — без дрижання)
       if (d <= 0) { acc = 0; clearTimeout(hideT); hideT = 0; return; }  // вгору сама не з'являється — лише ручка
       acc += d;
       if (acc > 90 && y > 150 && !S.hdrHide && !hideT && Date.now() - lastChg > 500) {  // ховаємо з невеликою затримкою: коротка прокрутка панель не чіпає
@@ -11859,7 +11866,10 @@ try {
     S.items = c.items; S.tmp = c.tmp || []; S.ffmpeg = c.ffmpeg; S._libSig = JSON.stringify(S.items) + '|' + JSON.stringify(S.tmp);
     S.enterPending = false; render(); _bootCached = true;
     const sc = JSON.parse(sessionStorage.getItem('ourScroll')); sessionStorage.removeItem('ourScroll');
+    if (sc && sc.scr) Object.assign(SCR, sc.scr);
+    if (sc) { S.hdrHide = !!sc.hh; }
     if (sc && sc.h === location.hash && sc.y > 0) {
+      try { window.__hdrJump && window.__hdrJump(sc.y); } catch (e) {}
       const go = () => window.scrollTo(0, sc.y);
       go(); requestAnimationFrame(go); setTimeout(go, 150); setTimeout(go, 500);
     }
