@@ -36,6 +36,17 @@ jobs:
       - name: Create Xcode project
         run: briefcase create iOS --no-input
 
+      - name: Precompile app code (fast first launch)
+        run: |
+          # на iPhone .py компілюється в байт-код при кожному старті (тека програми лише для читання) — великий файл тоді вантажиться секунди.
+          # Кладемо готовий .pyc (без перевірки часу зміни) поруч із кодом.
+          python3 --version
+          for D in $(find build -type f -name anime_app.py -not -path "*/Pods/*" -exec dirname {} \;); do
+            echo "compiling $D"
+            python3 -m compileall -q -f --invalidation-mode unchecked-hash "$D" || true
+            ls "$D/__pycache__" || true
+          done
+
       - name: Allow local HTTP in WebView (Info.plist)
         run: |
           PLIST=$(find build -maxdepth 7 -name "*Info.plist" -not -path "*/Pods/*" -not -path "*/app_packages*" -not -path "*/Python*" -not -path "*/support/*" | head -1)
