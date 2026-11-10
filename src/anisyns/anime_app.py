@@ -8050,6 +8050,10 @@ body{padding-bottom:calc(84px + var(--bot))}
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d}
 html,body,#root{overflow-anchor:none}/* перемальовування списку (морфінг) не має зсувати прокрутку «якорем» браузера */
 .hdr2{position:sticky;top:var(--barh,58px);z-index:19;background:rgba(13,14,19,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d;max-height:55vh;overflow-y:auto;will-change:transform,opacity;transition:transform .55s cubic-bezier(.32,.72,0,1),opacity .45s ease}
+/* поки грає відео, сторінка під плеєром не малюється: менше шарів, розмиттів і анімацій у GPU-процесі WebKit (на iPhone 15 він падає разом із застосунком) */
+body.pl #root,body.pl #tabs,body.pl #hdrtog,body.pl #splash{visibility:hidden!important}
+body.pl *,body.pl *::before,body.pl *::after{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;will-change:auto!important}
+body.pl #root *,body.pl #tabs *{animation:none!important;transition:none!important}
 .hdr2.hdr-fast{transition:transform .22s cubic-bezier(.3,.8,.2,1),opacity .18s ease!important}
 .hdr2.hdr-off{transform:translateY(calc(-100% - var(--barh,58px)));opacity:0;pointer-events:none}
 .bar h1{font-size:22px;margin:0;flex:1;letter-spacing:-.3px}
@@ -11383,7 +11387,7 @@ async function play(id, n) {
   const e = it.episodes.find(x => x.n === n);
   $('#player').classList.remove('hide'); vcIcon(); VC.classList.remove('off');
   { const vb = $('#vvol'); if (vb) vb.classList.toggle('hide', !ownVol()); if (!ownVol()) $('#vvp').classList.add('hide'); }
-  document.body.style.overflow = 'hidden';
+  document.body.style.overflow = 'hidden'; document.body.classList.add('pl');
   applyPlayerMode(); setNowPlaying(it, e, n);
   $('#ptitle').innerHTML = `Серія ${esc(n)}<small>${esc(it.title)}</small>`;
   syncAuto(); skips = {}; skDone = {}; skSoft = null; skEnded = false; pReset(); paintMarks(); skipBtn(null);
@@ -11662,7 +11666,7 @@ function closePlayer() {
   clearTimeout(clrT);
   // джерело знімаємо не одразу, а коли системний повноекранний плеєр вже закрився: зняття src під час його анімації могло вбивати програму
   if (wasFs) clrT = setTimeout(() => { if (!S.cur) { V.removeAttribute('src'); V.load(); } }, 600); else { V.removeAttribute('src'); V.load(); }
-  $('#player').classList.add('hide'); document.body.style.overflow = '';
+  $('#player').classList.add('hide'); document.body.style.overflow = ''; document.body.classList.remove('pl');
   S.cur = null; beat(true); loadLib().catch(() => {});
   // кожні 2 переглянуті серії WebView чиститься перезавантаженням: WebContent накопичує пам'ять, і iOS рано чи пізно вбиває його разом із застосунком
   if (PLAYS >= 2 && !RELOADING) { PLAYS = 0; setTimeout(() => { if (!S.cur && !RELOADING) softReload(0); }, 900); }
