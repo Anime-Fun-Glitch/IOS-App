@@ -7821,6 +7821,14 @@ def api_clientlog(msg):
 class _Server(ThreadingHTTPServer):
   daemon_threads = True
 
+  def server_bind(self):
+    # стандартний HTTPServer.server_bind викликає socket.getfqdn() → mDNS-запит, що на iOS може висіти десятки секунд
+    import socketserver
+    socketserver.TCPServer.server_bind(self)
+    host, port = self.server_address[:2]
+    self.server_name = str(host)
+    self.server_port = port
+
   def handle_error(self, request, client_address):
     ex = sys.exc_info()[1]
     if isinstance(ex, (ConnectionError, TimeoutError)):  # браузер закрив з'єднання — це не помилка
@@ -8859,6 +8867,7 @@ async function loadLib(quiet) {
   const sig = JSON.stringify(j.items) + '|' + JSON.stringify(j.tmp || []);
   if (quiet === 'vis' && S._libSig === sig) return;  // повернулись із фону, а нічого не змінилось — не перемальовуємо (інакше картки «блимають»)
   S._libSig = sig; S.items = j.items; S.tmp = j.tmp || []; S.ffmpeg = j.ffmpeg;
+  try { sessionStorage.setItem('libCache', JSON.stringify({items: S.items, tmp: S.tmp, ffmpeg: S.ffmpeg})); } catch (e) {}
   if (quiet !== true) render();
 }
 const item = id => S.items.find(x => x.id === id) || S.tmp.find(x => x.id === id);
@@ -11651,9 +11660,15 @@ function closePlayer() {
   $('#player').classList.add('hide'); document.body.style.overflow = '';
   S.cur = null; beat(true); loadLib().catch(() => {});
   // кожні 2 переглянуті серії WebView чиститься перезавантаженням: WebContent накопичує пам'ять, і iOS рано чи пізно вбиває його разом із застосунком
-  if (PLAYS >= 1 && !RELOADING) { RELOADING = true; try { sessionStorage.setItem('ourReload', '1'); } catch (e) {} setTimeout(() => { if (!S.cur) location.reload(); else RELOADING = false; }, 900); }
+  if (PLAYS >= 2 && !RELOADING) { PLAYS = 0; setTimeout(() => { if (!S.cur && !RELOADING) softReload(0); }, 900); }
 }
 /* діагностика: стан сторінки в alive.json і відстеження перезавантажень WebView */
+function softReload(delay) {
+  // перезавантаження WebView «непомітне»: запам'ятовуємо маршрут і прокрутку, бібліотеку беремо з кеша
+  RELOADING = true;
+  try { sessionStorage.setItem('ourReload', '1'); sessionStorage.setItem('ourScroll', JSON.stringify({h: location.hash, y: window.scrollY})); } catch (e) {}
+  setTimeout(() => { if (!S.cur) location.reload(); else RELOADING = false; }, delay);
+}
 function diagSend(ev) {
   try {
     const b = {player: !!S.cur, plays: PLAYS, hash: location.hash, lib: (S.items || []).length, imgs: Object.keys(JG_IMGS).length};
@@ -11670,7 +11685,7 @@ function diagSend(ev) {
   let nav = 0;
   window.addEventListener('hashchange', () => {
     if (/^#\/a\//.test(location.hash)) nav++;
-    if (nav >= 3 && !S.cur && !RELOADING) { RELOADING = true; try { sessionStorage.setItem('ourReload', '1'); } catch (e) {} setTimeout(() => location.reload(), 250); }
+    if (nav >= 8 && !S.cur && !RELOADING) { nav = 0; setTimeout(() => { if (!S.cur && !RELOADING) softReload(0); }, 1200); }
   });
 })();
 
@@ -11837,7 +11852,20 @@ api('/api/settings').then(j => {
 pollAC(true); setInterval(() => pollAC(), 45000);
 pollNet();
 fx();
-loadLib().then(() => { pollJobs(); pollNotifs(); checkInterrupted(); }).catch(e => {
+let _bootCached = false;
+try {
+  const c = JSON.parse(sessionStorage.getItem('libCache') || 'null');
+  if (c && c.items && sessionStorage.getItem('ourScroll')) {
+    S.items = c.items; S.tmp = c.tmp || []; S.ffmpeg = c.ffmpeg; S._libSig = JSON.stringify(S.items) + '|' + JSON.stringify(S.tmp);
+    S.enterPending = false; render(); _bootCached = true;
+    const sc = JSON.parse(sessionStorage.getItem('ourScroll')); sessionStorage.removeItem('ourScroll');
+    if (sc && sc.h === location.hash && sc.y > 0) {
+      const go = () => window.scrollTo(0, sc.y);
+      go(); requestAnimationFrame(go); setTimeout(go, 150); setTimeout(go, 500);
+    }
+  }
+} catch (e) {}
+loadLib(_bootCached ? 'vis' : false).then(() => { pollJobs(); pollNotifs(); checkInterrupted(); }).catch(e => {
   $('#root').innerHTML = `<div class="empty"><div class="big">${ico('plug')}</div><h2>Зв'язок з Python втрачено</h2><p>${esc(e.message)}</p></div>`;
 });
 </script>
