@@ -46,6 +46,10 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent bool true" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes:0 string audio" "$PLIST" || true
+          # екран запуску: якщо він заданий через Info.plist, прибираємо картинку
+          /usr/libexec/PlistBuddy -c "Delete :UILaunchScreen:UIImageName" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Print :UILaunchScreen" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Print :UILaunchStoryboardName" "$PLIST" || true
           /usr/libexec/PlistBuddy -c "Print" "$PLIST"
 
       - name: Dark launch screen (no white flash)
@@ -61,8 +65,12 @@ jobs:
               s = re.sub(r'<color key="backgroundColor"[^>]*/>', dark, s)
               if n == 0:  # колір тла не заданий явно (системний білий) — додаємо свій після safeArea
                   s = re.sub(r'(<viewLayoutGuide key="safeArea"[^>]*/>)', lambda m: m.group(1) + '\n' + dark, s, count=1)
+              h = len(re.findall(r'<imageView\b', s))
+              s = re.sub(r'<imageView\b(?![^>]*\bhidden=)', '<imageView hidden="YES"', s)  # картинку (іконку) на екрані запуску ховаємо
+              s = re.sub(r'<label\b(?![^>]*\bhidden=)', '<label hidden="YES"', s)
               open(f, 'w', encoding='utf8').write(s)
-              print('patched', f, 'background colors replaced:', n)
+              print('patched', f, 'background colors replaced:', n, 'imageViews hidden:', h)
+              print(s)
           PY
 
       - name: Remember plain project (fallback)
