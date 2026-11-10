@@ -8623,6 +8623,30 @@ input,select,textarea{font-size:16px}
 .strow.go{cursor:pointer}.strow .gochev{display:inline-flex;transform:rotate(-90deg);opacity:.5}
 .sth2{width:34px;height:50px;border-radius:7px;background:#ffffff14 center/cover;flex:none;display:grid;place-items:center;font-weight:700;color:#ffffff55}
 .sth.flash{animation:stfl 1.2s}@keyframes stfl{0%,60%{color:var(--ac)}100%{color:var(--mu)}}
+
+/* ---------- заставка при першому запуску (лише в iPhone-застосунку) ---------- */
+#splash{position:fixed;inset:0;z-index:99999;background:#0d0e13;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .55s ease,transform .55s ease;overflow:hidden}
+#splash.out{opacity:0;transform:scale(1.06);pointer-events:none}
+#splash .glow{position:absolute;left:50%;top:44%;width:520px;height:520px;margin:-260px 0 0 -260px;border-radius:50%;background:radial-gradient(circle,#6d4cff55 0%,#4b6fe022 38%,transparent 70%);opacity:0;animation:spGlow 2.4s ease-out .1s forwards}
+#splash svg{width:176px;height:176px;position:relative;filter:drop-shadow(0 10px 30px #6d4cff66);animation:spPop .9s cubic-bezier(.2,.9,.25,1.15) .1s both}
+#splash svg .pa,#splash svg .pb,#splash svg .pc{transform-box:fill-box;transform-origin:center}
+#splash svg .pa{animation:spRise .7s cubic-bezier(.2,.8,.2,1) .15s both}
+#splash svg .pb{animation:spSwoosh .8s cubic-bezier(.2,.8,.2,1) .45s both}
+#splash svg .pc{animation:spPlay .7s cubic-bezier(.2,1.2,.3,1) .75s both,spBeat 1.4s ease-in-out 1.5s infinite}
+#splash .nm{position:relative;margin-top:26px;font:700 30px/1 -apple-system,'SF Pro Display',Helvetica,Arial,sans-serif;letter-spacing:1px;color:#fff;opacity:0;animation:spFade .7s ease 1s forwards}
+#splash .nm i{font-style:normal;background:linear-gradient(90deg,#9b6bff,#5fb0ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+#splash .tg{position:relative;margin-top:10px;font:500 13px/1.3 -apple-system,Helvetica,Arial,sans-serif;color:#9aa0b8;opacity:0;animation:spFade .7s ease 1.25s forwards;text-align:center;padding:0 24px}
+#splash .ld{position:absolute;left:50%;bottom:calc(64px + env(safe-area-inset-bottom));width:120px;height:3px;margin-left:-60px;border-radius:2px;background:#ffffff14;overflow:hidden;opacity:0;animation:spFade .5s ease 1s forwards}
+#splash .ld::after{content:'';position:absolute;top:0;bottom:0;width:45%;border-radius:2px;background:linear-gradient(90deg,#7a3bcb,#66a2d3);animation:spRun 1.2s ease-in-out infinite}
+@keyframes spGlow{0%{opacity:0;transform:scale(.6)}60%{opacity:1}100%{opacity:.75;transform:scale(1)}}
+@keyframes spPop{0%{opacity:0;transform:scale(.55) rotate(-6deg)}100%{opacity:1;transform:none}}
+@keyframes spRise{0%{opacity:0;transform:translateY(26px)}100%{opacity:1;transform:none}}
+@keyframes spSwoosh{0%{opacity:0;transform:translate(-30px,18px) scale(.8)}100%{opacity:1;transform:none}}
+@keyframes spPlay{0%{opacity:0;transform:scale(.2)}100%{opacity:1;transform:scale(1)}}
+@keyframes spBeat{0%,100%{transform:scale(1)}50%{transform:scale(1.14)}}
+@keyframes spFade{0%{opacity:0;transform:translateY(8px)}100%{opacity:1;transform:none}}
+@keyframes spRun{0%{left:-45%}100%{left:100%}}
+@media (prefers-reduced-motion:reduce){#splash *{animation-duration:.01s!important;animation-delay:0s!important}}
 </style>
 <script>
 /* Безпечні зони (виріз / Dynamic Island / індикатор «Home»). Якщо WebView розтягнутий на весь екран, а env() віддає 0 —
@@ -8674,6 +8698,16 @@ input,select,textarea{font-size:16px}
 </script>
 </head>
 <body>
+<div id="splash" onclick="this.classList.add('out')"><div class="glow"></div>
+<svg viewBox="60 80 480 440" aria-hidden="true"><defs>
+<linearGradient id="spg2" x1="526" y1="370" x2="162" y2="458" gradientUnits="userSpaceOnUse"><stop offset=".4957" stop-color="#fff"/><stop offset=".8537" stop-color="#47367d"/><stop offset="1" stop-color="#543883"/></linearGradient>
+<linearGradient id="spg3" x1="257" y1="367" x2="311" y2="270" gradientUnits="userSpaceOnUse"><stop offset=".11" stop-color="#7a3bcb"/><stop offset="1" stop-color="#66a2d3"/></linearGradient></defs>
+<g class="pa"><polygon points="391.839,405.47 461.94,365.881 520.616,502.616 438.959,505.665" fill="#fff"/>
+<path d="M83 499 L262.338 101 L293.156 101 L297.302 180.97 L278.825 225.892 L257.739 213.547 C255.134 212.025 252.361 211.326 249.665 211.326 L249.656 211.326 L249.651 211.326 C247.22 211.326 244.843 211.892 242.699 212.923 C237.45 215.448 233.573 220.759 233.573 227.422 L233.573 233.183 L233.573 326.319 L155.763 499 Z" fill="#fff"/></g>
+<path class="pb" d="M297.302 180.97 L293.156 101 L316.231 101 L337.662 101 L397.098 234.559 C398.274 237.216 400.26 239.437 402.77 240.901 L471.915 281.271 C492.229 293.133 491.904 322.618 471.333 334.026 L271.188 447.056 C247.882 460.208 219.855 447.465 207.269 435.903 L233.441 377.821 C233.426 382.229 233.562 386.678 234.233 389.11 C237.034 399.275 249.552 403.717 260.05 398.273 C270.657 392.768 286.363 383.452 307.155 370.984 C334.35 354.677 370.246 332.977 414.814 307.358 C415.528 306.946 415.532 305.914 414.818 305.494 L337.876 260.459 C336.883 259.876 336.094 258.999 335.619 257.947 L298.824 177.271 Z" fill="url(#spg2)"/>
+<path class="pc" d="M360.709 299.135 L269.126 245.527 C263.774 242.395 257.045 246.259 257.045 252.461 L257.045 358.719 C257.045 364.891 263.719 368.76 269.068 365.682 L360.655 313.035 C366.003 309.961 366.033 302.25 360.709 299.135 Z" fill="url(#spg3)"/></svg>
+<div class="nm">Ani<i>Syns</i></div><div class="tg">The way to watch Anime with comfort!</div><div class="ld"></div></div>
+<script>try{var q=location.search.indexOf('splash=1')>=0;if(!q&&(document.documentElement.dataset.ios!=='1'||sessionStorage.getItem('splashed')))document.getElementById('splash').remove();else if(!q)sessionStorage.setItem('splashed','1')}catch(e){}</script>
 <div id="root"></div>
 <nav id="tabs"></nav>
 <div id="layer"></div>
@@ -8709,6 +8743,7 @@ input,select,textarea{font-size:16px}
 <script>
 'use strict';
 const $ = (s, el = document) => el.querySelector(s);
+setTimeout(() => { const sp = document.getElementById('splash'); if (sp) { sp.classList.add('out'); setTimeout(() => sp.remove(), 700); } }, 2300);  // заставку лишаємо на екрані, поки програється анімація
 const IOS_APP = document.documentElement.dataset.ios === '1';  // працюємо всередині iPhone-застосунку
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ls = {
