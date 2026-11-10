@@ -483,9 +483,9 @@ class AnimeApp(toga.App):
             async def _drop_cover(app, **kwargs):
                 import asyncio, time
                 t0 = time.time()
-                while anime_app.INDEX_SERVED[0] < t0 and time.time() - t0 < 8:  # чекаємо, поки сторінку віддано
-                    await asyncio.sleep(0.1)
-                await asyncio.sleep(0.7)  # і ще трохи — поки WebKit намалює перший кадр заставки
+                # знімаємо покривало, щойно сторінка САМА повідомила, що намалювала перший кадр (тоді ж стартує анімація заставки)
+                while anime_app.READY[0] < t0 and time.time() - t0 < 6:
+                    await asyncio.sleep(0.03)
                 try:
                     if getattr(self, '_cover', None) is not None:
                         self._cover.removeFromSuperview()

@@ -31,6 +31,7 @@ BASE_DIR = '.'  # папка з відео, library.json і кешем обкл�
 PORT = 8765
 HOST = '127.0.0.1'
 INDEX_SERVED = [0.0]
+READY = [0.0]  # коли сторінка вперше намалювалась (сигнал для iPhone-обгортки)
 IOS_APP = False  # true, коли працює всередині iPhone-застосунку (див. app.py): тоді сторінка сама враховує вирізи екрана
 
 
@@ -6782,6 +6783,7 @@ class Handler(BaseHTTPRequestHandler):
           '/api/delete_file': lambda: api_delete_file(b.get('id'), b.get('n')),
           '/api/beat': lambda: api_beat(b.get('closed')),
           '/api/diag': lambda: api_diag(b),
+          '/api/ready': lambda: (READY.__setitem__(0, time.time()), {'ok': True})[1],
           '/api/progress': lambda: api_progress(b.get('id'), b.get('n'), b.get('t', 0)),
           '/api/download': lambda: api_download(b.get('id'), b.get('episodes') or [], b.get('quality') or '720p'),
           '/api/cancel': lambda: api_cancel(b.get('job'), b.get('kid')),
@@ -8628,6 +8630,8 @@ input,select,textarea{font-size:16px}
 
 /* ---------- заставка при першому запуску (лише в iPhone-застосунку) ---------- */
 #splash{position:fixed;inset:0;z-index:99999;background:#0d0e13;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .55s ease,transform .55s ease;overflow:hidden}
+#splash:not(.go) *{animation-play-state:paused!important}
+#splash:not(.go) svg{animation-play-state:paused!important}
 #splash.out{opacity:0;transform:scale(1.06);pointer-events:none}
 #splash .glow{position:absolute;left:50%;top:50%;width:520px;height:520px;margin:-260px 0 0 -260px;border-radius:50%;background:radial-gradient(circle,#6d4cff55 0%,#4b6fe022 38%,transparent 70%);opacity:0;animation:spGlow 2.4s ease-out .1s forwards}
 #splash svg{width:176px;height:176px;position:relative;filter:drop-shadow(0 10px 30px #6d4cff66);animation:spPop .9s cubic-bezier(.2,.9,.25,1.15) .1s both}
@@ -8710,6 +8714,7 @@ input,select,textarea{font-size:16px}
 <path class="pc" d="M360.709 299.135 L269.126 245.527 C263.774 242.395 257.045 246.259 257.045 252.461 L257.045 358.719 C257.045 364.891 263.719 368.76 269.068 365.682 L360.655 313.035 C366.003 309.961 366.033 302.25 360.709 299.135 Z" fill="url(#spg3)"/></svg>
 <div class="nm">Ani<i>Syns</i></div><div class="tg">The way to watch Anime with comfort!</div><div class="ld"></div></div>
 <script>try{var q=location.search.indexOf('splash=1')>=0;if(!q&&(document.documentElement.dataset.ios!=='1'||sessionStorage.getItem('splashed')))document.getElementById('splash').remove();else if(!q)sessionStorage.setItem('splashed','1')}catch(e){}</script>
+<script>requestAnimationFrame(function(){requestAnimationFrame(function(){var s=document.getElementById('splash');if(s)s.classList.add('go');try{fetch('/api/ready',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})}catch(e){}})})</script>
 <div id="root"></div>
 <nav id="tabs"></nav>
 <div id="layer"></div>
