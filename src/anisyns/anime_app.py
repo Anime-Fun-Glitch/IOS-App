@@ -30,6 +30,7 @@ MAX_WORKERS = 12
 BASE_DIR = '.'  # папка з відео, library.json і кешем обкладинок
 PORT = 8765
 HOST = '127.0.0.1'
+INDEX_SERVED = [0.0]
 IOS_APP = False  # true, коли працює всередині iPhone-застосунку (див. app.py): тоді сторінка сама враховує вирізи екрана
 
 
@@ -6687,6 +6688,7 @@ class Handler(BaseHTTPRequestHandler):
       p = u.path
       if p in ('/', '/index.html'):
         html = INDEX_HTML.replace('<html ', '<html data-ios="1" ', 1) if IOS_APP else INDEX_HTML
+        INDEX_SERVED[0] = time.time()  # для iPhone-обгортки: сторінку віддано — темне «покривало» можна знімати
         return self._bytes(html.encode('utf8'), 'text/html; charset=utf-8', extra={'Cache-Control': 'no-store'})
       if p == '/api/library':
         with LOCK:

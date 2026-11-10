@@ -404,6 +404,26 @@ def _darken(window):
         pass
 
 
+def _cover_add(window):
+    """Темне «покривало» поверх усього вікна: ховає біле мерехтіння, поки WebKit запускає свій процес і малює першу сторінку."""
+    try:
+        from rubicon.objc import ObjCClass
+        win = window._impl.native
+        try:
+            win.overrideUserInterfaceStyle = 2  # завжди темне оформлення системних елементів
+        except Exception:
+            pass
+        c = ObjCClass('UIColor').colorWithRed(0.051, green=0.055, blue=0.075, alpha=1.0)
+        v = ObjCClass('UIView').alloc().initWithFrame(win.bounds)
+        v.backgroundColor = c
+        v.autoresizingMask = 18  # на всю ширину й висоту
+        v.userInteractionEnabled = False
+        win.addSubview(v)
+        return v
+    except Exception:
+        return None
+
+
 def _boot_server(app_obj):
     """Важка частина запуску (імпорт великого модуля й старт сервера) — поза головним потоком, щоб екран не «замерзав»."""
     from anisyns import anime_app
@@ -420,6 +440,7 @@ class AnimeApp(toga.App):
         self.main_window.content = toga.Box(style=Pack(flex=1, background_color='#0d0e13'))
         _darken(self.main_window)
         self.main_window.show()
+        self._cover = _cover_add(self.main_window)
         _hide_nav_bar(self.main_window)
         _darken(self.main_window)
         try:
@@ -440,6 +461,11 @@ class AnimeApp(toga.App):
         if url is None:
             self.main_window.content = toga.MultilineTextInput(
                 readonly=True, value='Не вдалося запустити:\n\n' + err, style=Pack(flex=1))
+            try:
+                if getattr(self, '_cover', None) is not None:
+                    self._cover.removeFromSuperview()
+            except Exception:
+                pass
             return
         self._attach(url)
 
@@ -453,6 +479,24 @@ class AnimeApp(toga.App):
             _audio_session()
             self._native_wv, view = _native_webview(self, url)
             wv = self._native_wv
+
+            async def _drop_cover(app, **kwargs):
+                import asyncio, time
+                t0 = time.time()
+                while anime_app.INDEX_SERVED[0] < t0 and time.time() - t0 < 8:  # чекаємо, поки сторінку віддано
+                    await asyncio.sleep(0.1)
+                await asyncio.sleep(0.7)  # і ще трохи — поки WebKit намалює перший кадр заставки
+                try:
+                    if getattr(self, '_cover', None) is not None:
+                        self._cover.removeFromSuperview()
+                        self._cover = None
+                except Exception:
+                    pass
+            try:
+                self.add_background_task(_drop_cover)
+            except Exception:
+                import asyncio
+                asyncio.ensure_future(_drop_cover(self))
 
             async def _bg(app, **kwargs):
                 await _inset_loop(app, wv, view)
@@ -472,6 +516,11 @@ class AnimeApp(toga.App):
             except Exception:
                 pass
             self.main_window.content = self.webview
+            try:
+                if getattr(self, '_cover', None) is not None:
+                    self._cover.removeFromSuperview()
+            except Exception:
+                pass
 
 
 def main():
