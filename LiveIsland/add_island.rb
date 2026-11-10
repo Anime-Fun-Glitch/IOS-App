@@ -4,7 +4,7 @@ proj_path, app_name = ARGV[0], ARGV[1]
 proj = Xcodeproj::Project.open(proj_path)
 app = proj.targets.find { |t| t.name == app_name } || proj.targets.find { |t| t.product_type == 'com.apple.product-type.application' }
 abort("target not found") unless app
-bid = app.build_configurations.first.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] || 'com.animeoffline.animeios'
+bid = app.build_configurations.first.build_settings['PRODUCT_BUNDLE_IDENTIFIER'] || 'com.watch.anisyns'
 puts "App target: #{app.name}, bundle id: #{bid}"
 
 group = proj.main_group.new_group('LiveIsland', 'LiveIsland')

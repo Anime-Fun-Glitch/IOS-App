@@ -2,23 +2,23 @@
 requires = ["briefcase"]
 
 [tool.briefcase]
-project_name = "Anime"
-bundle = "com.animeoffline"
+project_name = "AniSyns"
+bundle = "com.watch"
 version = "1.0.0"
-url = "https://example.com/anime"
+url = "https://github.com/Anime-Fun-Glitch/IOS-App"
 license = "LicenseRef-Personal-Use"
 license-files = ["LICENSE"]
-author = "Me"
-author_email = "me@example.com"
+author = "SberKon"
+author_email = "noreply@users.noreply.github.com"
 
-[tool.briefcase.app.animeios]
-formal_name = "Anime"
-description = "Особистий офлайн-застосунок для аніме"
-icon = "resources/animeios"
-sources = ["src/animeios"]
+[tool.briefcase.app.anisyns]
+formal_name = "AniSyns"
+description = "The way to watch Anime with comfort!"
+icon = "resources/anisyns"
+sources = ["src/anisyns"]
 requires = ["requests"]
 
-[tool.briefcase.app.animeios.iOS]
+[tool.briefcase.app.anisyns.iOS]
 requires = ["toga-iOS"]
 info."UIFileSharingEnabled" = true
 info."LSSupportsOpeningDocumentsInPlace" = true
