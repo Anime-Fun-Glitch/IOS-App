@@ -4236,26 +4236,61 @@ def _img_fail(url, ref, why):
 
 
 _SHRINK = {}
+_SHRINK_SEM = threading.Semaphore(2)  # не більше двох одночасних розпакувань: великий постер у пам'яті — десятки МБ
 
 
-def _shrink_img(url, data, ct):
-  """Великі постери (напр. YummyAnime «full») зменшуємо до ~420 px: розпакована картинка в WebView інакше їсть пам'ять. Без Pillow — віддаємо як є."""
-  if len(data) < 60000:
+def _shrink_img(url, data, ct, maxw=720):
+  """Великі постери зменшуємо до ~720 px і кешуємо на диску: розпакована картинка 4000×6000 у WebView займає ~100 МБ, і десяток таких убивають застосунок.
+  Потрібен Pillow (у збірці iOS додається в pyproject). Без нього — віддаємо як є."""
+  if len(data) < 40000:
     return data, ct
   hit = _SHRINK.get(url)
   if hit:
     return hit
+  fp = os.path.join(BASE_DIR, '.cache', 'img_s', hashlib.sha1((url + '|%d' % maxw).encode()).hexdigest()[:20])
+  try:
+    if os.path.exists(fp) and os.path.getsize(fp) > 64:
+      with open(fp, 'rb') as f:
+        res = (f.read(), 'image/jpeg')
+      if len(_SHRINK) > 80:
+        _SHRINK.pop(next(iter(_SHRINK)), None)
+      _SHRINK[url] = res
+      return res
+  except OSError:
+    pass
   try:
     from PIL import Image
+  except Exception:
+    return data, ct
+  try:
     import io
-    im = Image.open(io.BytesIO(data))
-    if im.width <= 480:
-      return data, ct
-    h = max(1, int(im.height * 420 / im.width))
-    im = im.convert('RGB').resize((420, h))
-    out = io.BytesIO()
-    im.save(out, 'JPEG', quality=80)
-    res = (out.getvalue(), 'image/jpeg')
+    with _SHRINK_SEM:
+      im = Image.open(io.BytesIO(data))
+      if getattr(im, 'is_animated', False) or im.width <= maxw + 40:
+        return data, ct
+      h = max(1, int(im.height * maxw / im.width))
+      try:
+        im.draft('RGB', (maxw, h))  # JPEG розпаковується одразу зменшеним (1/2, 1/4, 1/8) — без піку пам'яті
+      except Exception:
+        pass
+      if im.mode in ('RGBA', 'LA', 'P'):
+        im = im.convert('RGBA')
+        bg = Image.new('RGB', im.size, (13, 14, 19))
+        bg.paste(im, mask=im.split()[-1])
+        im = bg
+      else:
+        im = im.convert('RGB')
+      im = im.resize((maxw, h), Image.BILINEAR, reducing_gap=2.0)
+      out = io.BytesIO()
+      im.save(out, 'JPEG', quality=82)
+      res = (out.getvalue(), 'image/jpeg')
+    try:
+      os.makedirs(os.path.dirname(fp), exist_ok=True)
+      with open(fp + '.tmp', 'wb') as f:
+        f.write(res[0])
+      os.replace(fp + '.tmp', fp)
+    except OSError:
+      pass
     if len(_SHRINK) > 80:
       _SHRINK.pop(next(iter(_SHRINK)), None)
     _SHRINK[url] = res
@@ -6261,7 +6296,7 @@ def api_settings(data=None):
     with open(_settings_path(), 'w', encoding='utf8') as f:
       json.dump(SETTINGS, f)
     if data and 'logging' in data:
-      _log_on() if SETTINGS.get('logging') else _log_off()
+      _log_on() if _logging() else _log_off()
     if data and 'multitask' in data:
       _apply_multitask()
   d = dict(SETTINGS)
@@ -6707,6 +6742,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(api_storage())
       if p == '/api/settings':
         return self._json(api_settings())
+      if p == '/api/lastreport':
+        return self._json(api_lastreport())
       if p == '/api/search_status':
         return self._json(api_search_status(q.get('task')))
       if p == '/api/lookup_status':
@@ -6843,6 +6880,7 @@ class Handler(BaseHTTPRequestHandler):
     with open(pf, 'rb') as f:
       data = f.read()
     ctype = POSTER_TYPES.get(os.path.splitext(pf)[1].lower(), 'image/jpeg')
+    data, ctype = _shrink_img('poster:' + pf + ':' + str(int(os.path.getmtime(pf))), data, ctype)
     self._bytes(data, ctype, extra={'Cache-Control': 'max-age=86400'})
 
   def _img(self, url, retry=None, rel=False):
@@ -6857,8 +6895,7 @@ class Handler(BaseHTTPRequestHandler):
     if not got:
       return self._json({'error': 'image unavailable'}, 404)
     data, ct = got
-    if not rel:
-      data, ct = _shrink_img(url, data, ct)
+    data, ct = _shrink_img(url, data, ct)
     self._bytes(data, ct, extra={'Cache-Control': 'public, max-age=604800'})
 
   def _media(self, path):
@@ -7686,9 +7723,17 @@ def _state_text():
           f"мережа: {_NET.get('v')}\nзавантаження: {run}\nостанні запити:\n  " + '\n  '.join(list(RECENT)[-20:]))
 
 
+_IS_IOS = sys.platform == 'ios'
+
+
+def _logging():
+  """Мінімальний журнал збоїв (пульс, fatal.log, звіт про обірваний запуск) на iPhone/iPad працює завжди: інакше після краша немає чого показати."""
+  return bool(SETTINGS.get('logging')) or _IS_IOS
+
+
 def crash_report(kind, text):
   # пише файл звіту в папку crash_reports (зберігається не більше 40 файлів); лише коли логування увімкнено
-  if not SETTINGS.get('logging'):
+  if not _logging():
     return
   try:
     _CR['n'] += 1
@@ -7741,7 +7786,7 @@ def _heartbeat_loop():
       except Exception:
         pass
     try:
-      if not SETTINGS.get('logging'):
+      if not _logging():
         raise OSError  # логування вимкнено — «пульс» на диск не пишемо
       with open(p, 'w', encoding='utf8') as f:
         json.dump({'t': time.time(), 'mem': _mem_mb(), 'avail_mb': av, 'avail_min_mb': _MEM_MIN[0], 'threads': threading.active_count(), 'inflight': _inflight_list(), 'page': dict(DIAG), 'recent': list(RECENT)[-20:]}, f, ensure_ascii=False)
@@ -7777,15 +7822,15 @@ def _log_off():
 def crash_init():
   # виявляє, що минулий запуск обірвався, і ставить перехоплювачі винятків та фатальних збоїв
   try:
-    if SETTINGS.get('logging'):
+    if _logging():
       _log_on()
     d = os.path.join(BASE_DIR, 'crash_reports')
     p = os.path.join(d, 'alive.json')
-    if SETTINGS.get('logging') and os.path.exists(p):
+    if _logging() and os.path.exists(p):
       try:
         j = json.load(open(p, encoding='utf8'))
         age = time.time() - j.get('t', 0)
-        txt = ("Попередній запуск обірвався (наприклад, iOS закрив Carnets через нестачу пам'яті, або клітинку зупинили).\n"
+        txt = ("Попередній запуск завершився (iOS могла закрити застосунок через нестачу пам'яті, або його закрили вручну).\n"
                f"Останній подих: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(j.get('t', 0)))} ({int(age // 60)} хв тому)\n"
                f"стан сторінки (JS): {j.get('page')}\n"
                f"пам'ять (пік): {j.get('mem')} МБ, вільно до ліміту iOS: {j.get('avail_mb')} МБ (мінімум {j.get('avail_min_mb')}), потоків: {j.get('threads')}\nвиконувалось у момент обриву: {j.get('inflight')}\nостанні запити:\n  " + '\n  '.join(j.get('recent') or []))
@@ -7809,6 +7854,44 @@ def crash_init():
     threading.Thread(target=_heartbeat_loop, daemon=True).start()
   except Exception:
     pass
+
+
+def api_lastreport():
+  """Тексти останніх звітів про завершення запусків + хвіст fatal.log: показуємо в застосунку, бо файли з iPhone дістати непросто."""
+  d = _crash_dir()
+  out = []
+  try:
+    files = sorted(x for x in os.listdir(d) if x.endswith('.txt') and 'previous_run_ended' in x)[-3:]
+    for fn in reversed(files):
+      with open(os.path.join(d, fn), encoding='utf8') as f:
+        out.append('=== ' + fn + ' ===\n' + f.read()[:2500])
+  except Exception as ex:
+    out.append('звіти недоступні: ' + str(ex))
+  try:
+    fp = os.path.join(d, 'fatal.log')
+    if os.path.exists(fp):
+      with open(fp, encoding='utf8', errors='replace') as f:
+        t = f.read()
+      if t.strip() and len(t.strip().splitlines()) > 2:
+        out.append('=== fatal.log (хвіст) ===\n' + t[-2500:])
+  except Exception:
+    pass
+  try:
+    others = sorted(x for x in os.listdir(d) if x.endswith('.txt') and 'previous_run_ended' not in x)[-4:]
+    for fn in reversed(others):
+      with open(os.path.join(d, fn), encoding='utf8') as f:
+        out.append('=== ' + fn + ' ===\n' + f.read()[:1500])
+  except Exception:
+    pass
+  return {'text': '\n\n'.join(out) or 'Звітів поки немає.', 'pillow': _has_pillow()}
+
+
+def _has_pillow():
+  try:
+    import PIL  # noqa: F401
+    return True
+  except Exception:
+    return False
 
 
 def api_clientlog(msg):
@@ -8548,6 +8631,33 @@ button:active,.card:active,.btn:active,.ib:active,#tabs a:active,.dchip:active{t
 .job .st{display:flex;align-items:center;gap:6px}
 .job .dub{font-weight:500;color:var(--mu);font-size:12px}
 .job .h .btn{flex:none}
+/* ---------- iPad і широкі екрани ---------- */
+@media (min-width:700px){
+  .grid{grid-template-columns:repeat(auto-fill,minmax(172px,1fr));gap:16px;padding:16px 20px}
+  .grid.c3{grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px;padding:16px 20px}
+  .grid.c3 .card .t{font-size:13px}
+  .set,.grp{margin-left:auto;margin-right:auto;max-width:760px}
+  #root.settings-pg>*:not(.bar){max-width:760px;margin-left:auto;margin-right:auto}
+  .epgrid{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+  .desc{font-size:15px}
+}
+@media (min-width:900px){
+  #root.detail{max-width:1320px;margin:0 auto}
+  #root.detail .dcols{display:grid;grid-template-columns:minmax(340px,420px) minmax(0,1fr);gap:8px 28px;align-items:start;padding:0 20px}
+  #root.detail .dl{position:sticky;top:calc(var(--barh,58px) + 12px);max-height:calc(100vh - var(--barh,58px) - 100px);overflow-y:auto;overflow-x:hidden;scrollbar-width:none;margin-top:12px}
+  #root.detail .dl::-webkit-scrollbar{display:none}
+  #root.detail .dl .hero{border-radius:20px;margin-bottom:12px}
+  #root.detail .dl .hero .pic{flex-basis:132px}
+  #root.detail .dl .srcs,#root.detail .dl .acts,#root.detail .dl .desc,#root.detail .dl .more,#root.detail .dl .dubs,#root.detail .dl .tmpbar{padding-left:4px;padding-right:4px;margin-left:0;margin-right:0}
+  #root.detail .dr{min-width:0}
+  #root.detail .dr .dtabs{margin:12px 0 8px}
+  #root.detail .dr .tools,#root.detail .dr .hint,#root.detail .dr .foot{padding-left:0;padding-right:0}
+  #root.detail .dr .eps{margin:0}
+  #root.detail .dr .epgrid{margin:0}
+}
+@media (min-width:1100px){
+  .grid.c3{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+}
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 .card .cd{white-space:nowrap;margin:0 0 5px;padding:2px 8px;border-radius:8px;font-size:11px;background:#000a;backdrop-filter:blur(4px)}
 .card .cd .i{width:12px;height:12px}
@@ -9042,6 +9152,7 @@ function render() {
   if (r.name === 'settings' || r.name === 'storage') storLoad();
   if (S.tabKey !== tab) { S.tabKey = tab; $('#tabs').innerHTML = tabsHTML(tab); }
   root.classList.toggle('detail', r.name === 'detail');
+  root.classList.toggle('settings-pg', r.name === 'settings' || r.name === 'storage');
   root.classList.toggle('fill', r.name === 'home' || r.name === 'group');
   if (r.name === 'detail') maybeWarm(r.id);
   if (S.scrollEp && r.name === 'detail' && r.id === S.scrollEp.kid) {  // з повідомлення: прокручуємо до нової серії, але не вмикаємо її
@@ -9531,6 +9642,8 @@ function settingsHTML() {
     <label class="sw"><input type="checkbox" data-set="blur_thumbs" ${S.set.blur_thumbs ? 'checked' : ''}></label></div>
   <div class="set"><div class="tx"><b>Вести логи</b><span>Журнали збоїв для діагностики.</span></div>
     <label class="sw"><input type="checkbox" data-set="logging" ${S.set.logging ? 'checked' : ''}></label></div>
+  <div class="set"><div class="tx"><b>Звіт про останні запуски</b><span>Що було перед вильотом: пам'ять, запити, стан плеєра.</span></div>
+    <button class="btn sm" data-act="lastrep">Показати</button></div>
   ${IOS_APP ? `<div class="set"><div class="tx"><b>Штатний WebView (діагностика)</b><span>Замість власної оболонки — стандартний WebView Toga, без фонових циклів. Діє після перезапуску застосунку.</span></div>
     <label class="sw"><input type="checkbox" data-set="plain_wv" ${S.set.plain_wv ? 'checked' : ''}></label></div>` : ''}
   <div class="set"><div class="tx"><b>Багатозадачність</b><span>До 3 серій одночасно й більше паралельних запитів. Швидше, але більше пам'яті й батареї.</span></div>
@@ -9775,6 +9888,7 @@ function detailHTML(id) {
   return `
   <div class="bar"><button class="back" data-act="${tmp ? 'back' : 'home'}">‹ ${tmp ? 'Назад' : 'Бібліотека'}</button><h1></h1>${netHTML()}
     <button class="ib" data-act="jobs" aria-label="Завантаження">${ico('download')}${dlN ? `<span class="dot">${dlN}</span>` : ''}</button></div>
+  <div class="dcols"><div class="dl">
   <div class="hero">
     <div class="bg"${p ? ` style="background-image:url('${esc(p)}')"` : ''}></div>
     <div class="row">
@@ -9799,6 +9913,7 @@ function detailHTML(id) {
     <button class="btn" data-act="site" data-id="${it.id}" aria-label="Відкрити сайт (подвійний тап — скопіювати посилання)">${ico('globe')}</button>
   </div>
   ${desc ? `<div class="desc ${S.descOpen ? '' : 'cl'}">${esc(desc)}</div>${desc.length > 220 ? `<button class="more" data-act="more">${S.descOpen ? 'Згорнути' : 'Читати далі'}</button>` : ''}` : ''}
+  </div><div class="dr">
   ${tabsHTML}
   ${onEps ? `<div class="tools">
     ${sm ? `<button class="btn sm on" data-act="selmode">${ico('check')} Готово</button>
@@ -9818,6 +9933,7 @@ function detailHTML(id) {
   ${eps ? `<div class="${cardsMode ? 'epgrid' : 'eps'}">${eps}</div>` : '<div class="eps"><div style="padding:18px;color:var(--mu)">Серій поки немає.</div></div>'}` : S.dtab === 'cm' ? commentsHTML(it) : relHTML(it)}
   ${tmp ? '' : `<div class="foot"><button class="btn sm" data-act="archive" style="margin-right:8px">${ico('check')} ${it.archived ? 'Повернути з переглянутих' : 'Переглянуто — в архів'}</button><button class="btn dng sm" data-act="remove">${ico('trash')} Видалити з бібліотеки</button></div>
   <p style="text-align:center;color:var(--mu);font-size:12px;margin-top:14px">Остання перевірка: ${esc(it.checked || '—')}</p>`}
+  </div></div>
   ${sel && onEps ? `<div class="dlbar">${dlbarInner(it)}</div><div class="dlsp" style="height:150px"></div>` : ''}`;
 }
 
@@ -10103,6 +10219,9 @@ function renderSheet() {
      <button class="btn pri" data-act="dlg-yes" style="flex:1">Готово</button></div>`;
   else if (s.kind === 'opening') inner = `<h3>${esc(s.title || 'Відкриваю…')}</h3><div class="findbox"><span class="spin">${ico('spinner')}</span><div class="tx"><b id="opstage">${esc(s.stage || 'Підключаюсь до сайту…')}</b></div>
      <button class="btn sm" data-act="opencancel">${ico('close')} Скасувати</button></div>`;
+  else if (s.kind === 'report') inner = `<h3>Звіт про запуски</h3><p class="hint" style="margin:0 0 8px;font-size:12px">Pillow: ${s.pillow ? 'є — постери стискаються' : 'немає — постери не стискаються'}. Зробіть знімок екрана й надішліть.</p>
+     <pre style="white-space:pre-wrap;word-break:break-word;font-size:11px;line-height:1.35;background:#0006;border-radius:10px;padding:10px;max-height:52vh;overflow:auto;user-select:text">${esc(s.text || '')}</pre>
+     <div class="row2"><button class="btn pri" data-act="dlg-no" style="flex:1">Закрити</button></div>`;
   else if (s.kind === 'confirm') inner = `<h3>${esc(s.title)}</h3><p style="color:var(--mu);white-space:pre-line">${esc(s.text || '')}</p>
      <div class="row2"><button class="btn" data-act="dlg-no" style="flex:1">Скасувати</button>
      <button class="btn ${s.danger ? 'dng' : 'pri'}" data-act="dlg-yes" style="flex:1">${esc(s.ok || 'Так')}</button></div>`;
@@ -10594,6 +10713,7 @@ const A = {
     const ids = [...S.libSel].filter(id => item(id) && item(id).group); if (!ids.length) return;
     try { await api('/api/ungroup', {ids}); S.libSel.clear(); await loadLib(); toast('Розгруповано', false, 'check'); } catch (e) { toast(e.message, true); }
   },
+  async lastrep() { try { const j = await api('/api/lastreport'); openSheet('report', {text: j.text, pillow: j.pillow}); } catch (e) { toast(e.message, true); } },
   stgo() { const e = document.getElementById('stanime'); if (e) { const y = e.getBoundingClientRect().top + window.scrollY - 12; window.scrollTo({top: y, behavior: 'smooth'}); e.classList.remove('flash'); void e.offsetWidth; e.classList.add('flash'); } },
   stback() { location.hash = '#/settings'; },
   async stclear(el) {
