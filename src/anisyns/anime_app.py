@@ -6251,7 +6251,7 @@ def net_state():
 SETTINGS = {'mobile_download': False, 'auto_skip': False, 'auto_skip_opening': True, 'auto_skip_ending': True, 'auto_next': True,
             'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': True, 'ios_player': True, 'np_ep_cover': True,
             'bg_keep': True, 'bg_check': False, 'island': True, 'island_dl': True, 'island_check': False,
-            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'recent_min': 3, 'client': {},
+            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'recent_min': 3, 'handoff': False, 'client': {},
             'site_order': ['aniliberty', 'yummyani', 'animevost', 'animru'], 'view': {}}
 
 
@@ -6839,11 +6839,14 @@ class Handler(BaseHTTPRequestHandler):
           '/api/diag': lambda: api_diag(b),
           '/api/sync_cfg': lambda: api_sync_cfg(b),
           '/api/sync_scan': lambda: api_sync_scan(),
-          '/api/sync_add': lambda: api_sync_add(b.get('addr'), b.get('port')),
+          '/api/sync_pairmode': lambda: api_sync_pairmode(bool(b.get('on'))),
           '/api/sync_pair': lambda: api_sync_pair(b.get('id')),
           '/api/sync_code': lambda: api_sync_code(b.get('code')),
           '/api/sync_unpair': lambda: api_sync_unpair(b.get('id')),
           '/api/sync_now': lambda: api_sync_now(),
+          '/api/sync_xfer': lambda: api_sync_xfer(b.get('id'), b.get('mode')),
+          '/api/sync_push_settings': lambda: api_sync_push_settings(b.get('peer')),
+          '/api/sync_offer': lambda: api_sync_offer_answer(b.get('hid'), bool(b.get('ok'))),
           '/api/sync_alias': lambda: api_sync_alias(b.get('id'), b.get('name')),
           '/api/sync_cast': lambda: api_sync_cast(b.get('peer'), b),
           '/api/sync_rc': lambda: api_sync_rc(b.get('peer'), b.get('c'), b.get('v')),
@@ -7940,7 +7943,7 @@ SYNC_DISC_PORT = 8791
 SYNC_PROTO = 1
 SYNC_LOCK = threading.RLock()
 SYNC = {'st': None, 'srv': None, 'srv_err': '', 'started': False, 'found': {}, 'pending': None, 'pair_out': None, 'gen': 0,
-        'status': {}, 'wake': threading.Event(), 'scanning': 0.0, 'last_rescan': 0.0}
+        'status': {}, 'wake': threading.Event(), 'scanning': 0.0, 'last_rescan': 0.0, 'pair_until': 0.0, 'last_scan': 0.0}
 SYNC_SETTINGS_KEYS = ['auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'auto_check', 'auto_check_hours', 'blur_thumbs',
                       'np_ep_cover', 'skip_mode', 'vol_max', 'own_vol', 'recent_min', 'site_order']
 SYNC_BASE_FIELDS = ['url', 'title', 'dubbing', 'base_dub', 'all_dubs', 'folder', 'known', 'ep_titles', 'meta', 'sources', 'poster_v']
@@ -7967,7 +7970,7 @@ def _sync_state():
     st.setdefault('id', uuid.uuid4().hex[:16])
     st.setdefault('epoch', uuid.uuid4().hex[:12])
     st.setdefault('name', 'iPhone' if nm.lower() in ('localhost', 'iphone', '') else nm)
-    for k, v in (('enabled', False), ('sync_settings', False), ('seq', 0), ('clock', 0), ('regs', {}), ('last', {}), ('peers', {}), ('kind', 'phone'), ('name_user', False)):
+    for k, v in (('sync', bool(st.get('enabled'))), ('sync_settings', False), ('seq', 0), ('clock', 0), ('regs', {}), ('last', {}), ('peers', {}), ('kind', 'phone'), ('name_user', False)):
       st.setdefault(k, v)
     SYNC['st'] = st
     return st
@@ -8048,7 +8051,20 @@ def _sync_scan():
       if last.get(k) == hs:
         continue
       v = _sync_base(key, library[key]) if k.startswith('i/') and key in library else val
-      _sync_set(st, k, v, me)
+      ts = None
+      if k not in last and k not in st['regs']:
+        # Вперше бачимо цей запис (пристрій довго не синхронізувався або щойно підключений): ставимо не «зараз», а час, коли
+        # аніме було додано/востаннє дивились, інакше стара бібліотека воскресила б усе, що інші пристрої давно видалили
+        try:
+          kid = k.split('/')[1]
+          _k, e = _sync_find(kid)
+          if e is not None:
+            ts = int(float(max(e.get('added_ts') or 0, e.get('last_watch') or 0 if not k.startswith('i/') else 0)) * 1000) or None
+            if ts and ts > int(time.time() * 1000):
+              ts = None
+        except Exception:
+          ts = None
+      _sync_set(st, k, v, me, ts)
       last[k] = hs
       changed = True
     for k in [k for k in last if k not in snap]:
@@ -8221,10 +8237,16 @@ def _sync_hello(addr, port=SYNC_PORT, timeout=0.6):
   return d
 
 
+def _pairing():
+  return time.time() < SYNC['pair_until']
+
+
 def _sync_note_found(pid, name, addr, port, kind='phone'):
   st = _sync_state()
   if pid == st['id']:
     return
+  if not _pairing() and pid not in st['peers']:
+    return  # нові пристрої шукаємо лише коли відкрите меню підключення
   SYNC['found'][pid] = {'id': pid, 'name': name, 'addr': addr, 'port': port, 'kind': kind, 'ts': time.time()}
   p = st['peers'].get(pid)
   if p and (p.get('addr') != addr or p.get('port') != port or p.get('kind') != kind):
@@ -8282,15 +8304,13 @@ class _SyncHandler(BaseHTTPRequestHandler):
 
   def do_GET(self):
     st = _sync_state()
-    if urlparse(self.path).path == '/sync/hello' and st.get('enabled'):
+    if urlparse(self.path).path == '/sync/hello':
       return self._send({'app': 'anisyns', 'proto': SYNC_PROTO, 'id': st['id'], 'name': st['name'], 'kind': st['kind'], 'port': SYNC_PORT})
     self._send({'error': 'not found'}, 404)
 
   def do_POST(self):
     try:
       st = _sync_state()
-      if not st.get('enabled'):
-        return self._send({'error': 'Синхронізація вимкнена'}, 403)
       path = urlparse(self.path).path
       n = int(self.headers.get('Content-Length') or 0)
       if n > 40 * 1024 * 1024:
@@ -8298,6 +8318,8 @@ class _SyncHandler(BaseHTTPRequestHandler):
       raw = self.rfile.read(n) if n else b''
       body = json.loads(raw.decode('utf8') or '{}')
       ip = self.client_address[0]
+      if path in ('/sync/pair_request', '/sync/pair_confirm') and not _pairing():
+        return self._send({'error': 'Інший пристрій не відкрив меню підключення'}, 403)
       if path == '/sync/pair_request':
         code = '%04d' % secrets.randbelow(10000)
         SYNC['pending'] = {'id': str(body.get('id')), 'name': str(body.get('name') or '')[:40], 'kind': str(body.get('kind') or 'phone')[:10], 'ip': ip, 'code': code,
@@ -8328,6 +8350,8 @@ class _SyncHandler(BaseHTTPRequestHandler):
         return self._send({'error': 'Не авторизовано'}, 401)
       peer['addr'] = ip
       if path == '/sync/exchange':
+        if not st.get('sync'):
+          return self._send({'error': 'Синхронізація вимкнена', 'off': True}, 403)
         _sync_scan()
         with SYNC_LOCK:
           _sync_apply(st, body.get('regs') or {})
@@ -8362,7 +8386,16 @@ def _sync_command(body):
       return {'ok': True, 'queued': r.get('queued', 0)}
     except Exception as ex:
       return {'ok': False, 'error': str(ex)[:200]}
+  if body.get('type') == 'settings_offer':
+    vals = body.get('settings')
+    if isinstance(vals, dict):
+      SYNC['offer'] = {'hid': uuid.uuid4().hex[:10], 'from': str(body.get('from') or '')[:30], 'n': len(vals), 'settings': {k: v for k, v in vals.items() if k in SYNC_SETTINGS_KEYS}, 'ts': time.time()}
+    return {'ok': True}
+  if body.get('type') == 'ping':
+    return {'ok': True, 'sync': bool(_sync_state().get('sync'))}
   if body.get('type') == 'handoff':
+    if not SETTINGS.get('handoff'):
+      return {'ok': False, 'error': 'На іншому пристрої вимкнено передачу сеансу'}
     item = body.get('item')
     if item:
       _sync_create(item)
@@ -8412,8 +8445,6 @@ def _sync_disc_recv():
   while True:
     try:
       data, addr = s.recvfrom(2048)
-      if not _sync_state().get('enabled'):
-        continue
       d = json.loads(data.decode('utf8'))
       if d.get('t') == 'anisyns' and d.get('id'):
         _sync_note_found(str(d['id']), str(d.get('name') or '')[:40], addr[0], int(d.get('port') or SYNC_PORT), str(d.get('kind') or 'phone'))
@@ -8467,19 +8498,24 @@ def _sync_loop():
     SYNC['wake'].wait(10)
     SYNC['wake'].clear()
     st = _sync_state()
-    if not st.get('enabled'):
-      continue
     n += 1
-    if n % 2 == 1:
+    lost = any(not (SYNC['status'].get(pid) or {}).get('ok') for pid in st['peers'])
+    if (_pairing() and n % 2 == 1) or (lost and n % 2 == 0):  # пристрій зник (змінилась мережа/IP) — кричимо, щоб він нас знайшов за id
       _sync_send_beacon()
-    try:
-      _sync_scan()
-    except Exception:
-      pass
+    if _pairing() and time.time() - SYNC['last_scan'] > 12:
+      SYNC['last_scan'] = time.time()
+      threading.Thread(target=_sync_scan_net, daemon=True).start()
+    if st.get('sync'):
+      try:
+        _sync_scan()
+      except Exception:
+        pass
     for pid in list(st['peers']):
       try:
-        r = _sync_exchange(pid)
-        SYNC['status'][pid] = {'ok': True, 't': time.time(), 'info': r}
+        r = _peer_cmd(pid, {'type': 'ping'}, 4)
+        SYNC['status'][pid] = {'ok': True, 't': time.time(), 'sync': bool(r.get('sync'))}
+        if st.get('sync') and r.get('sync'):
+          _sync_exchange(pid)
       except Exception as ex:
         SYNC['status'][pid] = {'ok': False, 't': time.time(), 'err': str(ex)[:90]}
         if time.time() - SYNC['last_rescan'] > 60:  # адреса могла змінитись — шукаємо пристрій за id
@@ -8518,9 +8554,8 @@ def _sync_stop():
 
 
 def _sync_boot():
-  st = _sync_state()
-  if st.get('enabled'):
-    _sync_run()
+  _sync_state()
+  _sync_run()
 
 
 def api_sync_state():
@@ -8530,9 +8565,9 @@ def api_sync_state():
   for pid, p in st['peers'].items():
     s = SYNC['status'].get(pid) or {}
     peers.append({'id': pid, 'name': p.get('alias') or p.get('name') or pid[:6], 'rname': p.get('name') or '', 'alias': p.get('alias') or '',
-                  'kind': p.get('kind') or 'phone', 'addr': p.get('addr'), 'last': p.get('last') or 0,
-                  'online': bool(s.get('ok') and now - s.get('t', 0) < 45), 'err': '' if s.get('ok') or not s else s.get('err', '')})
-  found = [f for f in SYNC['found'].values() if now - f['ts'] < 90 and f['id'] not in st['peers']]
+                  'kind': p.get('kind') or 'phone', 'xfer': p.get('xfer') or 'std', 'addr': p.get('addr'), 'last': p.get('last') or 0,
+                  'online': bool(s.get('ok') and now - s.get('t', 0) < 45), 'err': '' if s.get('ok') or not s else s.get('err', ''), 'sync': bool(s.get('sync'))})
+  found = [f for f in SYNC['found'].values() if now - f['ts'] < 40 and f['id'] not in st['peers']] if _pairing() else []
   pd = SYNC['pending']
   if pd and time.time() > pd['exp']:
     SYNC['pending'] = pd = None
@@ -8542,7 +8577,7 @@ def api_sync_state():
   ho = SYNC.get('handoff')
   if ho and time.time() - ho['ts'] > 600:
     SYNC['handoff'] = ho = None
-  return {'handoff': ho, 'kind': st['kind'], 'enabled': bool(st['enabled']), 'name': st['name'], 'id': st['id'], 'sync_settings': bool(st['sync_settings']), 'peers': peers,
+  return {'offer': ({k: v for k, v in SYNC['offer'].items() if k != 'settings'} if SYNC.get('offer') else None), 'handoff': ho, 'kind': st['kind'], 'sync': bool(st['sync']), 'enabled': bool(st['sync']), 'pairing': _pairing(), 'handoff_on': bool(SETTINGS.get('handoff')), 'name': st['name'], 'id': st['id'], 'sync_settings': bool(st['sync_settings']), 'peers': peers,
           'found': found, 'incoming': {'name': pd['name'], 'code': pd['code']} if pd else None,
           'outgoing': {'name': po['name'], 'id': po['id']} if po else None, 'gen': SYNC['gen'], 'ip': _local_ip(), 'port': SYNC_PORT,
           'err': SYNC['srv_err'], 'scanning': now - SYNC['scanning'] < 8}
@@ -8561,20 +8596,36 @@ def api_sync_cfg(d):
         st['name'], st['name_user'] = nm, True
     if 'sync_settings' in d:
       st['sync_settings'] = bool(d['sync_settings'])
-    if 'enabled' in d:
-      st['enabled'] = bool(d['enabled'])
+    if 'sync' in d:
+      st['sync'] = bool(d['sync'])
     _sync_save()
-  if st['enabled']:
-    _sync_run()
+  _sync_run()
+  SYNC['wake'].set()
+  return api_sync_state()
+
+
+def api_sync_pairmode(on):
+  """Меню «Додати пристрій»: лише поки воно відкрите пристрої шукають одне одного й приймають підключення."""
+  _sync_run()
+  if on:
+    first = not _pairing()
+    SYNC['pair_until'] = time.time() + 25
+    SYNC['scanning'] = time.time()
+    if first:
+      SYNC['found'] = {}
+      SYNC['last_scan'] = time.time()
+      _sync_send_beacon()
+      threading.Thread(target=_sync_scan_net, daemon=True).start()
   else:
-    _sync_stop()
+    SYNC['pair_until'] = 0.0
+    SYNC['found'], SYNC['pending'], SYNC['pair_out'] = {}, None, None
   return api_sync_state()
 
 
 def api_sync_scan():
   st = _sync_state()
-  if not st['enabled']:
-    raise ValueError('Спочатку увімкніть синхронізацію')
+  if not _pairing():
+    raise ValueError('Відкрийте меню підключення')
   SYNC['scanning'] = time.time()
   _sync_send_beacon()
   threading.Thread(target=_sync_scan_net, daemon=True).start()
@@ -8624,8 +8675,6 @@ def api_sync_unpair(pid):
 
 def api_sync_now():
   st = _sync_state()
-  if not st['enabled']:
-    raise ValueError('Синхронізацію вимкнено')
   SYNC['wake'].set()
   return {'ok': True}
 
@@ -8643,6 +8692,38 @@ def api_sync_alias(pid, name):
     else:
       p.pop('alias', None)
     _sync_save()
+  return api_sync_state()
+
+
+def api_sync_xfer(pid, mode):
+  """Куди перекидати з цього пристрою: std — звичайно (з вибором), only — лише якщо той пристрій єдиний онлайн, never — не передавати."""
+  st = _sync_state()
+  with SYNC_LOCK:
+    p = st['peers'].get(pid)
+    if not p:
+      raise ValueError('Пристрій не спарено')
+    if mode in ('only', 'never'):
+      p['xfer'] = mode
+    else:
+      p.pop('xfer', None)
+    _sync_save()
+  return api_sync_state()
+
+
+def api_sync_push_settings(pid):
+  """Разово запропонувати свої налаштування одному пристрою; той має підтвердити, інші пристрої не зачіпаються."""
+  vals = {k: SETTINGS[k] for k in SYNC_SETTINGS_KEYS if k in SETTINGS}
+  _peer_cmd(pid, {'type': 'settings_offer', 'settings': vals, 'from': _sync_state()['name']}, 10)
+  return {'ok': True}
+
+
+def api_sync_offer_answer(hid, ok):
+  off = SYNC.get('offer')
+  if not off or off.get('hid') != hid:
+    return api_sync_state()
+  SYNC['offer'] = None
+  if ok:
+    api_settings({k: v for k, v in off['settings'].items() if k in SYNC_SETTINGS_KEYS})
   return api_sync_state()
 
 
@@ -8934,7 +9015,76 @@ body{padding-bottom:calc(84px + var(--bot))}
 #tabs a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;font-size:11px;color:var(--mu);border-radius:12px}
 #tabs a .i{width:24px;height:24px}
 #tabs a.on{color:var(--ac)}
+body.nocast [data-act=pcast]{display:none!important}
+body.thz,body.thz *,body.armed,body.armed *{-webkit-user-select:none!important;user-select:none!important;-webkit-touch-callout:none!important}
+.xf{padding:8px 4px 6px}.xf .xl{display:block;font-size:11.5px;color:var(--mu);margin:0 4px 6px}
+.seg.sm button{font-size:12px;padding:8px 4px}
+.ib[hidden]{display:none}
+.back-d.pop,.back-d.pop .sheet{touch-action:none;overscroll-behavior:none}
+.dvwrap{max-width:720px;margin:0 auto;padding:0 16px}
+.dvme{display:flex;align-items:center;gap:13px;padding:14px;margin:4px 0 6px;border-radius:20px;background:linear-gradient(135deg,#7c6cff30,#3d9bff1c);border:1px solid #ffffff12;cursor:pointer}
+.dvme .tx{flex:1;min-width:0;display:flex;flex-direction:column}.dvme .tx b{font-size:18px}.dvme .d{font-size:12px;color:var(--mu)}.dvedit{color:var(--mu);display:flex}
+.dvic.ft{background:#7c6cff22;color:var(--ac)}
+.dvcard .d.ok{color:#3ddc97}
+.dvadd{width:100%;margin:10px 0 4px;display:flex;align-items:center;justify-content:center;gap:8px;padding:14px;font-size:16px}
+.dvempty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:22px 18px;background:var(--s1);border-radius:20px;color:var(--mu);font-size:13px}.dvempty b{color:var(--fg,#fff);font-size:16px}
+.dvrad{position:relative;width:96px;height:96px;margin-bottom:8px;display:flex;align-items:center;justify-content:center}
+.dvrad i{position:absolute;inset:0;border-radius:50%;border:1.5px solid #7c6cff55;animation:prPulse 3.2s ease-out infinite}.dvrad i:nth-child(2){animation-delay:1s}.dvrad i:nth-child(3){animation-delay:2s}
+.dvrad span{color:var(--ac);display:flex}.dvrad span .i{width:34px;height:34px}
+.seg{display:flex;background:var(--s1);border-radius:14px;padding:3px;margin:2px 0 4px}.seg button{flex:1;border:0;background:none;color:var(--mu);font-weight:600;font-size:13.5px;padding:10px 6px;border-radius:11px;transition:all .2s}.seg button.on,.dvwrap .seg button.on{background:#7c6cff!important;color:#fff!important;box-shadow:0 4px 14px #7c6cff55}
+.dvcard.gest{align-items:flex-start;gap:14px}
+.gdemo{flex:none;width:76px;height:116px;display:flex;align-items:center;justify-content:center}
+.gph{position:relative;width:66px;height:112px;border-radius:14px;border:2px solid #ffffff30;background:#0d0e13;overflow:hidden;animation:gShake 4.4s infinite}
+.gph .gglow{position:absolute;left:-20%;right:-20%;top:-14px;height:56px;background:radial-gradient(ellipse at 50% 0,#8b7bffcc,transparent 70%);opacity:0;animation:gGlow 4.4s infinite}
+.gph .gb{position:absolute;width:16px;height:22px;border-radius:5px;background:linear-gradient(145deg,#8b7bff,#4c96ff);opacity:0;animation:gFly 4.4s infinite}.gb.b1{left:10px;bottom:24px}.gb.b2{left:30px;bottom:34px;animation-delay:.08s}.gb.b3{left:44px;bottom:20px;animation-delay:.16s}
+.gph .gf{position:absolute;left:50%;top:8px;width:20px;height:20px;margin-left:-10px;border-radius:50%;background:#fff;opacity:.9;box-shadow:0 0 0 0 #fff8;animation:gFinger 4.4s infinite}
+@keyframes gFinger{0%{opacity:0;transform:translateY(0)}8%{opacity:.9}35%{box-shadow:0 0 0 12px #fff0;transform:translateY(0)}55%{transform:translateY(-6px);opacity:.9}70%,100%{opacity:0;transform:translateY(-8px)}}
+@keyframes gShake{0%,12%{transform:none}14%{transform:translateX(-2px) rotate(-1deg)}18%{transform:translateX(2px) rotate(1deg)}22%{transform:translateX(-2px) rotate(-1deg)}26%{transform:translateX(2px) rotate(1deg)}30%,100%{transform:none}}
+@keyframes gGlow{0%,12%{opacity:0}20%,60%{opacity:1}80%,100%{opacity:0}}
+@keyframes gFly{0%,50%{opacity:0;transform:none}55%{opacity:1}85%{opacity:0;transform:translateY(-120px) rotate(14deg)}100%{opacity:0}}
+#pairlay{position:fixed;inset:0;z-index:85;background:var(--bg,#0d0e13);overflow-y:auto;overflow-x:hidden;padding:max(var(--top,0px),env(safe-area-inset-top)) 18px calc(30px + var(--bot,0px));text-align:center;animation:fadein .22s}
+#pairlay.out{animation:fadeout .2s forwards}
+#pairlay>*{max-width:520px;margin-left:auto;margin-right:auto}
+.prhead{display:flex;align-items:center;justify-content:space-between;padding:10px 0}.prhead b{font-size:17px}
+.prradar{position:relative;width:min(80vw,340px,46vh);aspect-ratio:1;margin:14px auto 8px}
+.prradar .rg{position:absolute;inset:0;border-radius:50%;border:1.5px solid #7c6cff66;animation:prPulse 3.6s ease-out infinite}.prradar .rg:nth-child(2){animation-delay:1.2s}.prradar .rg:nth-child(3){animation-delay:2.4s}
+.prradar::before{content:'';position:absolute;inset:0;border-radius:50%;border:1px solid #ffffff10;box-shadow:inset 0 0 0 38px #ffffff00,0 0 0 1px #ffffff08;background:radial-gradient(circle,#7c6cff18,transparent 68%)}
+.prradar::after{content:'';position:absolute;inset:16%;border-radius:50%;border:1px dashed #ffffff14}
+.prradar .sweep{position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 0deg,#7c6cff00 0deg,#7c6cff00 250deg,#7c6cff66 345deg,#9bc4ff99 360deg);animation:prSweep 3s linear infinite;-webkit-mask:radial-gradient(circle,transparent 0,#000 12%);mask:radial-gradient(circle,transparent 0,#000 12%)}
+.prme{position:absolute;left:50%;top:50%;width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:50%;background:linear-gradient(145deg,#7c6cff,#4c96ff);display:flex;align-items:center;justify-content:center;color:#fff;box-shadow:0 0 30px #7c6cff88;z-index:2}.prme .i{width:30px;height:30px}
+.blip{position:absolute;z-index:3;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:4px;background:none;border:0;color:inherit;animation:blipIn .5s cubic-bezier(.2,1.4,.3,1)}
+.blip .bi{width:46px;height:46px;border-radius:15px;background:#1c1f2b;border:1.5px solid #3ddc97;display:flex;align-items:center;justify-content:center;color:#3ddc97;box-shadow:0 0 18px #3ddc9755}.blip .bi .i{width:24px;height:24px}
+.blip .bn{font-size:12px;font-weight:600;max-width:96px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 6px #000}
+#pairlay h2{font-size:21px;margin:14px 0 6px}#pairlay p{color:var(--mu);font-size:14px;margin:0 auto 14px;max-width:340px}
+#prbody{text-align:left}#prbody .dvcard .d{display:block}
+.prcode{display:flex;justify-content:center;gap:10px;margin:6px 0 10px}.prcode span{width:56px;height:70px;border-radius:16px;background:var(--s1);border:1.5px solid #7c6cff88;display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:800;box-shadow:0 6px 20px #7c6cff33}
+.prin{width:100%;text-align:center;font-size:34px;font-weight:800;letter-spacing:14px;padding:12px 0 12px 14px;border-radius:16px;border:1.5px solid #7c6cff88;background:var(--s1);color:inherit}
+.prok{width:84px;height:84px;margin:6px auto;border-radius:50%;background:linear-gradient(145deg,#3ddc97,#2bb67a);display:flex;align-items:center;justify-content:center;color:#fff;animation:blipIn .55s cubic-bezier(.2,1.4,.3,1);box-shadow:0 0 40px #3ddc9788}.prok .i{width:44px;height:44px}
+#pairlay.ok .sweep,#pairlay.ok .rg{display:none}
+@keyframes prPulse{0%{transform:scale(.25);opacity:.9}100%{transform:scale(1);opacity:0}}
+@keyframes prSweep{to{transform:rotate(360deg)}}
+@keyframes blipIn{0%{transform:translate(-50%,-50%) scale(0);opacity:0}100%{transform:translate(-50%,-50%) scale(1);opacity:1}}
+#fx{position:fixed;inset:0;z-index:99990;pointer-events:none;overflow:hidden}
+#fx .fxg{position:absolute;left:-15%;right:-15%;top:-40px;height:260px;background:radial-gradient(ellipse at 50% 0,rgba(124,108,255,.9),rgba(76,150,255,.4) 42%,transparent 72%);opacity:0;filter:blur(4px)}
+#fx.arm .fxg{animation:fxPulse 1s ease-in-out infinite alternate}
+#fx.out .fxg,#fx.in .fxg{animation:fxFlash 1.5s ease-out forwards}
+#fx .fxb{position:absolute;border-radius:12px;background:linear-gradient(145deg,#8b7bff,#4c96ff);box-shadow:0 10px 28px #5b4cff77;opacity:0}
+#fx.out .fxb{animation:fxUp .95s cubic-bezier(.4,0,.2,1) forwards}
+#fx.in .fxb{animation:fxDown 1.05s cubic-bezier(.2,.9,.25,1) forwards}
+@keyframes fxPulse{from{opacity:.45}to{opacity:.95}}
+@keyframes fxFlash{0%{opacity:0}18%{opacity:1}100%{opacity:0}}
+@keyframes fxUp{0%{opacity:0;transform:translateY(20px) scale(.6)}15%{opacity:1}100%{opacity:0;transform:translateY(-95vh) scale(.9) rotate(var(--r))}}
+@keyframes fxDown{0%{opacity:0;transform:translateY(-70vh) scale(.5) rotate(var(--r))}30%{opacity:1}100%{opacity:0;transform:translateY(var(--ty)) scale(1) rotate(0)}}
+#fxh{position:fixed;left:50%;top:calc(var(--top,0px) + 70px);transform:translate(-50%,-10px);z-index:99991;pointer-events:none;background:#1c1f2bee;border:1px solid #7c6cff88;color:#fff;font-weight:600;font-size:14px;line-height:1;padding:11px 16px;border-radius:999px;opacity:0;transition:all .2s;white-space:nowrap;box-shadow:0 8px 24px #000a}
+#fxh.on{opacity:1;transform:translate(-50%,0)}
+body.armed #root{animation:armW .16s linear infinite}
+body.shk #root,body.shk #tabs{animation:shkK .6s cubic-bezier(.3,.1,.2,1)}
+@keyframes armW{0%,100%{transform:translate(-1.5px,0) rotate(-.25deg)}50%{transform:translate(1.5px,0) rotate(.25deg)}}
+@keyframes shkK{0%,100%{transform:none}15%{transform:translate(-5px,3px) rotate(-.5deg)}30%{transform:translate(5px,-3px) rotate(.5deg)}45%{transform:translate(-4px,2px)}60%{transform:translate(3px,-2px)}80%{transform:translate(-1px,0)}}
 html,body{overflow-x:hidden;max-width:100%;overscroll-behavior-x:none}
+html:has(body.pl),html:has(body[style*="overflow: hidden"]){overflow:hidden!important}
+body.pl{overflow:hidden!important}
+#player{overscroll-behavior:none;touch-action:manipulation}
 #root{overflow-x:clip;touch-action:pan-y pinch-zoom}
 .rrow,.dtabs,.sfil,.srcs,.dubs{touch-action:pan-x pan-y}
 #splash>*:not(.ld){translate:0 -52px}
@@ -9209,7 +9359,7 @@ body.pressing,body.pressing *{-webkit-user-select:none!important;user-select:non
 .ec.sel{box-shadow:0 0 0 2px var(--ac)}
 .ec .th{position:relative;display:block;aspect-ratio:16/9;background:linear-gradient(135deg,#2c2757,#171a2a);overflow:hidden}
 .ec .th img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .35s}
-.ec .th img.ld{opacity:1}.ec .th img.bl{filter:blur(14px);transform:scale(1.2)}
+.ec .th img.ld{opacity:1}.ec:not(.w) .th img.bl{filter:blur(14px);transform:scale(1.2)}
 .ec .th::after{content:'';position:absolute;inset:0;background:linear-gradient(transparent 40%,#000b);z-index:1;pointer-events:none}
 .ec .th .num{position:absolute;left:10px;bottom:5px;z-index:2;font-size:28px;font-weight:800;line-height:1;text-shadow:0 2px 10px #000b;font-variant-numeric:tabular-nums}
 .ec .th .stt{position:absolute;right:8px;top:8px;z-index:3;font-size:11px;padding:2px 8px;border-radius:99px;background:#000a;display:flex;align-items:center;gap:3px;backdrop-filter:blur(4px)}
@@ -9722,6 +9872,7 @@ input,select,textarea{font-size:16px}
         <button class="ib" data-act="pclose" aria-label="Закрити"><i data-ico="close"></i></button>
         <div class="tt" id="ptitle"></div>
         <button class="ib" data-act="pcast" aria-label="Грати на іншому пристрої"><i data-ico="cast"></i></button>
+        <button class="ib" data-act="airplay" id="apbtn" aria-label="AirPlay" hidden><i data-ico="airplay"></i></button>
         <label class="sw"><input type="checkbox" id="pauto"> Далі</label>
       </div>
       <div class="mid3">
@@ -9741,6 +9892,7 @@ input,select,textarea{font-size:16px}
   <div class="msg hide" id="pmsg"></div>
 </div>
 <div id="rcbar" class="hide"></div>
+<div id="fx"></div><div id="fxh"></div>
 <div id="toast"></div>
 
 <script>
@@ -9833,6 +9985,7 @@ const ICONS = {
   pc: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
   devices: '<rect x="2.5" y="6" width="13" height="10" rx="1.8"/><path d="M6.5 19.5h5"/><rect x="16.5" y="9" width="5" height="9" rx="1.4"/>',
   cast: '<path d="M3 8V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5"/><path d="M3 12a9 9 0 0 1 9 9M3 16a5 5 0 0 1 5 5M3 20h.01" stroke-width="2.4"/>',
+  airplay: '<path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1"/><path d="m12 15 5 6H7z"/>',
   spinner: '<path d="M12 3a9 9 0 1 0 9 9"/>'
 };
 const FILLED = {play: 1, prev: 1, next: 1, spark: 1};
@@ -10954,7 +11107,7 @@ function dlbarInner(it) {
      <div class="dact">
      ${nUp ? `<button class="btn ok" data-act="download" ${S.ffmpeg ? '' : 'disabled'}>${ico('download')} Скачати · ${nUp}</button>` : ''}
      ${nDl ? `<button class="btn dng" data-act="delsel">${ico('trash')} Видалити · ${nDl}</button>` : ''}
-     ${nUp && S.sync && S.sync.enabled && S.sync.peers.length ? `<button class="btn" data-act="rdl">${ico('download')} На іншому</button>` : ''}
+     ${nUp && S.sync && S.sync.peers.length ? `<button class="btn" data-act="rdl">${ico('download')} На іншому</button>` : ''}
      <button class="btn" data-act="watchsel" aria-label="Переглянуто">${ico('eye')} ${allW ? 'Не дивився' : 'Переглянуто'}</button></div>`;
 }
 function applySelMode() {  // вхід/вихід з режиму вибору без повного перемальовування: нічого не блимає
@@ -11608,12 +11761,29 @@ const A = {
     const ids = [...S.libSel].filter(id => item(id) && item(id).group); if (!ids.length) return;
     try { await api('/api/ungroup', {ids}); S.libSel.clear(); await loadLib(); toast('Розгруповано', false, 'check'); } catch (e) { toast(e.message, true); }
   },
-  async syncscan() { try { await api('/api/sync_scan', {}); } catch (e) { toast(e.message, true); } setTimeout(syncFetch, 400); syncFetch(); },
-  async syncpair(el) { try { await api('/api/sync_pair', {id: el.dataset.id}); toast('Код показано на другому пристрої'); } catch (e) { toast(e.message, true); } syncFetch(); },
-  async synccode() { const c = ($('#sycode') || {}).value || ''; try { S.sync = await api('/api/sync_code', {code: c}); paintSync(); toast('Пристрій підключено', false, 'check'); } catch (e) { toast(e.message, true); } },
+  pairopen() { openPair(); },
+  pairclose() { closePair(); },
+  async syncpair(el) { try { await api('/api/sync_pair', {id: el.dataset.id}); gpHaptic(); } catch (e) { toast(e.message, true); } syncFetch(); },
+  async synccode() { const c = ($('#sycode') || {}).value || ''; try { S.sync = await api('/api/sync_code', {code: c}); paintSync(); } catch (e) { toast(e.message, true); } },
   async syncunpair(el) {
     if (!el.classList.contains('conf')) { el.classList.add('conf'); el.textContent = 'Точно?'; setTimeout(() => { if (el.isConnected) { el.classList.remove('conf'); el.textContent = 'Відʼєднати'; } }, 3000); return; }
     try { S.sync = await api('/api/sync_unpair', {id: el.dataset.id}); paintSync(); } catch (e) { toast(e.message, true); }
+  },
+  async dxfer(el) { try { S.sync = await api('/api/sync_xfer', {id: el.dataset.id, mode: el.dataset.x}); paintSync(); } catch (e) { toast(e.message, true); } },
+  async dpush(el) {
+    const p = peerOf(el.dataset.id); closeSheet();
+    try { await api('/api/sync_push_settings', {peer: el.dataset.id}); toast('Запропоновано «' + (p ? p.name : '') + '» — чекаємо підтвердження', false, 'check'); } catch (e) { toast(e.message, true); }
+  },
+  async dvrename() {
+    const y = S.sync; if (!y) return;
+    const v = await askText('Назва цього пристрою', y.name, 'Так його бачитимуть інші ваші пристрої.'); if (v == null || !String(v).trim()) return;
+    try { S.sync = await api('/api/sync_cfg', {name: v}); paintSync(); } catch (e) { toast(e.message, true); }
+  },
+  async symode(el) {
+    const y = S.sync; if (!y) return; const all = el.dataset.m === 'all'; if (all === !!y.sync_settings) return;
+    const ok = await askConfirm(all ? 'Синхронізувати й налаштування?' : 'Лише бібліотека?', all ? 'Налаштування плеєра, автоперевірки та гучності передаватимуться між пристроями й можуть перезаписати налаштування на іншому.' : 'Налаштування перестануть передаватись між пристроями.', all ? 'Увімкнути' : 'Так', false);
+    if (!ok) return;
+    try { S.sync = await api('/api/sync_cfg', {sync_settings: all}); paintSync(); } catch (e) { toast(e.message, true); }
   },
   dmenu(el) { const r = el.getBoundingClientRect(); openSheet('dmenu', {id: el.dataset.id, rect: r}); },
   async dsync(el) { closeSheet(); A.syncnow(); },
@@ -11636,13 +11806,9 @@ const A = {
   dcast(el) { throwTo(el.dataset.id, 'handoff'); },
   dthrow(el) { closeSheet(); throwTo(el.dataset.id, 'handoff'); },
   pcast() { castPick('cast'); },
+  airplay() { try { V.webkitShowPlaybackTargetPicker(); } catch (e) { toast('AirPlay недоступний', true); } },
   castgo(el) { const m = S.sheet && S.sheet.mode; closeSheet(); throwTo(el.dataset.id, m || 'handoff'); },
   async syncnow() { try { await api('/api/sync_now', {}); toast('Синхронізую…'); } catch (e) { toast(e.message, true); } setTimeout(syncFetch, 1500); },
-  async syncadd() {
-    const v = await askText('Додати за IP', '', 'IP-адреса другого пристрою, напр. 192.168.1.25'); if (!v) return;
-    const [addr, port] = v.trim().split(':');
-    try { await api('/api/sync_add', {addr, port: port ? Number(port) : undefined}); syncFetch(); } catch (e) { toast('Не вдалося зʼєднатись: ' + e.message, true); }
-  },
   rdl() {
     const y = S.sync, it = item(route().id); if (!y || !it) return;
     openSheet('rdl', {kid: it.id, eps: [...S.sel].map(Number), q: S.q});
@@ -12371,9 +12537,18 @@ document.addEventListener('change', ev => {
     if (D.more && nwVisible(D).length < 12 && ev.target.dataset.nf !== 'sort') nwLoad(true);
     return;
   }
-  if (ev.target.id === 'sysw' || ev.target.id === 'syset' || ev.target.id === 'syname') {
-    const b = ev.target.id === 'sysw' ? {enabled: ev.target.checked} : ev.target.id === 'syset' ? {sync_settings: ev.target.checked} : {name: ev.target.value};
-    api('/api/sync_cfg', b).then(j => { S.sync = j; paintSync(); if (b.enabled) setTimeout(() => api('/api/sync_scan', {}).catch(() => {}), 600); }).catch(e => toast(e.message, true));
+  if (ev.target.id === 'hosw') {
+    const v = ev.target.checked;
+    api('/api/settings', {handoff: v}).then(() => { if (S.set) S.set.handoff = v; if (S.sync) S.sync.handoff_on = v; paintSync(); }).catch(e => toast(e.message, true));
+    return;
+  }
+  if (ev.target.id === 'sysw') {
+    api('/api/sync_cfg', {sync: ev.target.checked}).then(j => { S.sync = j; paintSync(); }).catch(e => toast(e.message, true));
+    return;
+  }
+  if (ev.target.id === 'syset' || ev.target.id === 'syname') {
+    const b = ev.target.id === 'syset' ? {sync_settings: ev.target.checked} : {name: ev.target.value};
+    api('/api/sync_cfg', b).then(j => { S.sync = j; paintSync(); }).catch(e => toast(e.message, true));
     return;
   }
   if (ev.target.id === 'qsel') { S.q = ev.target.value; ls.set('q', S.q); }
@@ -12654,8 +12829,22 @@ V.addEventListener('seeking', () => {
   P.sinceSeek = 0; P.lastT = t; nxCancel(); skSoft = null;
 });
 /* ---------- режим плеєра (iOS), Now Playing, повний екран, PiP ---------- */
+function airplayInit() {
+  try {
+    const b = $('#apbtn'); if (b && IOS_APP && V.webkitShowPlaybackTargetPicker) b.hidden = false;
+    V.setAttribute('x-webkit-airplay', 'allow');
+    V.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', () => {
+      const w = !!V.webkitCurrentPlaybackTargetIsWireless;
+      if (w === !!S.awp) return;
+      S.awp = w; applyPlayerMode();
+      try { if (w && V.webkitDisplayingFullscreen && V.webkitExitFullscreen) V.webkitExitFullscreen(); } catch (e) {}
+      toast(w ? 'AirPlay: серія грає на екрані, кнопки лишаються тут' : 'AirPlay вимкнено', false, 'airplay');
+    });
+  } catch (e) {}
+}
+setTimeout(airplayInit, 0);
 function applyPlayerMode() {  // без playsinline iPhone сам відкриває стандартний плеєр iOS (PiP, AirPlay, керування з екрана блокування)
-  const native = IOS_APP && S.set.ios_player !== false && !S.mirror;  // під час трансляції екрана системний плеєр йде на інший екран і гасить телефон — тоді свій
+  const native = IOS_APP && S.set.ios_player !== false && !S.mirror && !S.awp;  // під час трансляції екрана системний плеєр йде на інший екран і гасить телефон — тоді свій
   ['playsinline', 'webkit-playsinline'].forEach(a => native ? V.removeAttribute(a) : V.setAttribute(a, ''));
 }
 function setNowPlaying(it, e, n) {
@@ -12759,38 +12948,108 @@ const peerOf = id => ((S.sync && S.sync.peers) || []).find(p => p.id === id);
 function devBody() {
   const y = S.sync;
   if (!y) return '<div class="dvhint">Завантаження…</div>';
-  let h = `<label class="dvcard dvsw"><div class="dvic me">${dico(y.kind)}</div><div class="tx"><b>Синхронізація</b><span class="d">Бібліотека, перегляд, позиція, архів і видалення між вашими пристроями в одній мережі</span></div><span class="sw"><input type="checkbox" id="sysw" ${y.enabled ? 'checked' : ''}></span></label>`;
-  if (!y.enabled) return h + '<p class="dvhint">Увімкніть на обох пристроях, потім натисніть «Пошук пристроїв».</p>';
-  h += `<div class="dvcard"><div class="dvic me">${dico(y.kind)}</div><div class="tx"><b>Цей пристрій</b><span class="d">${esc(DKIND[y.kind] || '')} · ${esc(y.ip || '—')}</span></div>
-     <input class="in" id="syname" type="text" maxlength="30" value="${esc(y.name)}" aria-label="Назва цього пристрою"></div>
-   <label class="dvcard dvsw"><div class="tx"><b>Синхронізувати й налаштування</b><span class="d">Плеєр, автоперевірка, гучність. Функції розробника та фонові режими не передаються.</span></div><span class="sw"><input type="checkbox" id="syset" ${y.sync_settings ? 'checked' : ''}></span></label>`;
-  if (y.err) h += `<div class="dvcard err"><span class="d">Сервер синхронізації не запустився: ${esc(y.err)}</span></div>`;
-  if (y.incoming) h += `<div class="dvcard inc"><div class="tx"><b>«${esc(y.incoming.name)}» хоче підключитись</b><span class="d">Введіть цей код на тому пристрої:</span><div class="dvcode">${esc(y.incoming.code)}</div></div></div>`;
-  if (y.outgoing) h += `<div class="dvcard inc"><div class="tx"><b>Підключення до «${esc(y.outgoing.name)}»</b><span class="d">Введіть код, показаний на тому пристрої.</span>
-     <div style="display:flex;gap:8px;margin-top:8px"><input class="in" id="sycode" inputmode="numeric" maxlength="4" placeholder="0000" style="flex:1;letter-spacing:4px;text-align:center"><button class="btn pri sm" data-act="synccode">Підключити</button></div></div></div>`;
-  h += `<div class="dvsec">Підключені пристрої</div>`;
-  h += y.peers.length ? y.peers.map(p => `<div class="dvcard dev" data-act="dmenu" data-lp="dmenu" data-id="${esc(p.id)}"><div class="dvic ${p.online ? 'on' : ''}">${dico(p.kind)}<i class="dot"></i></div>
-      <div class="tx"><b>${esc(p.name)}</b><span class="d">${p.online ? 'онлайн' : esc(p.err || 'офлайн')} · ${syAgo(p.last)}</span></div>${p.online ? `<button class="ib" data-act="dcast" data-id="${esc(p.id)}" aria-label="Перекинути туди відкрите">${ico('cast')}</button>` : ''}<span class="dvdots">⋯</span></div>`).join('')
-      + '<p class="dvhint">Торкніться пристрою або затисніть його — меню з перейменуванням і відʼєднанням.</p>'
-      : '<p class="dvhint">Поки жодного. Натисніть «Пошук пристроїв» на обох девайсах.</p>';
-  h += `<div class="dvbtns"><button class="btn sm" data-act="syncscan">${y.scanning ? 'Шукаю…' : 'Пошук пристроїв'}</button>${y.peers.length ? '<button class="btn sm" data-act="syncnow">Синхронізувати зараз</button>' : ''}<button class="btn sm" data-act="syncadd">Додати за IP</button></div>`;
-  if (y.found.length) h += y.found.map(f => `<div class="dvcard"><div class="dvic">${dico(f.kind)}</div><div class="tx"><b>${esc(f.name)}</b><span class="d">${esc(f.addr)}</span></div><button class="btn pri sm" data-act="syncpair" data-id="${esc(f.id)}">Підключити</button></div>`).join('');
+  const nP = y.peers.length;
+  let h = `<div class="dvme" data-act="dvrename"><div class="dvic me">${dico(y.kind)}</div><div class="tx"><span class="d">Цей пристрій</span><b>${esc(y.name)}</b></div><span class="dvedit">${ico('edit')}</span></div>`;
+  h += '<div class="dvsec">Мої пристрої</div>';
+  if (nP) h += y.peers.map(p => `<div class="dvcard dev" data-act="dmenu" data-lp="dmenu" data-id="${esc(p.id)}"><div class="dvic ${p.online ? 'on' : ''}">${dico(p.kind)}<i class="dot"></i></div>
+      <div class="tx"><b>${esc(p.name)}</b><span class="d ${p.online ? 'ok' : ''}">${p.online ? 'У мережі' : 'Не в мережі'}${p.online && y.sync && p.sync && p.last ? ' · синхр. ' + syAgo(p.last) : ''}</span></div><span class="dvdots">⋯</span></div>`).join('')
+    + '<p class="dvhint">Торкніться пристрою або затисніть його — перейменувати чи відʼєднати.</p>';
+  else h += `<div class="dvempty"><div class="dvrad"><i></i><i></i><i></i><span>${ico('devices')}</span></div><b>Поки немає пристроїв</b><span>Підключіть iPhone, iPad чи комп’ютер, щоб передавати між ними сеанс і синхронізувати бібліотеку.</span></div>`;
+  h += `<button class="btn pri dvadd" data-act="pairopen">${ico('plus')} Додати пристрій</button>`;
+  if (nP) {
+    h += '<div class="dvsec">Можливості</div>';
+    h += `<label class="dvcard dvsw"><div class="dvic ft">${ico('cast')}</div><div class="tx"><b>Передача між пристроями</b><span class="d">Перекидайте вкладку, серію з поточного моменту, пошук і прокрутку на інший пристрій. Увімкніть на обох.</span></div><span class="sw"><input type="checkbox" id="hosw" ${y.handoff_on ? 'checked' : ''}></span></label>`;
+    h += `<label class="dvcard dvsw"><div class="dvic ft">${ico('refresh')}</div><div class="tx"><b>Синхронізація</b><span class="d">Бібліотека, перегляд, позиція, архів і видалення. Увімкніть на обох.</span></div><span class="sw"><input type="checkbox" id="sysw" ${y.sync ? 'checked' : ''}></span></label>`;
+    if (y.sync) h += `<div class="seg" role="tablist"><button data-act="symode" data-m="lib" class="${y.sync_settings ? '' : 'on'}">Бібліотека</button><button data-act="symode" data-m="all" class="${y.sync_settings ? 'on' : ''}">Бібліотека й налаштування</button></div>
+      <p class="dvhint">${y.sync_settings ? 'Разом із налаштуваннями плеєра, автоперевірки й гучності. Функції розробника не передаються.' : 'Налаштування лишаються окремими на кожному пристрої.'}</p>`;
+    h += `<div class="dvsec">Як перекинути</div>
+      <div class="dvcard gest"><div class="gdemo"><div class="gph"><i class="gglow"></i><i class="gb b1"></i><i class="gb b2"></i><i class="gb b3"></i><i class="gf"></i></div></div>
+      <div class="tx"><b>Затисніть і проведіть угору</b><span class="d">1. Затисніть верх екрана або правий край посередині.<br>2. Екран затремтить і засяє.<br>3. Проведіть пальцем угору — відкрите переліта на інший пристрій.</span>
+      ${y.handoff_on ? '' : '<span class="d" style="color:var(--ac);margin-top:4px">Спершу ввімкніть «Передачу між пристроями».</span>'}</div></div>`;
+  }
   return h;
 }
 function devicesHTML() {
-  return pageHead('Пристрої') + `<div id="dvbox" data-h="${esc(devBody())}">${devBody()}</div><p class="dvhint" style="margin-top:14px">Затисніть верх екрана на 0,6 с, щоб перекинути відкрите аніме (серію з поточного моменту, пошук, прокрутку) на інший пристрій.</p>`;
+  return pageHead('Пристрої') + `<div id="dvbox" class="dvwrap" data-h="${esc(devBody())}">${devBody()}</div>`;
 }
 function dmenuHTML(s) {
   const p = peerOf(s.id); if (!p) return '<h3>Пристрій</h3><p class="hint">Пристрій більше не підключено.</p>';
   return `<div class="dmh"><div class="dvic big ${p.online ? 'on' : ''}">${dico(p.kind)}<i class="dot"></i></div>
-    <div class="tx"><b>${esc(p.name)}</b><span class="dst ${p.online ? 'on' : ''}">${p.online ? 'Онлайн · доступний для синхронізації' : 'Офлайн' + (p.err ? ' · ' + esc(p.err) : '')}</span>
-    <span class="d">${esc(DKIND[p.kind] || '')} · ${esc(p.addr || '')} · ${syAgo(p.last)}</span></div></div>
-    <div class="cm"><button data-act="dsync" data-id="${esc(p.id)}" ${p.online ? '' : 'disabled'}>${ico('refresh')} Синхронізувати зараз</button>
-    <button data-act="dthrow" data-id="${esc(p.id)}" ${p.online ? '' : 'disabled'}>${ico('cast')} Перекинути туди відкрите</button>
+    <div class="tx"><b>${esc(p.name)}</b><span class="dst ${p.online ? 'on' : ''}">${p.online ? 'У мережі' : 'Не в мережі'}</span>
+    <span class="d">${esc(DKIND[p.kind] || '')}${p.sync && p.last ? ' · синхр. ' + syAgo(p.last) : ''}</span></div></div>
+    <div class="cm">${p.online && S.sync && S.sync.sync ? `<button data-act="dsync" data-id="${esc(p.id)}">${ico('refresh')} Синхронізувати зараз</button>` : ''}
+    ${castTargets().some(x => x.id === p.id) ? `<button data-act="dthrow" data-id="${esc(p.id)}">${ico('cast')} Перекинути туди відкрите</button>` : ''}
+    ${p.online ? `<button data-act="dpush" data-id="${esc(p.id)}">${ico('download')} Передати сюди мої налаштування</button>` : ''}
+    <div class="xf"><span class="xl">Перекидання на цей пристрій</span><div class="seg sm">${[['std', 'Звичайне'], ['only', 'Єдиний'], ['never', 'Ніколи']].map(([m, t]) => `<button data-act="dxfer" data-id="${esc(p.id)}" data-x="${m}" class="${(p.xfer || 'std') === m ? 'on' : ''}">${t}</button>`).join('')}</div></div>
     <button data-act="drename" data-id="${esc(p.id)}">${ico('edit')} Змінити назву</button>
     <button class="dng" data-act="dunpair" data-id="${esc(p.id)}">${ico('trash')} Відʼєднати</button></div>`;
 }
+// ───────── Меню «Додати пристрій» (радар) ─────────
+const PR = {open: false, t1: 0, t2: 0, n0: 0, done: false, sig: ''};
+const hue = id => { let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
+function pairHTML() {
+  const y = S.sync || {kind: myKind(), peers: [], found: []};
+  return `<div class="prhead"><button class="ib" data-act="pairclose" aria-label="Закрити">${ico('close')}</button><b>Додати пристрій</b><span style="width:44px"></span></div>
+   <div class="prradar"><i class="rg"></i><i class="rg"></i><i class="rg"></i><i class="sweep"></i><div class="prme">${dico(y.kind)}</div><div id="prblips"></div></div>
+   <h2 id="prtitle">Шукаю пристрої поруч…</h2><p id="prsub">Відкрийте це меню й на другому пристрої та підключіть їх до однієї Wi‑Fi мережі.</p><div id="prbody"></div>`;
+}
+async function askOffer(o) {
+  S.lastOffer = o.hid;
+  const yes = await askConfirm('Прийняти налаштування?', `«${o.from}» пропонує передати свої налаштування (${o.n}). Поточні налаштування на цьому пристрої буде замінено.`, 'Прийняти', false);
+  try { S.sync = await api('/api/sync_offer', {hid: o.hid, ok: !!yes}); if (yes) { const s2 = await api('/api/settings'); if (s2 && S.set) Object.assign(S.set, s2.settings || s2); toast('Налаштування прийнято', false, 'check'); if (typeof render === 'function') render(); } } catch (e) { toast(e.message, true); }
+}
+function paintPair() {
+  if (!PR.open) return;
+  const y = S.sync; if (!y) return;
+  if (y.peers.length > PR.n0 && !PR.done) {
+    PR.done = true;
+    const np = y.peers[y.peers.length - 1];
+    $('#pairlay').classList.add('ok');
+    $('#prtitle').textContent = 'Підключено';
+    $('#prsub').textContent = '«' + np.name + '» тепер у вашому списку пристроїв.';
+    $('#prbody').innerHTML = `<div class="prok">${ico('check')}</div>`; $('#prblips').innerHTML = '';
+    gpHaptic(); setTimeout(closePair, 1700); return;
+  }
+  if (PR.done) return;
+  const inc = y.incoming, out = y.outgoing, found = y.found || [];
+  const sig = JSON.stringify([inc && inc.code, out && out.id, found.map(f => f.id + f.name)]);
+  if (sig === PR.sig) return;
+  PR.sig = sig;
+  const bl = $('#prblips');
+  bl.innerHTML = found.map(f => { const a = hue(f.id) % 360, r = 33 + hue(f.id + 'r') % 12, x = 50 + r * Math.cos(a * Math.PI / 180), yy = 50 + r * Math.sin(a * Math.PI / 180);
+    return `<button class="blip" style="left:${x}%;top:${yy}%" data-act="syncpair" data-id="${esc(f.id)}"><span class="bi">${dico(f.kind)}</span><span class="bn">${esc(f.name)}</span></button>`; }).join('');
+  const t = $('#prtitle'), sub = $('#prsub'), body = $('#prbody');
+  if (inc) {
+    t.textContent = '«' + inc.name + '» хоче підключитись'; sub.textContent = 'Введіть цей код на тому пристрої:';
+    body.innerHTML = `<div class="prcode">${esc(inc.code).split('').map(c => `<span>${c}</span>`).join('')}</div>`;
+  } else if (out) {
+    t.textContent = 'Код із «' + out.name + '»'; sub.textContent = 'Введіть 4 цифри, показані на тому пристрої.';
+    body.innerHTML = `<input class="prin" id="sycode" inputmode="numeric" maxlength="4" placeholder="••••" autocomplete="one-time-code"><button class="btn pri" data-act="synccode" style="margin-top:14px;width:100%">Підключити</button>`;
+    setTimeout(() => { const i = $('#sycode'); if (i) i.focus(); }, 80);
+  } else {
+    t.textContent = found.length ? 'Знайдено поруч' : 'Шукаю пристрої поруч…';
+    sub.textContent = found.length ? 'Торкніться пристрою, щоб підключитись.' : 'Відкрийте це меню й на другому пристрої та підключіть їх до однієї Wi‑Fi мережі.';
+    body.innerHTML = found.map(f => `<div class="dvcard" data-act="syncpair" data-id="${esc(f.id)}" style="cursor:pointer"><div class="dvic on">${dico(f.kind)}</div><div class="tx"><b>${esc(f.name)}</b><span class="d">${esc(DKIND[f.kind] || '')}</span></div><span class="btn pri sm">Підключити</span></div>`).join('');
+  }
+}
+function openPair() {
+  if (PR.open) return;
+  PR.open = true; PR.done = false; PR.sig = ''; PR.n0 = ((S.sync && S.sync.peers) || []).length;
+  const el = document.createElement('div'); el.id = 'pairlay'; el.innerHTML = pairHTML(); document.body.appendChild(el);
+  document.body.style.overflow = 'hidden';
+  const tick = () => api('/api/sync_pairmode', {on: true}).then(j => { S.sync = j; paintPair(); }).catch(e => { if (PR.open) toast(e.message, true); });
+  tick(); PR.t1 = setInterval(tick, 5000); PR.t2 = setInterval(() => { syncFetch(); }, 1200);
+}
+function closePair() {
+  if (!PR.open) return;
+  PR.open = false; clearInterval(PR.t1); clearInterval(PR.t2);
+  const el = $('#pairlay'); if (el) { el.classList.add('out'); setTimeout(() => el.remove(), 220); }
+  if (!S.cur) document.body.style.overflow = '';
+  api('/api/sync_pairmode', {on: false}).then(j => { S.sync = j; paintSync(); }).catch(() => {});
+}
 function paintSync() {
+  paintPair(); castSync();
+  const o = S.sync && S.sync.offer; if (o && o.hid !== S.lastOffer) askOffer(o);
   const b = $('#dvbox');
   if (S.sheet && S.sheet.kind === 'dmenu') renderSheet();
   if (!b || (document.activeElement && b.contains(document.activeElement) && document.activeElement.tagName === 'INPUT')) return;
@@ -12810,16 +13069,23 @@ async function syncFetch() {
 }
 setInterval(() => {
   if (document.hidden) return;
-  if ((S.sync && S.sync.enabled) || (S.sync && /^#\/devices/.test(location.hash))) syncFetch();
+  if (S.sync && ((S.sync.peers && S.sync.peers.length) || /^#\/devices/.test(location.hash))) syncFetch();
 }, 2500);
-document.addEventListener('visibilitychange', () => { if (!document.hidden && S.sync && S.sync.enabled) api('/api/sync_now', {}).catch(() => {}); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S.sync && S.sync.sync) api('/api/sync_now', {}).catch(() => {}); });
 
 // ───────── Перекидання сеансу й пульт ─────────
 function onlinePeers() { return ((S.sync && S.sync.peers) || []).filter(p => p.online); }
-function castPick(mode) {
+// куди можна перекинути з цього пристрою: онлайн, не «не передавати», а «лише якщо єдиний» — тільки коли він єдиний онлайн
+function castTargets() {
+  if (!S.sync || !S.sync.handoff_on) return [];
   const on = onlinePeers();
-  if (!S.sync || !S.sync.enabled) { toast('Увімкніть синхронізацію у вкладці «Пристрої»', true); return; }
-  if (!on.length) { toast('Немає підключених пристроїв онлайн', true); return; }
+  return on.filter(p => p.xfer !== 'never' && (p.xfer !== 'only' || on.length === 1));
+}
+function castSync() { document.body.classList.toggle('nocast', !castTargets().length); }
+function castPick(mode) {
+  const on = castTargets();
+  if (!S.sync || !S.sync.handoff_on) { toast('Увімкніть «Передачу між пристроями» у вкладці «Пристрої»', true); return; }
+  if (!on.length) { toast('Немає пристрою, на який можна перекинути', true); return; }
   if (on.length === 1) { throwTo(on[0].id, mode); return; }
   openSheet('cast', {mode});
 }
@@ -12831,7 +13097,7 @@ async function throwTo(pid, mode) {
   try {
     await api('/api/sync_cast', b);
     gpHaptic();
-    toast('Передано на «' + p.name + '»', false, 'check');
+    fxRun('out');
     if (S.cur) { closePlayer(); if (mode === 'cast') rcStart(pid); }
   } catch (e) { toast(e.message, true); }
 }
@@ -12847,13 +13113,13 @@ async function applyHandoff(h) {
   if (h.search && /^#\/search/.test(h.hash || '')) setTimeout(() => A.dosearch(), 250);
   const y = h.scroll || 0;
   if (y > 0) [300, 800, 1600].forEach(t => setTimeout(() => { if (!S.cur) window.scrollTo(0, y); }, t));
-  toast('Передано з «' + (h.from || 'іншого пристрою') + '»', false, 'cast');
+  fxRun('in'); gpHaptic();
   if (h.play && h.kid && item(h.kid)) setTimeout(() => play(h.kid, h.play.n, h.play.t), 350);
 }
 // плеєр звітує про стан і забирає команди пульта
 let PST = {on: false, busy: false};
 setInterval(async () => {
-  if (PST.busy || !(S.sync && S.sync.enabled)) return;
+  if (PST.busy || !(S.sync && S.sync.handoff_on)) return;
   if (!S.cur && !PST.on) return;
   PST.busy = true;
   try {
@@ -12899,18 +13165,63 @@ setInterval(async () => {
 }, 1000);
 document.addEventListener('input', ev => { if (ev.target.id === 'rcseek') { RC.drag = true; const d = (RC.st && RC.st.dur) || 0; $('#rcc').textContent = fmtT(d * ev.target.value / 1000); } });
 document.addEventListener('change', ev => { if (ev.target.id === 'rcseek') { const d = (RC.st && RC.st.dur) || 0; rcCmd('seek', d * ev.target.value / 1000); setTimeout(() => { RC.drag = false; }, 1200); } });
-// затиснути верх екрана → перекинути поточне на інший пристрій
-const TH = {timer: null, x: 0, y: 0};
-document.addEventListener('pointerdown', ev => {
-  clearTimeout(TH.timer); TH.timer = null;
-  if (S.sheet || !(S.sync && S.sync.enabled) || !onlinePeers().length) return;
-  const t = ev.target; if (!t || !t.closest || t.closest('button,a,input,select,textarea,label,[data-lp],.sheet,#rcbar')) return;
-  if (ev.clientY > 64 + (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--top')) || 0)) return;
-  TH.x = ev.clientX; TH.y = ev.clientY;
-  TH.timer = setTimeout(() => { TH.timer = null; GP.t = Date.now(); castPick('handoff'); }, 650);
-}, true);
-document.addEventListener('pointermove', ev => { if (TH.timer && Math.hypot(ev.clientX - TH.x, ev.clientY - TH.y) > 9) { clearTimeout(TH.timer); TH.timer = null; } }, true);
-['pointerup', 'pointercancel'].forEach(t => document.addEventListener(t, () => { clearTimeout(TH.timer); TH.timer = null; }, true));
+// ───────── жест: затиснути (верх екрана або правий край посередині) → екран тремтить → свайп угору ─────────
+const TH = {t: 0, armed: false, sx: 0, sy: 0};
+const thReady = () => castTargets().length > 0;
+function fxBlocks(kind) {
+  const n = 8; let h = '<i class="fxg"></i>';
+  for (let k = 0; k < n; k++) {
+    const x = 8 + (k * 11 + (k % 3) * 7) % 78, w = 40 + (k * 13) % 30, r = ((k % 2) ? 1 : -1) * (8 + k * 4), y = kind === 'out' ? 52 + (k * 9) % 34 : 30 + (k * 7) % 30;
+    h += `<i class="fxb" style="left:${x}%;top:${y}%;width:${w}px;height:${Math.round(w * 1.4)}px;--r:${r}deg;--ty:${(k % 3) * 8}vh;animation-delay:${k * 70}ms"></i>`;
+  }
+  return h;
+}
+function fxRun(kind) {  // 'out' — блоки злітають угору; 'in' — влітають згори
+  const el = $('#fx'); if (!el) return;
+  el.className = ''; el.innerHTML = fxBlocks(kind); void el.offsetWidth; el.className = kind;
+  document.body.classList.remove('armed'); document.body.classList.add('shk');
+  setTimeout(() => document.body.classList.remove('shk'), 700);
+  setTimeout(() => { el.className = ''; el.innerHTML = ''; }, 2000);
+}
+function thArm() {
+  TH.armed = true; gpHaptic(); GP.t = Date.now();
+  document.body.classList.add('armed'); try { getSelection().removeAllRanges(); } catch (e) {}
+  const el = $('#fx'); if (el) { el.innerHTML = '<i class="fxg"></i>'; el.className = 'arm'; }
+  const h = $('#fxh'); if (h) { h.textContent = 'Проведіть угору, щоб перекинути'; h.classList.add('on'); }
+}
+function thReset() {
+  clearTimeout(TH.t); TH.t = 0;
+  setTimeout(() => { if (!TH.armed) document.body.classList.remove('thz'); }, 0);
+  if (TH.armed) {
+    TH.armed = false; GP.t = Date.now();
+    document.body.classList.remove('armed');
+    const el = $('#fx'); if (el && el.className === 'arm') { el.className = ''; el.innerHTML = ''; }
+    const h = $('#fxh'); if (h) h.classList.remove('on');
+  }
+}
+function thFire() {
+  TH.armed = false; GP.t = Date.now(); gpHaptic();
+  document.body.classList.remove('armed');
+  const h = $('#fxh'); if (h) h.classList.remove('on');
+  const el = $('#fx'); if (el && el.className === 'arm') { el.className = ''; el.innerHTML = ''; }
+  castPick('handoff');
+}
+document.addEventListener('touchstart', ev => {
+  thReset();
+  if (ev.touches.length !== 1 || S.sheet || PR.open || !thReady()) return;
+  const t = ev.touches[0], top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--top')) || 0;
+  const edge = t.clientX > innerWidth - 44 && t.clientY > innerHeight * .25 && t.clientY < innerHeight * .75, zone = t.clientY < 100 + top || edge;
+  const bad = edge ? 'button,input,select,textarea,.sheet,#rcbar,video' : 'button,a,input,select,textarea,label,[data-lp],.sheet,#rcbar,video';
+  if (!zone || (ev.target.closest && ev.target.closest(bad))) return;
+  TH.sx = t.clientX; TH.sy = t.clientY; document.body.classList.add('thz');
+  TH.t = setTimeout(() => { TH.t = 0; clearTimeout(GP.timer); GP.timer = null; if (typeof DR !== 'undefined') { clearTimeout(DR.timer); DR.timer = null; } thArm(); }, edge ? 380 : 600);
+}, {passive: true, capture: true});
+document.addEventListener('touchmove', ev => {
+  const t = ev.touches[0]; if (!t) return;
+  if (TH.armed) { ev.preventDefault(); if (TH.sy - t.clientY > 45) thFire(); return; }
+  if (TH.t && Math.hypot(t.clientX - TH.sx, t.clientY - TH.sy) > 10) { clearTimeout(TH.t); TH.t = 0; }
+}, {passive: false, capture: true});
+['touchend', 'touchcancel'].forEach(t => document.addEventListener(t, thReset, true));
 function diagSend(ev) {
   try {
     const b = {player: !!S.cur, plays: PLAYS, hash: location.hash, lib: (S.items || []).length, imgs: Object.keys(JG_IMGS).length};
@@ -13011,7 +13322,7 @@ function diagSend(ev) {
   let sw = null;
   const layer = $('#layer');
   layer.addEventListener('touchstart', e => {
-    const sh = e.target.closest('.sheet'); if (!sh || e.touches.length !== 1) { sw = null; return; }
+    const sh = e.target.closest('.sheet'); if (!sh || e.touches.length !== 1 || sh.closest('.back-d.pop')) { sw = null; return; }  // менюшки збоку не тягнуться
     const sc = e.target.closest('#joblist') || $('#sb');  // у шторці завантажень прокручується #joblist, а не #sb
     sw = {y: e.touches[0].clientY, t: Date.now(), sh, sc, drag: false, grab: !!e.target.closest('.grab'), atTop: !sc || sc.scrollTop <= 0, last: 0};
   }, {passive: true});
@@ -13041,6 +13352,7 @@ function diagSend(ev) {
       setTimeout(() => { sh.style.transition = ''; }, 300);  // animation лишається 'none': інакше шторка повторно програє появу й блимає
     }
   };
+  layer.addEventListener('touchmove', e => { if (e.target.closest && e.target.closest('.back-d.pop')) e.preventDefault(); }, {passive: false});
   layer.addEventListener('touchend', end); layer.addEventListener('touchcancel', end);
 })();
 
