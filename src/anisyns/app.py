@@ -2,7 +2,6 @@ import os
 import socket
 import traceback
 
-
 import toga
 from toga.style import Pack
 
@@ -176,6 +175,11 @@ def _setup_native_info(anime_app):
             return 'offline'  # 0x2 = Reachable, 0x4 = ConnectionRequired (мережі фактично немає)
         return 'cell' if f & 0x40000 else 'wifi'  # 0x40000 = IsWWAN
     anime_app.NET_PROVIDER['fn'] = net
+
+    def captured():
+        from rubicon.objc import ObjCClass
+        return bool(ObjCClass('UIScreen').mainScreen.isCaptured)
+    anime_app.SCREEN_PROVIDER['fn'] = captured
 
 
 class _KeepAlive:

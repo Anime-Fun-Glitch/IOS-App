@@ -22,5 +22,6 @@ requires = ["requests"]
 [tool.briefcase.app.anisyns.iOS]
 requires = ["toga-iOS", "pillow"]
 info."UIFileSharingEnabled" = true
+info."NSLocalNetworkUsageDescription" = "AniSyns шукає ваші інші пристрої в локальній мережі, щоб синхронізувати бібліотеку."
 info."LSSupportsOpeningDocumentsInPlace" = true
 info."UIUserInterfaceStyle" = "Dark"
