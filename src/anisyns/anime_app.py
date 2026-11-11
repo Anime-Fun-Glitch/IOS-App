@@ -7904,6 +7904,15 @@ def api_clientlog(msg):
 class _Server(ThreadingHTTPServer):
   daemon_threads = True
 
+  def get_request(self):
+    conn, addr = super().get_request()
+    try:
+      import socket  # macOS/iOS: запис у закритий сокет не шле SIGPIPE
+      conn.setsockopt(socket.SOL_SOCKET, socket.SO_NOSIGPIPE, 1)
+    except Exception:
+      pass
+    return conn, addr
+
   def server_bind(self):
     # стандартний HTTPServer.server_bind викликає socket.getfqdn() → mDNS-запит, що на iOS може висіти десятки секунд
     import socketserver
@@ -8024,8 +8033,24 @@ def restart_server():
   return server
 
 
+def ignore_sigpipe():
+  """Запис у сокет, який клієнт уже закрив (плеєр обірвав запит сегмента), у вбудованому Python без обробників сигналів вбиває весь процес мовчки — без звіту про збій
+  (у Carnets обробники є, тому там це не проявлялось). Ігноруємо SIGPIPE: тоді замість смерті процесу буде звичайний BrokenPipeError."""
+  try:
+    import signal
+    signal.signal(signal.SIGPIPE, signal.SIG_IGN)
+  except Exception:
+    pass
+  try:
+    import ctypes
+    ctypes.CDLL(None).signal(13, ctypes.c_void_p(1))  # SIGPIPE → SIG_IGN напряму в libc (працює з будь-якого потоку)
+  except Exception:
+    pass
+
+
 def start():
   """Запускає сервер у фоні. Повторний запуск у тому ж блокноті перезапускає його."""
+  ignore_sigpipe()
   g = sys.modules['__main__'].__dict__
   old = g.get('_app_server')
   if old is not None:

@@ -5,6 +5,18 @@ import traceback
 import toga
 from toga.style import Pack
 
+# SIGPIPE: вбудований Python не ігнорує його сам, і запис у сокет, який закрив плеєр, мовчки вбиває застосунок (без звіту про збій)
+try:
+    import signal as _sg
+    _sg.signal(_sg.SIGPIPE, _sg.SIG_IGN)
+except Exception:
+    pass
+try:
+    import ctypes as _ct
+    _ct.CDLL(None).signal(13, _ct.c_void_p(1))
+except Exception:
+    pass
+
 
 def _documents_dir(app):
     """Папка Documents застосунку (видна в додатку «Файли»); запасний варіант — службова папка Toga."""
