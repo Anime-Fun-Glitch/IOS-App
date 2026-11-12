@@ -178,7 +178,10 @@ def _setup_native_info(anime_app):
 
     def captured():
         from rubicon.objc import ObjCClass
-        return bool(ObjCClass('UIScreen').mainScreen.isCaptured)
+        v = ObjCClass('UIScreen').mainScreen.isCaptured
+        if callable(v):  # rubicon віддає селектор isCaptured як метод — без виклику bool() завжди True (хибна «трансляція»)
+            v = v()
+        return v is True or v == 1
     anime_app.SCREEN_PROVIDER['fn'] = captured
 
 

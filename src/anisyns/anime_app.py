@@ -6251,7 +6251,7 @@ def net_state():
 SETTINGS = {'mobile_download': False, 'auto_skip': False, 'auto_skip_opening': True, 'auto_skip_ending': True, 'auto_next': True,
             'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': True, 'ios_player': True, 'np_ep_cover': True,
             'bg_keep': True, 'bg_check': False, 'island': True, 'island_dl': True, 'island_check': False,
-            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'recent_min': 3, 'handoff': False, 'client': {},
+            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'recent_min': 3, 'handoff': False, 'xgest': 'both', 'client': {},
             'site_order': ['aniliberty', 'yummyani', 'animevost', 'animru'], 'view': {}}
 
 
@@ -6293,6 +6293,8 @@ def api_settings(data=None):
           elif isinstance(SETTINGS[k], dict):
             if isinstance(data[k], dict) and len(json.dumps(data[k])) < 4000:
               SETTINGS[k] = data[k]
+          elif k == 'xgest':
+            SETTINGS[k] = data[k] if data[k] in ('both', 'top', 'edge') else 'both'
           elif k == 'skip_mode':
             SETTINGS[k] = 'soft' if data[k] == 'soft' else 'instant'
           elif k == 'recent_min':
@@ -7944,7 +7946,7 @@ SYNC_PROTO = 1
 SYNC_LOCK = threading.RLock()
 SYNC = {'st': None, 'srv': None, 'srv_err': '', 'started': False, 'found': {}, 'pending': None, 'pair_out': None, 'gen': 0,
         'status': {}, 'wake': threading.Event(), 'scanning': 0.0, 'last_rescan': 0.0, 'pair_until': 0.0, 'last_scan': 0.0}
-SYNC_SETTINGS_KEYS = ['auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'auto_check', 'auto_check_hours', 'blur_thumbs',
+SYNC_SETTINGS_KEYS = ['view', 'auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'auto_check', 'auto_check_hours', 'blur_thumbs',
                       'np_ep_cover', 'skip_mode', 'vol_max', 'own_vol', 'recent_min', 'site_order']
 SYNC_BASE_FIELDS = ['url', 'title', 'dubbing', 'base_dub', 'all_dubs', 'folder', 'known', 'ep_titles', 'meta', 'sources', 'poster_v']
 
@@ -8028,6 +8030,15 @@ def _sync_snapshot(st):
           out[f'p/{kid}/{n}'] = (str(int(t // 10)), round(t, 1), None)
       fl = {'a': bool(e.get('archived')), 'al': e.get('alias') or '', 'g': e.get('group') or '', 'gn': e.get('gname') or ''}
       out['f/' + kid] = (json.dumps(fl, sort_keys=True), fl, None)
+  groups = {}
+  with LOCK:
+    for key, e in library.items():
+      if e.get('temp') or not e.get('group'):
+        continue
+      groups.setdefault(e['group'], []).append((e.get('order', 0), _kid(key)))
+  for gid, lst in groups.items():
+    kids = [k for _o, k in sorted(lst)]
+    out['go/' + gid] = (json.dumps(kids), kids, None)
   if st.get('sync_settings'):
     for k in SYNC_SETTINGS_KEYS:
       if k in SETTINGS:
@@ -8122,6 +8133,20 @@ def _sync_apply_one(st, k, r):
       api_settings({parts[1]: v})
       last[k] = json.dumps(SETTINGS.get(parts[1]))
     return False
+  if kind == 'go':
+    # порядок аніме всередині групи: перелічені першими в заданому порядку, решта (невідомі цьому пристрою) — після
+    gid = parts[1]
+    if not isinstance(v, list):
+      return False
+    with LOCK:
+      mem = [(lk, le) for lk, le in library.items() if le.get('group') == gid and not le.get('temp')]
+      pos = {x: n for n, x in enumerate(v)}
+      mem.sort(key=lambda ke: (pos.get(_kid(ke[0]), 10**6), ke[1].get('order', 0)))
+      slots = sorted(le.get('order', 0) for _lk, le in mem)
+      for (_lk, le), o in zip(mem, slots):
+        le['order'] = o
+      last[k] = json.dumps([_kid(lk) for lk, _le in mem])
+    return True
   kid = parts[1]
   if kind == 'i':
     key, e = _sync_find(kid)
@@ -8179,7 +8204,7 @@ def _sync_apply_one(st, k, r):
 def _sync_apply(st, incoming):
   """Зливає чужі регістри: по кожному ключу перемагає новіша мітка (при рівності — більший id пристрою)."""
   changed = False
-  order = 'ifwps'
+  order = 'ifgwps'
   for k in sorted(incoming, key=lambda x: order.index(x[0]) if x[:1] in order else 9):
     r = incoming[k]
     try:
@@ -8241,17 +8266,20 @@ def _pairing():
   return time.time() < SYNC['pair_until']
 
 
-def _sync_note_found(pid, name, addr, port, kind='phone'):
+def _sync_note_found(pid, name, addr, port, kind='phone', pair=False):
   st = _sync_state()
   if pid == st['id']:
     return
-  if not _pairing() and pid not in st['peers']:
-    return  # нові пристрої шукаємо лише коли відкрите меню підключення
-  SYNC['found'][pid] = {'id': pid, 'name': name, 'addr': addr, 'port': port, 'kind': kind, 'ts': time.time()}
   p = st['peers'].get(pid)
   if p and (p.get('addr') != addr or p.get('port') != port or p.get('kind') != kind):
     p['addr'], p['port'], p['kind'] = addr, port, kind
     _sync_save()
+  if not pair:
+    SYNC['found'].pop(pid, None)  # пристрій вийшов із меню підключення — одразу прибираємо
+    return
+  if not _pairing():
+    return  # нові пристрої шукаємо лише коли відкрите меню підключення (і в них теж)
+  SYNC['found'][pid] = {'id': pid, 'name': name, 'addr': addr, 'port': port, 'kind': kind, 'ts': time.time()}
 
 
 def _sync_exchange(pid, _retry=True):
@@ -8305,7 +8333,7 @@ class _SyncHandler(BaseHTTPRequestHandler):
   def do_GET(self):
     st = _sync_state()
     if urlparse(self.path).path == '/sync/hello':
-      return self._send({'app': 'anisyns', 'proto': SYNC_PROTO, 'id': st['id'], 'name': st['name'], 'kind': st['kind'], 'port': SYNC_PORT})
+      return self._send({'app': 'anisyns', 'proto': SYNC_PROTO, 'id': st['id'], 'name': st['name'], 'kind': st['kind'], 'port': SYNC_PORT, 'pair': _pairing()})
     self._send({'error': 'not found'}, 404)
 
   def do_POST(self):
@@ -8400,7 +8428,7 @@ def _sync_command(body):
     if item:
       _sync_create(item)
     SYNC['handoff'] = {'hid': uuid.uuid4().hex[:10], 'from': str(body.get('from') or '')[:30], 'kid': body.get('kid'), 'hash': body.get('hash') or '',
-                       'scroll': body.get('scroll') or 0, 'search': body.get('search') or '', 'play': body.get('play'), 'mode': body.get('mode'),
+                       'scroll': body.get('scroll') or 0, 'search': body.get('search') or '', 'play': body.get('play'), 'open': body.get('open'), 'mode': body.get('mode'),
                        'ts': time.time()}
     return {'ok': True}
   if body.get('type') == 'pstate':
@@ -8409,6 +8437,8 @@ def _sync_command(body):
       stt = {'on': False}
     return {'ok': True, 'state': stt}
   if body.get('type') == 'pcmd':
+    if not SETTINGS.get('handoff'):
+      return {'ok': False, 'error': 'На іншому пристрої вимкнено передачу сеансу'}
     PLAYER['cmds'].append({'c': body.get('c'), 'v': body.get('v')})
     del PLAYER['cmds'][:-20]
     return {'ok': True}
@@ -8428,7 +8458,7 @@ def _local_ip():
 
 def _sync_beacon():
   st = _sync_state()
-  return json.dumps({'t': 'anisyns', 'p': SYNC_PROTO, 'id': st['id'], 'name': st['name'], 'kind': st['kind'], 'port': SYNC_PORT}).encode()
+  return json.dumps({'t': 'anisyns', 'p': SYNC_PROTO, 'id': st['id'], 'name': st['name'], 'kind': st['kind'], 'port': SYNC_PORT, 'pair': _pairing()}).encode()
 
 
 def _sync_disc_recv():
@@ -8447,7 +8477,7 @@ def _sync_disc_recv():
       data, addr = s.recvfrom(2048)
       d = json.loads(data.decode('utf8'))
       if d.get('t') == 'anisyns' and d.get('id'):
-        _sync_note_found(str(d['id']), str(d.get('name') or '')[:40], addr[0], int(d.get('port') or SYNC_PORT), str(d.get('kind') or 'phone'))
+        _sync_note_found(str(d['id']), str(d.get('name') or '')[:40], addr[0], int(d.get('port') or SYNC_PORT), str(d.get('kind') or 'phone'), bool(d.get('pair')))
     except Exception:
       time.sleep(0.2)
 
@@ -8485,7 +8515,7 @@ def _sync_scan_net():
       return
     try:
       d = _sync_hello(a)
-      _sync_note_found(str(d['id']), str(d.get('name') or '')[:40], a, int(d.get('port') or SYNC_PORT), str(d.get('kind') or 'phone'))
+      _sync_note_found(str(d['id']), str(d.get('name') or '')[:40], a, int(d.get('port') or SYNC_PORT), str(d.get('kind') or 'phone'), bool(d.get('pair')))
     except Exception:
       pass
   with ThreadPoolExecutor(48) as ex:
@@ -8500,11 +8530,8 @@ def _sync_loop():
     st = _sync_state()
     n += 1
     lost = any(not (SYNC['status'].get(pid) or {}).get('ok') for pid in st['peers'])
-    if (_pairing() and n % 2 == 1) or (lost and n % 2 == 0):  # пристрій зник (змінилась мережа/IP) — кричимо, щоб він нас знайшов за id
+    if lost and n % 2 == 0:  # пристрій зник (змінилась мережа/IP) — кричимо, щоб він нас знайшов за id
       _sync_send_beacon()
-    if _pairing() and time.time() - SYNC['last_scan'] > 12:
-      SYNC['last_scan'] = time.time()
-      threading.Thread(target=_sync_scan_net, daemon=True).start()
     if st.get('sync'):
       try:
         _sync_scan()
@@ -8567,7 +8594,7 @@ def api_sync_state():
     peers.append({'id': pid, 'name': p.get('alias') or p.get('name') or pid[:6], 'rname': p.get('name') or '', 'alias': p.get('alias') or '',
                   'kind': p.get('kind') or 'phone', 'xfer': p.get('xfer') or 'std', 'addr': p.get('addr'), 'last': p.get('last') or 0,
                   'online': bool(s.get('ok') and now - s.get('t', 0) < 45), 'err': '' if s.get('ok') or not s else s.get('err', ''), 'sync': bool(s.get('sync'))})
-  found = [f for f in SYNC['found'].values() if now - f['ts'] < 40 and f['id'] not in st['peers']] if _pairing() else []
+  found = [f for f in SYNC['found'].values() if now - f['ts'] < 12 and f['id'] not in st['peers']] if _pairing() else []
   pd = SYNC['pending']
   if pd and time.time() > pd['exp']:
     SYNC['pending'] = pd = None
@@ -8604,6 +8631,18 @@ def api_sync_cfg(d):
   return api_sync_state()
 
 
+def _sync_pair_thread():
+  last_scan = 0.0
+  while _pairing():
+    _sync_send_beacon()
+    if time.time() - last_scan > 8:
+      last_scan = time.time()
+      threading.Thread(target=_sync_scan_net, daemon=True).start()
+    time.sleep(2.5)
+  SYNC['pair_thr'] = False
+  _sync_send_beacon()  # останній сигнал: «я вже не в меню» (pair=false)
+
+
 def api_sync_pairmode(on):
   """Меню «Додати пристрій»: лише поки воно відкрите пристрої шукають одне одного й приймають підключення."""
   _sync_run()
@@ -8614,8 +8653,9 @@ def api_sync_pairmode(on):
     if first:
       SYNC['found'] = {}
       SYNC['last_scan'] = time.time()
-      _sync_send_beacon()
-      threading.Thread(target=_sync_scan_net, daemon=True).start()
+      if not SYNC.get('pair_thr'):
+        SYNC['pair_thr'] = True
+        threading.Thread(target=_sync_pair_thread, daemon=True).start()
   else:
     SYNC['pair_until'] = 0.0
     SYNC['found'], SYNC['pending'], SYNC['pair_out'] = {}, None, None
@@ -8635,7 +8675,7 @@ def api_sync_scan():
 def api_sync_add(addr, port=None):
   """Додати пристрій вручну за IP (якщо мережа блокує автопошук; для ПК теж зручно)."""
   d = _sync_hello(str(addr).strip(), int(port or SYNC_PORT), timeout=3)
-  _sync_note_found(str(d['id']), str(d.get('name') or '')[:40], str(addr).strip(), int(d.get('port') or SYNC_PORT), str(d.get('kind') or 'phone'))
+  _sync_note_found(str(d['id']), str(d.get('name') or '')[:40], str(addr).strip(), int(d.get('port') or SYNC_PORT), str(d.get('kind') or 'phone'), bool(d.get('pair')))
   return {'ok': True, 'id': d['id']}
 
 
@@ -8732,7 +8772,7 @@ PLAYER = {'state': {'on': False}, 'cmds': [], 'ts': 0.0}
 
 def api_pstate(b):
   """Плеєр на цьому пристрої звітує про стан (раз на секунду) і забирає команди, надіслані з пристрою-пульта."""
-  PLAYER['state'] = {k: b.get(k) for k in ('on', 'id', 'n', 't', 'dur', 'paused', 'title', 'ep')}
+  PLAYER['state'] = {k: b.get(k) for k in ('on', 'id', 'n', 't', 'dur', 'paused', 'title', 'ep', 'vol', 'vmax', 'own')}
   PLAYER['ts'] = time.time()
   cmds, PLAYER['cmds'] = PLAYER['cmds'], []
   return {'cmds': cmds}
@@ -8758,7 +8798,7 @@ def api_sync_cast(pid, b):
     item = _sync_base(key, e, temp=True)
     item['temp'] = True
   play = b.get('play') if isinstance(b.get('play'), dict) else None
-  _peer_cmd(pid, {'type': 'handoff', 'item': item, 'kid': kid, 'hash': str(b.get('hash') or '')[:200], 'scroll': float(b.get('scroll') or 0),
+  _peer_cmd(pid, {'type': 'handoff', 'item': item, 'kid': kid, 'open': b.get('open') if isinstance(b.get('open'), dict) else None, 'hash': str(b.get('hash') or '')[:200], 'scroll': float(b.get('scroll') or 0),
                   'search': str(b.get('search') or '')[:120], 'play': play, 'mode': b.get('mode') or 'handoff', 'from': st['name']}, 20)
   return {'ok': True}
 
@@ -9015,6 +9055,30 @@ body{padding-bottom:calc(84px + var(--bot))}
 #tabs a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;font-size:11px;color:var(--mu);border-radius:12px}
 #tabs a .i{width:24px;height:24px}
 #tabs a.on{color:var(--ac)}
+#rcbar{bottom:calc(var(--tabh,92px) + 10px)!important;z-index:95!important;touch-action:manipulation;-webkit-tap-highlight-color:transparent;transition:all .25s}
+#rcbar .rcx{background:none;border:0;color:var(--mu);width:38px;height:38px;display:flex;align-items:center;justify-content:center}
+#rcbar .rcpill{display:none;background:none;border:0;color:var(--ac);width:48px;height:48px;align-items:center;justify-content:center}
+#rcbar.min{left:auto;right:12px;width:50px;height:50px;padding:0;border-radius:25px}
+#rcbar.min .rcfull{display:none}#rcbar.min .rcpill{display:flex}
+.rcvl{display:flex;align-items:center;gap:8px;margin-top:6px;color:var(--mu);font-size:12px}.rcvl input{flex:1}.rcvl .rcvi .i{width:20px;height:20px}#rcvn{min-width:34px;text-align:right}
+.rcb .cb,.rcx{-webkit-tap-highlight-color:transparent}
+body.bsw #root,body.bsw #player{filter:blur(14px);opacity:.78;transition:filter .24s,opacity .24s}
+#root,#player{transition:filter .3s,opacity .3s}
+.dvwrap{padding-top:28px!important}
+.dvic{flex:none;aspect-ratio:1}.dvic .i,.prme .i,.blip .bi .i{flex:none}
+.seg button{white-space:nowrap;display:flex!important;align-items:center;justify-content:center;text-align:center;line-height:1.15;min-height:38px;padding:0 6px!important;font-family:inherit}
+.seg{align-items:stretch}
+.dvic .dot,.dvic i.dot{position:absolute;right:-3px;bottom:-3px;width:13px!important;height:13px!important;min-width:13px;min-height:13px;max-width:13px;max-height:13px;aspect-ratio:1/1;box-sizing:border-box!important;border-radius:50%!important;display:block;flex:none;padding:0;margin:0;font-size:0;line-height:0}
+.dvic.big .dot{width:16px!important;height:16px!important;min-width:16px;min-height:16px;max-width:16px;max-height:16px}
+.dvcard.gest.dim{opacity:.45}
+#pairlay,#pairlay *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+#pairlay input{-webkit-user-select:text;user-select:text}
+.prradar,.prradar *{pointer-events:none}
+.gph.e .gf{left:auto;right:5px;top:50%;margin:0;animation:gFingerE 4.4s infinite}
+.gph.e .gglow{animation:gGlowE 4.4s infinite}
+@keyframes gFingerE{0%{opacity:0;transform:translateY(0)}10%{opacity:.9}35%{box-shadow:0 0 0 10px #fff0;transform:translateY(0)}60%{transform:translateY(-34px);opacity:.9}75%,100%{opacity:0;transform:translateY(-40px)}}
+@keyframes gGlowE{0%,40%{opacity:0}55%,70%{opacity:1}90%,100%{opacity:0}}
+@media (min-width:700px){#player .top{padding-top:calc(34px + var(--top))!important;background:linear-gradient(#000 0,#000 72%,transparent)!important}}
 body.nocast [data-act=pcast]{display:none!important}
 body.thz,body.thz *,body.armed,body.armed *{-webkit-user-select:none!important;user-select:none!important;-webkit-touch-callout:none!important}
 .xf{padding:8px 4px 6px}.xf .xl{display:block;font-size:11.5px;color:var(--mu);margin:0 4px 6px}
@@ -11241,7 +11305,8 @@ function renderSheet() {
   else if (s.kind === 'cmenu' && s.res) inner = `<h3>${esc(s.res.title)}</h3><div class="cm">
      <button data-act="rsshare">${ico('share')} Поділитись</button>
      <button data-act="rslib" data-lp="gpick" data-m="lib">${ico('plus')} Додати в Бібліотеку</button>
-     <button data-act="rsseen" data-lp="gpick" data-m="seen">${ico('check')} Додати в Переглянуте</button></div>
+     <button data-act="rsseen" data-lp="gpick" data-m="seen">${ico('check')} Додати в Переглянуте</button>
+     ${castTargets().length ? `<button data-act="rscast">${ico('cast')} Відкрити на іншому пристрої</button>` : ''}</div>
      <p class="hint" style="margin:8px 4px 0;font-size:12px">Затисніть «Бібліотеку» чи «Переглянуте», щоб додати до наявної групи.</p>`;
   else if (s.kind === 'dmenu') inner = dmenuHTML(s);
   else if (s.kind === 'cast') inner = `<h3>Перекинути на…</h3><div class="cm">${((S.sync && S.sync.peers) || []).map(p => `<button data-act="castgo" data-id="${esc(p.id)}" ${p.online ? '' : 'disabled'}>${dico(p.kind)} ${esc(p.name)} <span class="d" style="margin-left:auto">${p.online ? 'онлайн' : 'офлайн'}</span></button>`).join('')}</div>`;
@@ -11253,6 +11318,7 @@ function renderSheet() {
      <button class="dng" data-act="gmdel" data-g="${esc(s.gid)}">${ico('trash')} Видалити</button></div>`; }
   else if (s.kind === 'cmenu') { const it = item(s.id) || {}; inner = `<h3>${esc(lname(it))}</h3><div class="cm">
      <button data-act="cmshare" data-id="${s.id}">${ico('share')} Поділитись</button>
+     ${castTargets().length ? `<button data-act="cmcast">${ico('cast')} Відкрити на іншому пристрої</button>` : ''}
      <button data-act="cmrename" data-id="${s.id}">${ico('edit')} Перейменувати</button>
      <button data-act="cmarc" data-lp="gpick" data-id="${s.id}">${ico(it.archived ? 'refresh' : 'check')} ${it.archived ? 'У бібліотеку' : 'У переглянуте'}</button>
      ${it.group ? '' : `<button data-act="cmgroup" data-id="${s.id}">${ico('plus')} Створити групу</button>`}
@@ -11769,6 +11835,7 @@ const A = {
     if (!el.classList.contains('conf')) { el.classList.add('conf'); el.textContent = 'Точно?'; setTimeout(() => { if (el.isConnected) { el.classList.remove('conf'); el.textContent = 'Відʼєднати'; } }, 3000); return; }
     try { S.sync = await api('/api/sync_unpair', {id: el.dataset.id}); paintSync(); } catch (e) { toast(e.message, true); }
   },
+  async xgest(el) { try { await api('/api/settings', {xgest: el.dataset.m}); if (S.set) S.set.xgest = el.dataset.m; paintSync(); const b = $('#dvbox'); if (b) { b.dataset.h = ''; paintSync(); } } catch (e) { toast(e.message, true); } },
   async dxfer(el) { try { S.sync = await api('/api/sync_xfer', {id: el.dataset.id, mode: el.dataset.x}); paintSync(); } catch (e) { toast(e.message, true); } },
   async dpush(el) {
     const p = peerOf(el.dataset.id); closeSheet();
@@ -11807,7 +11874,9 @@ const A = {
   dthrow(el) { closeSheet(); throwTo(el.dataset.id, 'handoff'); },
   pcast() { castPick('cast'); },
   airplay() { try { V.webkitShowPlaybackTargetPicker(); } catch (e) { toast('AirPlay недоступний', true); } },
-  castgo(el) { const m = S.sheet && S.sheet.mode; closeSheet(); throwTo(el.dataset.id, m || 'handoff'); },
+  castgo(el) { const m = S.sheet && S.sheet.mode, x = S.sheet && S.sheet.extra; closeSheet(); throwTo(el.dataset.id, m || 'handoff', x); },
+  cmcast() { const id = S.sheet && S.sheet.id; closeSheet(); castPick('handoff', {id, hash: '#/a/' + id, scroll: 0, search: '', play: null}); },
+  rscast() { const r = S.sheet && S.sheet.res; if (!r) return; closeSheet(); castPick('handoff', {hash: '#/', scroll: 0, search: '', open: {url: r.srcs[0].url, title: r.title, explicit: !!r.explicit, srcs: r.srcs}}); },
   async syncnow() { try { await api('/api/sync_now', {}); toast('Синхронізую…'); } catch (e) { toast(e.message, true); } setTimeout(syncFetch, 1500); },
   rdl() {
     const y = S.sync, it = item(route().id); if (!y || !it) return;
@@ -12960,12 +13029,16 @@ function devBody() {
     h += '<div class="dvsec">Можливості</div>';
     h += `<label class="dvcard dvsw"><div class="dvic ft">${ico('cast')}</div><div class="tx"><b>Передача між пристроями</b><span class="d">Перекидайте вкладку, серію з поточного моменту, пошук і прокрутку на інший пристрій. Увімкніть на обох.</span></div><span class="sw"><input type="checkbox" id="hosw" ${y.handoff_on ? 'checked' : ''}></span></label>`;
     h += `<label class="dvcard dvsw"><div class="dvic ft">${ico('refresh')}</div><div class="tx"><b>Синхронізація</b><span class="d">Бібліотека, перегляд, позиція, архів і видалення. Увімкніть на обох.</span></div><span class="sw"><input type="checkbox" id="sysw" ${y.sync ? 'checked' : ''}></span></label>`;
-    if (y.sync) h += `<div class="seg" role="tablist"><button data-act="symode" data-m="lib" class="${y.sync_settings ? '' : 'on'}">Бібліотека</button><button data-act="symode" data-m="all" class="${y.sync_settings ? 'on' : ''}">Бібліотека й налаштування</button></div>
+    if (y.sync) h += `<div class="seg" role="tablist"><button data-act="symode" data-m="lib" class="${y.sync_settings ? '' : 'on'}">Бібліотека</button><button data-act="symode" data-m="all" class="${y.sync_settings ? 'on' : ''}">З налаштуваннями</button></div>
       <p class="dvhint">${y.sync_settings ? 'Разом із налаштуваннями плеєра, автоперевірки й гучності. Функції розробника не передаються.' : 'Налаштування лишаються окремими на кожному пристрої.'}</p>`;
-    h += `<div class="dvsec">Як перекинути</div>
-      <div class="dvcard gest"><div class="gdemo"><div class="gph"><i class="gglow"></i><i class="gb b1"></i><i class="gb b2"></i><i class="gb b3"></i><i class="gf"></i></div></div>
-      <div class="tx"><b>Затисніть і проведіть угору</b><span class="d">1. Затисніть верх екрана або правий край посередині.<br>2. Екран затремтить і засяє.<br>3. Проведіть пальцем угору — відкрите переліта на інший пристрій.</span>
-      ${y.handoff_on ? '' : '<span class="d" style="color:var(--ac);margin-top:4px">Спершу ввімкніть «Передачу між пристроями».</span>'}</div></div>`;
+    const g = (S.set && S.set.xgest) || 'both';
+    h += `<div class="dvsec">Жест перекидання</div>
+      <div class="seg" role="tablist">${[['both', 'Обидва'], ['top', 'Зверху'], ['edge', 'Справа']].map(([m, t]) => `<button data-act="xgest" data-m="${m}" class="${g === m ? 'on' : ''}">${t}</button>`).join('')}</div>
+      <div class="dvcard gest ${g === 'edge' ? 'dim' : ''}"><div class="gdemo"><div class="gph"><i class="gglow"></i><i class="gb b1"></i><i class="gb b2"></i><i class="gb b3"></i><i class="gf"></i></div></div>
+      <div class="tx"><b>Затиснути зверху</b><span class="d">Затисніть верх екрана — екран затремтить і засяє. Продовжуйте тримати, і відкрите перелетить на інший пристрій.</span></div></div>
+      <div class="dvcard gest ${g === 'top' ? 'dim' : ''}"><div class="gdemo"><div class="gph e"><i class="gglow"></i><i class="gb b1"></i><i class="gb b2"></i><i class="gb b3"></i><i class="gf"></i></div></div>
+      <div class="tx"><b>Затиснути справа й провести вгору</b><span class="d">Затисніть правий край посередині екрана — він затремтить. Тоді проведіть пальцем угору, щоб перекинути.</span></div></div>
+      ${y.handoff_on ? '' : '<p class="dvhint" style="color:var(--ac)">Спершу ввімкніть «Передачу між пристроями».</p>'}`;
   }
   return h;
 }
@@ -12978,7 +13051,6 @@ function dmenuHTML(s) {
     <div class="tx"><b>${esc(p.name)}</b><span class="dst ${p.online ? 'on' : ''}">${p.online ? 'У мережі' : 'Не в мережі'}</span>
     <span class="d">${esc(DKIND[p.kind] || '')}${p.sync && p.last ? ' · синхр. ' + syAgo(p.last) : ''}</span></div></div>
     <div class="cm">${p.online && S.sync && S.sync.sync ? `<button data-act="dsync" data-id="${esc(p.id)}">${ico('refresh')} Синхронізувати зараз</button>` : ''}
-    ${castTargets().some(x => x.id === p.id) ? `<button data-act="dthrow" data-id="${esc(p.id)}">${ico('cast')} Перекинути туди відкрите</button>` : ''}
     ${p.online ? `<button data-act="dpush" data-id="${esc(p.id)}">${ico('download')} Передати сюди мої налаштування</button>` : ''}
     <div class="xf"><span class="xl">Перекидання на цей пристрій</span><div class="seg sm">${[['std', 'Звичайне'], ['only', 'Єдиний'], ['never', 'Ніколи']].map(([m, t]) => `<button data-act="dxfer" data-id="${esc(p.id)}" data-x="${m}" class="${(p.xfer || 'std') === m ? 'on' : ''}">${t}</button>`).join('')}</div></div>
     <button data-act="drename" data-id="${esc(p.id)}">${ico('edit')} Змінити назву</button>
@@ -12993,10 +13065,20 @@ function pairHTML() {
    <div class="prradar"><i class="rg"></i><i class="rg"></i><i class="rg"></i><i class="sweep"></i><div class="prme">${dico(y.kind)}</div><div id="prblips"></div></div>
    <h2 id="prtitle">Шукаю пристрої поруч…</h2><p id="prsub">Відкрийте це меню й на другому пристрої та підключіть їх до однієї Wi‑Fi мережі.</p><div id="prbody"></div>`;
 }
+async function pullView() {
+  try {
+    const j = await api('/api/settings');
+    if (j.view && Object.keys(j.view).length && JSON.stringify({...VIEW_DEF, ...j.view}) !== JSON.stringify(S.view)) {
+      S.view = {...VIEW_DEF, ...j.view}; try { localStorage.setItem('libview', JSON.stringify(S.view)); } catch (e) {}
+      if (['home', 'group'].includes(route().name) && !S.cur) render();
+    }
+    if (S.set) Object.assign(S.set, j);
+  } catch (e) {}
+}
 async function askOffer(o) {
   S.lastOffer = o.hid;
   const yes = await askConfirm('Прийняти налаштування?', `«${o.from}» пропонує передати свої налаштування (${o.n}). Поточні налаштування на цьому пристрої буде замінено.`, 'Прийняти', false);
-  try { S.sync = await api('/api/sync_offer', {hid: o.hid, ok: !!yes}); if (yes) { const s2 = await api('/api/settings'); if (s2 && S.set) Object.assign(S.set, s2.settings || s2); toast('Налаштування прийнято', false, 'check'); if (typeof render === 'function') render(); } } catch (e) { toast(e.message, true); }
+  try { S.sync = await api('/api/sync_offer', {hid: o.hid, ok: !!yes}); if (yes) { await pullView(); toast('Налаштування прийнято', false, 'check'); render(); } } catch (e) { toast(e.message, true); }
 }
 function paintPair() {
   if (!PR.open) return;
@@ -13017,7 +13099,7 @@ function paintPair() {
   PR.sig = sig;
   const bl = $('#prblips');
   bl.innerHTML = found.map(f => { const a = hue(f.id) % 360, r = 33 + hue(f.id + 'r') % 12, x = 50 + r * Math.cos(a * Math.PI / 180), yy = 50 + r * Math.sin(a * Math.PI / 180);
-    return `<button class="blip" style="left:${x}%;top:${yy}%" data-act="syncpair" data-id="${esc(f.id)}"><span class="bi">${dico(f.kind)}</span><span class="bn">${esc(f.name)}</span></button>`; }).join('');
+    return `<div class="blip" style="left:${x}%;top:${yy}%"><span class="bi">${dico(f.kind)}</span><span class="bn">${esc(f.name)}</span></div>`; }).join('');
   const t = $('#prtitle'), sub = $('#prsub'), body = $('#prbody');
   if (inc) {
     t.textContent = '«' + inc.name + '» хоче підключитись'; sub.textContent = 'Введіть цей код на тому пристрої:';
@@ -13063,7 +13145,7 @@ async function syncFetch() {
     S.sync = j; paintSync();
     if (j.kind !== myKind() && !S._kindSent) { S._kindSent = true; api('/api/sync_cfg', {kind: myKind(), auto_name: DKIND[myKind()]}).then(r => { S.sync = r; paintSync(); }).catch(() => {}); }
     if (j.handoff && j.handoff.hid !== S.lastHid) applyHandoff(j.handoff);
-    if (j.gen !== g0 && !S.cur) loadLib('vis').catch(() => {});
+    if (j.gen !== g0 && !S.cur) { loadLib('vis').catch(() => {}); if (j.sync_settings) pullView(); }
     return j;
   } catch (e) {}
 }
@@ -13082,39 +13164,48 @@ function castTargets() {
   return on.filter(p => p.xfer !== 'never' && (p.xfer !== 'only' || on.length === 1));
 }
 function castSync() { document.body.classList.toggle('nocast', !castTargets().length); }
-function castPick(mode) {
+function castPick(mode, extra) {
   const on = castTargets();
   if (!S.sync || !S.sync.handoff_on) { toast('Увімкніть «Передачу між пристроями» у вкладці «Пристрої»', true); return; }
   if (!on.length) { toast('Немає пристрою, на який можна перекинути', true); return; }
-  if (on.length === 1) { throwTo(on[0].id, mode); return; }
-  openSheet('cast', {mode});
+  if (on.length === 1) { throwTo(on[0].id, mode, extra); return; }
+  openSheet('cast', {mode, extra});
 }
-async function throwTo(pid, mode) {
+// плавний перехід із розмиттям: контент розмивається, змінюється, знову стає чітким
+function blurSwap(fn) {
+  document.body.classList.add('bsw');
+  setTimeout(() => { try { fn(); } catch (e) {} setTimeout(() => document.body.classList.remove('bsw'), 140); }, 240);
+}
+async function throwTo(pid, mode, extra) {
   const p = peerOf(pid); if (!p) return;
   const r = route(), b = {peer: pid, mode, hash: location.hash, scroll: window.scrollY, search: r.name === 'search' ? (S.search.q || '') : ''};
-  if (S.cur) { b.id = S.cur.id; b.play = {n: S.cur.n, t: V.currentTime || P.good || 0, paused: V.paused}; }
+  if (extra) { Object.assign(b, extra); }
+  else if (S.cur) { b.id = S.cur.id; b.play = {n: S.cur.n, t: V.currentTime || P.good || 0, paused: V.paused}; }
   else if (r.name === 'detail') b.id = r.id;
   try {
     await api('/api/sync_cast', b);
     gpHaptic();
     fxRun('out');
-    if (S.cur) { closePlayer(); if (mode === 'cast') rcStart(pid); }
+    if (S.cur) { blurSwap(() => { closePlayer(); if (mode === 'cast') rcStart(pid); }); }
   } catch (e) { toast(e.message, true); }
 }
 async function applyHandoff(h) {
   S.lastHid = h.hid;
   api('/api/sync_ack', {hid: h.hid}).catch(() => {});
   try { await loadLib('vis'); } catch (e) {}
-  if (S.sheet) closeSheet();
-  if (S.cur) closePlayer();
-  rcStop();
-  if (h.search) { S.search.q = h.search; }
-  if (h.hash && h.hash !== location.hash && !/^#\/devices/.test(h.hash)) location.hash = h.hash; else render();
-  if (h.search && /^#\/search/.test(h.hash || '')) setTimeout(() => A.dosearch(), 250);
-  const y = h.scroll || 0;
-  if (y > 0) [300, 800, 1600].forEach(t => setTimeout(() => { if (!S.cur) window.scrollTo(0, y); }, t));
   fxRun('in'); gpHaptic();
-  if (h.play && h.kid && item(h.kid)) setTimeout(() => play(h.kid, h.play.n, h.play.t), 350);
+  blurSwap(() => {
+    if (S.sheet) closeSheet();
+    if (S.cur) closePlayer();
+    rcStop();
+    if (h.search) { S.search.q = h.search; }
+    if (h.hash && h.hash !== location.hash && !/^#\/devices/.test(h.hash)) location.hash = h.hash; else render();
+    if (h.search && /^#\/search/.test(h.hash || '')) setTimeout(() => A.dosearch(), 250);
+    const y = h.scroll || 0;
+    if (y > 0) [300, 800, 1600].forEach(t => setTimeout(() => { if (!S.cur) window.scrollTo(0, y); }, t));
+    if (h.open && h.open.url) openAnime(h.open.url, h.open.title, !!h.open.explicit, h.open.srcs || [{url: h.open.url, title: h.open.title}]);
+    if (h.play && h.kid && item(h.kid)) setTimeout(() => play(h.kid, h.play.n, h.play.t), 350);
+  });
 }
 // плеєр звітує про стан і забирає команди пульта
 let PST = {on: false, busy: false};
@@ -13124,7 +13215,7 @@ setInterval(async () => {
   PST.busy = true;
   try {
     const it = S.cur ? item(S.cur.id) : null;
-    const b = S.cur ? {on: true, id: S.cur.id, n: S.cur.n, t: V.currentTime || 0, dur: V.duration || 0, paused: V.paused, title: it ? lname(it) : '', ep: S.cur.n} : {on: false};
+    const b = S.cur ? {on: true, id: S.cur.id, n: S.cur.n, t: V.currentTime || 0, dur: V.duration || 0, paused: V.paused, title: it ? lname(it) : '', ep: S.cur.n, vol: volGet(), vmax: volMax(), own: ownVol() || !IOS_APP} : {on: false};
     PST.on = !!S.cur;
     const r = await api('/api/pstate', b);
     for (const c of (r.cmds || [])) {
@@ -13132,42 +13223,94 @@ setInterval(async () => {
       if (c.c === 'pause') V.pause(); else if (c.c === 'play') V.play().catch(() => {});
       else if (c.c === 'seek') V.currentTime = Math.max(0, Number(c.v) || 0);
       else if (c.c === 'seekby') V.currentTime = Math.max(0, (V.currentTime || 0) + (Number(c.v) || 0));
+      else if (c.c === 'vol') { const v = Number(c.v) || 0; if (ownVol()) { volApply(v); volPaint(); } else { try { V.volume = Math.max(0, Math.min(1, v / 100)); } catch (e) {} } }
       else if (c.c === 'next') A.pnext(); else if (c.c === 'prev') A.pprev(); else if (c.c === 'close') closePlayer();
     }
   } catch (e) {} finally { PST.busy = false; }
 }, 1000);
 // пульт: цей пристрій керує плеєром на іншому
-const RC = {pid: null, name: '', t0: 0, miss: 0, drag: false, busy: false, st: null};
-function rcStart(pid) {
-  const p = peerOf(pid); RC.pid = pid; RC.name = p ? p.name : 'пристрій'; RC.t0 = Date.now(); RC.miss = 0; RC.st = null; RC.drag = false;
-  const el = $('#rcbar'); el.classList.remove('hide');
-  el.innerHTML = `<div class="rch"><span class="rci">${ico('cast')}</span><div class="tx"><b id="rct">Грає на «${esc(RC.name)}»</b><span id="rcs">Підключаюсь…</span></div><button class="ib" data-act="rcx" aria-label="Зупинити й закрити">${ico('close')}</button></div>
+const RC = {pid: null, name: '', t0: 0, miss: 0, drag: false, vdrag: false, busy: false, st: null, seen: false, auto: false, min: false, n: 0};
+function rcLayout() {
+  const t = $('#tabs'), h = t ? t.getBoundingClientRect().height : 90;
+  document.documentElement.style.setProperty('--tabh', Math.round(h) + 'px');
+}
+function rcStart(pid, auto) {
+  const p = peerOf(pid); RC.pid = pid; RC.name = p ? p.name : 'пристрій'; RC.t0 = Date.now(); RC.miss = 0; RC.st = null; RC.drag = RC.vdrag = false; RC.seen = false; RC.auto = !!auto; RC.min = false;
+  const el = $('#rcbar'); rcLayout(); el.classList.remove('hide', 'min');
+  el.innerHTML = `<button class="rcpill" data-rc="open" aria-label="Пульт">${ico('cast')}</button>
+   <div class="rcfull"><div class="rch"><span class="rci">${ico('cast')}</span><div class="tx"><b id="rct">Запускаю на «${esc(RC.name)}»…</b><span id="rcs">Пульт керування</span></div>
+    <button class="rcx" data-rc="min" aria-label="Згорнути">${ico('chev')}</button><button class="rcx" data-rc="stop" aria-label="Зупинити відтворення">${ico('close')}</button></div>
    <div class="rcsk"><span id="rcc">0:00</span><input type="range" id="rcseek" min="0" max="1000" value="0"><span id="rcd">0:00</span></div>
-   <div class="rcb"><button class="cb sm" data-act="rcc" data-c="prev">${ico('prev')}</button><button class="cb" data-act="rcc" data-c="seekby" data-v="-10">${ico('back10')}</button><button class="cb big" id="rcpp" data-act="rcpp">${ico('pause')}</button><button class="cb" data-act="rcc" data-c="seekby" data-v="10">${ico('fwd10')}</button><button class="cb sm" data-act="rcc" data-c="next">${ico('next')}</button></div>`;
+   <div class="rcb"><button class="cb sm" data-rc="prev">${ico('prev')}</button><button class="cb" data-rc="back">${ico('back10')}</button><button class="cb big" id="rcpp" data-rc="pp">${ico('pause')}</button><button class="cb" data-rc="fwd">${ico('fwd10')}</button><button class="cb sm" data-rc="next">${ico('next')}</button></div>
+   <div class="rcvl"><span class="rcvi">${ico('vol')}</span><input type="range" id="rcvol" min="0" max="100" value="100"><span id="rcvn">100</span></div></div>`;
   document.body.classList.add('rc');
 }
 function rcStop() { RC.pid = null; const el = $('#rcbar'); if (el) { el.classList.add('hide'); el.innerHTML = ''; } document.body.classList.remove('rc'); }
 async function rcCmd(c, v) { if (!RC.pid) return; try { await api('/api/sync_rc', {peer: RC.pid, c, v}); } catch (e) { toast(e.message, true); } }
-setInterval(async () => {
-  if (!RC.pid || RC.busy || RC.drag) return;
+function rcAct(b) {
+  const a = b.dataset.rc;
+  if (a === 'min') { RC.min = true; $('#rcbar').classList.add('min'); }
+  else if (a === 'open') { RC.min = false; $('#rcbar').classList.remove('min'); }
+  else if (a === 'stop') { rcCmd('close'); rcStop(); }
+  else if (a === 'pp') rcCmd(RC.st && RC.st.paused ? 'play' : 'pause');
+  else if (a === 'prev') rcCmd('prev'); else if (a === 'next') rcCmd('next');
+  else if (a === 'back') rcCmd('seekby', -10); else if (a === 'fwd') rcCmd('seekby', 10);
+}
+(function rcInit() {
+  const el = $('#rcbar'); if (!el) return;
+  el.addEventListener('click', ev => { ev.stopPropagation(); ev.preventDefault(); });
+  let last = 0;
+  const tap = ev => { const b = ev.target.closest && ev.target.closest('[data-rc]'); if (!b) return; if (ev.type === 'touchend' && ev.cancelable) ev.preventDefault(); if (Date.now() - last < 350) return; last = Date.now(); rcAct(b); };
+  el.addEventListener('touchend', tap, {passive: false}); el.addEventListener('pointerup', ev => { if (ev.pointerType === 'mouse') tap(ev); });
+  ['touchstart', 'pointerdown'].forEach(t => el.addEventListener(t, ev => ev.stopPropagation()));
+})();
+function rcPaint(st) {
+  RC.st = st; const it = $('#rct'); if (!it) return;
+  it.textContent = st.title ? st.title : 'Грає на «' + RC.name + '»';
+  $('#rcs').textContent = 'Серія ' + st.ep + ' · «' + RC.name + '»';
+  if (!RC.drag) { $('#rcc').textContent = fmtT(st.t); $('#rcseek').value = st.dur ? Math.round(1000 * st.t / st.dur) : 0; }
+  $('#rcd').textContent = fmtT(st.dur);
+  $('#rcpp').innerHTML = ico(st.paused ? 'play' : 'pause');
+  const vm = st.vmax || 100, vr = $('#rcvol'); vr.max = vm; vr.disabled = st.own === false;
+  if (!RC.vdrag) { vr.value = st.vol == null ? 100 : st.vol; $('#rcvn').textContent = st.own === false ? 'сист.' : Math.round(vr.value); }
+}
+// автоматично: якщо на іншому пристрої зараз грає серія — пропонуємо пульт
+async function rcPoll() {
+  if (RC.busy) return;
   RC.busy = true;
   try {
-    const r = await api('/api/sync_pstate', {peer: RC.pid}), st = r.state || {};
-    if (!RC.pid) return;
-    if (!st.on) { RC.miss++; if (RC.miss >= 3 && Date.now() - RC.t0 > 8000) { rcStop(); toast('Відтворення на «' + RC.name + '» завершено'); } return; }
-    RC.miss = 0; RC.st = st;
-    const it = $('#rct'); if (it) it.textContent = st.title ? st.title : 'Грає на «' + RC.name + '»';
-    const sub = $('#rcs'); if (sub) sub.textContent = 'Серія ' + st.ep + ' · «' + RC.name + '»';
-    $('#rcc').textContent = fmtT(st.t); $('#rcd').textContent = fmtT(st.dur);
-    $('#rcseek').value = st.dur ? Math.round(1000 * st.t / st.dur) : 0;
-    $('#rcpp').innerHTML = ico(st.paused ? 'play' : 'pause');
-  } catch (e) { RC.miss++; if (RC.miss >= 4 && Date.now() - RC.t0 > 8000) { rcStop(); toast('Звʼязок із «' + RC.name + '» втрачено', true); } } finally { RC.busy = false; }
-}, 1000);
-document.addEventListener('input', ev => { if (ev.target.id === 'rcseek') { RC.drag = true; const d = (RC.st && RC.st.dur) || 0; $('#rcc').textContent = fmtT(d * ev.target.value / 1000); } });
-document.addEventListener('change', ev => { if (ev.target.id === 'rcseek') { const d = (RC.st && RC.st.dur) || 0; rcCmd('seek', d * ev.target.value / 1000); setTimeout(() => { RC.drag = false; }, 1200); } });
+    if (RC.pid) {
+      if (RC.drag || RC.vdrag) return;
+      let st = {};
+      try { st = (await api('/api/sync_pstate', {peer: RC.pid})).state || {}; } catch (e) { st = null; }
+      if (!RC.pid) return;
+      if (st && st.on) { RC.seen = true; RC.miss = 0; rcPaint(st); if (S.cur && RC.auto) rcStop(); return; }
+      RC.miss++;
+      const lim = RC.seen || RC.auto ? 3 : 25;  // після перекидання даємо час на запуск серії
+      if (RC.miss >= lim && Date.now() - RC.t0 > 6000) { const q = RC.seen && !RC.auto; const nm = RC.name; rcStop(); if (q) toast(st ? 'Відтворення на «' + nm + '» завершено' : 'Звʼязок із «' + nm + '» втрачено', !st); }
+      return;
+    }
+    if (S.cur || !(S.sync && S.sync.handoff_on)) return;
+    RC.n++; if (RC.n % 3) return;
+    for (const p of onlinePeers()) {
+      try { const st = (await api('/api/sync_pstate', {peer: p.id})).state || {}; if (st.on && !S.cur) { rcStart(p.id, true); rcPaint(st); RC.seen = true; return; } } catch (e) {}
+    }
+  } finally { RC.busy = false; }
+}
+setInterval(rcPoll, 1000);
+document.addEventListener('input', ev => {
+  if (ev.target.id === 'rcseek') { RC.drag = true; const d = (RC.st && RC.st.dur) || 0; $('#rcc').textContent = fmtT(d * ev.target.value / 1000); }
+  if (ev.target.id === 'rcvol') { RC.vdrag = true; $('#rcvn').textContent = Math.round(ev.target.value); }
+});
+document.addEventListener('change', ev => {
+  if (ev.target.id === 'rcseek') { const d = (RC.st && RC.st.dur) || 0; rcCmd('seek', d * ev.target.value / 1000); setTimeout(() => { RC.drag = false; }, 1200); }
+  if (ev.target.id === 'rcvol') { rcCmd('vol', Number(ev.target.value)); setTimeout(() => { RC.vdrag = false; }, 1200); }
+});
+window.addEventListener('resize', rcLayout);
 // ───────── жест: затиснути (верх екрана або правий край посередині) → екран тремтить → свайп угору ─────────
-const TH = {t: 0, armed: false, sx: 0, sy: 0};
+const TH = {t: 0, f: 0, armed: false, sx: 0, sy: 0, mode: ''};
 const thReady = () => castTargets().length > 0;
+const xgest = () => (S.set && S.set.xgest) || 'both';
 function fxBlocks(kind) {
   const n = 8; let h = '<i class="fxg"></i>';
   for (let k = 0; k < n; k++) {
@@ -13187,10 +13330,11 @@ function thArm() {
   TH.armed = true; gpHaptic(); GP.t = Date.now();
   document.body.classList.add('armed'); try { getSelection().removeAllRanges(); } catch (e) {}
   const el = $('#fx'); if (el) { el.innerHTML = '<i class="fxg"></i>'; el.className = 'arm'; }
-  const h = $('#fxh'); if (h) { h.textContent = 'Проведіть угору, щоб перекинути'; h.classList.add('on'); }
+  const h = $('#fxh'); if (h) { h.textContent = TH.mode === 'top' ? 'Тримайте, щоб перекинути…' : 'Проведіть угору, щоб перекинути'; h.classList.add('on'); }
+  if (TH.mode === 'top') TH.f = setTimeout(() => { TH.f = 0; if (TH.armed) thFire(); }, 700);
 }
 function thReset() {
-  clearTimeout(TH.t); TH.t = 0;
+  clearTimeout(TH.t); TH.t = 0; clearTimeout(TH.f); TH.f = 0;
   setTimeout(() => { if (!TH.armed) document.body.classList.remove('thz'); }, 0);
   if (TH.armed) {
     TH.armed = false; GP.t = Date.now();
@@ -13200,7 +13344,7 @@ function thReset() {
   }
 }
 function thFire() {
-  TH.armed = false; GP.t = Date.now(); gpHaptic();
+  clearTimeout(TH.f); TH.f = 0; TH.armed = false; GP.t = Date.now(); gpHaptic();
   document.body.classList.remove('armed');
   const h = $('#fxh'); if (h) h.classList.remove('on');
   const el = $('#fx'); if (el && el.className === 'arm') { el.className = ''; el.innerHTML = ''; }
@@ -13209,16 +13353,18 @@ function thFire() {
 document.addEventListener('touchstart', ev => {
   thReset();
   if (ev.touches.length !== 1 || S.sheet || PR.open || !thReady()) return;
-  const t = ev.touches[0], top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--top')) || 0;
-  const edge = t.clientX > innerWidth - 44 && t.clientY > innerHeight * .25 && t.clientY < innerHeight * .75, zone = t.clientY < 100 + top || edge;
+  const t = ev.touches[0], top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--top')) || 0, g = xgest();
+  const edge = (g === 'both' || g === 'edge') && t.clientX > innerWidth - 44 && t.clientY > innerHeight * .25 && t.clientY < innerHeight * .75;
+  const tp = (g === 'both' || g === 'top') && t.clientY < 100 + top;
+  if (!edge && !tp) return;
   const bad = edge ? 'button,input,select,textarea,.sheet,#rcbar,video' : 'button,a,input,select,textarea,label,[data-lp],.sheet,#rcbar,video';
-  if (!zone || (ev.target.closest && ev.target.closest(bad))) return;
-  TH.sx = t.clientX; TH.sy = t.clientY; document.body.classList.add('thz');
+  if (ev.target.closest && ev.target.closest(bad)) return;
+  TH.mode = edge ? 'edge' : 'top'; TH.sx = t.clientX; TH.sy = t.clientY; document.body.classList.add('thz');
   TH.t = setTimeout(() => { TH.t = 0; clearTimeout(GP.timer); GP.timer = null; if (typeof DR !== 'undefined') { clearTimeout(DR.timer); DR.timer = null; } thArm(); }, edge ? 380 : 600);
 }, {passive: true, capture: true});
 document.addEventListener('touchmove', ev => {
   const t = ev.touches[0]; if (!t) return;
-  if (TH.armed) { ev.preventDefault(); if (TH.sy - t.clientY > 45) thFire(); return; }
+  if (TH.armed) { ev.preventDefault(); if (TH.mode === 'edge' && TH.sy - t.clientY > 45) thFire(); return; }
   if (TH.t && Math.hypot(t.clientX - TH.sx, t.clientY - TH.sy) > 10) { clearTimeout(TH.t); TH.t = 0; }
 }, {passive: false, capture: true});
 ['touchend', 'touchcancel'].forEach(t => document.addEventListener(t, thReset, true));
