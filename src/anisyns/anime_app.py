@@ -6255,6 +6255,9 @@ SETTINGS = {'mobile_download': False, 'auto_skip': False, 'auto_skip_opening': T
             'site_order': ['aniliberty', 'yummyani', 'animevost', 'animru'], 'view': {}}
 
 
+SETTINGS_DEF = __import__('copy').deepcopy(SETTINGS)
+
+
 def _settings_path():
   return os.path.join(BASE_DIR, 'settings.json')
 
@@ -7945,6 +7948,7 @@ def api_clientlog(msg):
 SYNC_PORT = 8790
 SYNC_DISC_PORT = 8791
 SYNC_PROTO = 1
+import copy as _copy
 SYNC_LOCK = threading.RLock()
 SYNC = {'st': None, 'srv': None, 'srv_err': '', 'started': False, 'found': {}, 'pending': None, 'pair_out': None, 'gen': 0,
         'status': {}, 'wake': threading.Event(), 'scanning': 0.0, 'last_rescan': 0.0, 'pair_until': 0.0, 'last_scan': 0.0}
@@ -8079,7 +8083,11 @@ def _sync_scan():
         continue
       v = _sync_base(key, library[key]) if k.startswith('i/') and key in library else val
       ts = None
-      if k not in last and k not in st['regs']:
+      if k.startswith('s/') and k not in last and k not in st['regs']:
+        # налаштування, яких ми ще не фіксували: значення за замовчуванням не повинні перебивати змінені на іншому пристрої
+        if val == SETTINGS_DEF.get(k[2:]):
+          ts = 1
+      elif k not in last and k not in st['regs']:
         # Вперше бачимо цей запис (пристрій довго не синхронізувався або щойно підключений): ставимо не «зараз», а час, коли
         # аніме було додано/востаннє дивились, інакше стара бібліотека воскресила б усе, що інші пристрої давно видалили
         try:
@@ -8261,11 +8269,29 @@ def _sync_http(addr, port, path, body, peer=None, timeout=8):
     with opener.open(rq, timeout=timeout) as rs:
       return json.loads(rs.read().decode('utf8'))
   except urllib.error.HTTPError as ex:
+    msg, gone = '', False
     try:
-      msg = json.loads(ex.read().decode('utf8')).get('error') or ''
+      j = json.loads(ex.read().decode('utf8'))
+      msg, gone = j.get('error') or '', bool(j.get('gone'))
     except Exception:
-      msg = ''
+      pass
+    if gone and peer and time.time() - peer.get('t0', 0) > 90:  # інший пристрій нас відʼєднав, поки ми були поза мережею
+      try:
+        for k, v in list(_sync_state()['peers'].items()):
+          if v is peer:
+            _sync_drop_peer(k)
+      except Exception:
+        pass
     raise ValueError(msg or f'HTTP {ex.code}')
+
+
+def _sync_drop_peer(pid):
+  st = _sync_state()
+  with SYNC_LOCK:
+    st['peers'].pop(pid, None)
+    SYNC['status'].pop(pid, None)
+    SYNC['gen'] += 1
+    _sync_save()
 
 
 def _sync_hello(addr, port=SYNC_PORT, timeout=0.6):
@@ -8381,7 +8407,7 @@ class _SyncHandler(BaseHTTPRequestHandler):
         secret = secrets.token_hex(32)
         with SYNC_LOCK:
           st['peers'][pd['id']] = {'name': pd['name'], 'kind': pd.get('kind', 'phone'), 'secret': secret, 'addr': pd['ip'], 'port': pd['port'], 'in_seq': 0,
-                                   'out_seq': 0, 'epoch': '', 'last': 0}
+                                   'out_seq': 0, 'epoch': '', 'last': 0, 't0': time.time()}
           _sync_save()
         SYNC['pending'] = None
         SYNC['wake'].set()
@@ -8391,7 +8417,7 @@ class _SyncHandler(BaseHTTPRequestHandler):
       ts = self.headers.get('X-Sync-Ts') or '0'
       if not peer or abs(time.time() * 1000 - float(ts or 0)) > 120000 or \
               not hmac.compare_digest(self.headers.get('X-Sync-Sig') or '', _sync_sign(peer['secret'], ts, path, raw)):
-        return self._send({'error': 'Не авторизовано'}, 401)
+        return self._send({'error': 'Не авторизовано', 'gone': not peer}, 401)
       peer['addr'] = ip
       if path == '/sync/exchange':
         if not st.get('sync'):
@@ -8411,7 +8437,7 @@ class _SyncHandler(BaseHTTPRequestHandler):
           _sync_save()
           return self._send({'ok': True, 'epoch': st['epoch'], 'seq': st['seq'], 'regs': out, 'name': st['name'], 'kind': st['kind'], 'now': int(time.time() * 1000)})
       if path == '/sync/command':
-        return self._send(_sync_command(body))
+        return self._send(_sync_command(body, pid))
       return self._send({'error': 'not found'}, 404)
     except Exception as ex:
       try:
@@ -8420,7 +8446,7 @@ class _SyncHandler(BaseHTTPRequestHandler):
         pass
 
 
-def _sync_command(body):
+def _sync_command(body, pid=None):
   """Команди від спареного пристрою. Поки одна: download — поставити серії аніме в чергу завантаження на цьому пристрої."""
   if body.get('type') == 'download':
     item = body.get('item') or {}
@@ -8437,6 +8463,9 @@ def _sync_command(body):
     return {'ok': True}
   if body.get('type') == 'ping':
     return {'ok': True, 'sync': bool(_sync_state().get('sync'))}
+  if body.get('type') == 'unpair' and pid:
+    _sync_drop_peer(pid)
+    return {'ok': True}
   if body.get('type') == 'handoff':
     if not SETTINGS.get('handoff'):
       return {'ok': False, 'error': 'На іншому пристрої вимкнено передачу сеансу'}
@@ -8716,7 +8745,7 @@ def api_sync_code(code):
   r = _sync_http(po['addr'], po['port'], '/sync/pair_confirm', {'id': st['id'], 'code': str(code or '').strip(), 'port': SYNC_PORT})
   with SYNC_LOCK:
     st['peers'][po['id']] = {'name': r.get('name') or po['name'], 'kind': r.get('kind') or po.get('kind', 'phone'), 'secret': r['secret'], 'addr': po['addr'],
-                             'port': int(r.get('port') or po['port']), 'in_seq': 0, 'out_seq': 0, 'epoch': '', 'last': 0}
+                             'port': int(r.get('port') or po['port']), 'in_seq': 0, 'out_seq': 0, 'epoch': '', 'last': 0, 't0': time.time()}
     _sync_save()
   SYNC['pair_out'] = None
   SYNC['wake'].set()
@@ -8725,6 +8754,10 @@ def api_sync_code(code):
 
 def api_sync_unpair(pid):
   st = _sync_state()
+  try:
+    _peer_cmd(pid, {'type': 'unpair'}, 3)  # якщо інший пристрій у мережі — він теж відʼєднається одразу
+  except Exception:
+    pass
   with SYNC_LOCK:
     st['peers'].pop(pid, None)
     SYNC['status'].pop(pid, None)
@@ -9082,7 +9115,7 @@ body{padding-bottom:calc(84px + var(--bot))}
 #rcbar.min .rcfull{display:none}#rcbar.min .rcpill{display:flex}
 .rcvl{display:flex;align-items:center;gap:8px;margin-top:6px;color:var(--mu);font-size:12px}.rcvl input{flex:1}.rcvl .rcvi .i{width:20px;height:20px}#rcvn{min-width:34px;text-align:right}
 .rcb .cb,.rcx{-webkit-tap-highlight-color:transparent}
-#bswl{position:fixed;inset:0;z-index:99980;pointer-events:none;opacity:0;background:rgba(12,14,26,.12);-webkit-backdrop-filter:blur(0px);backdrop-filter:blur(0px);transition:opacity .3s ease,-webkit-backdrop-filter .3s ease,backdrop-filter .3s ease}
+#bswl{position:fixed;inset:0;z-index:99980;pointer-events:none;opacity:0;-webkit-backdrop-filter:blur(0px);backdrop-filter:blur(0px);transition:opacity .3s ease,-webkit-backdrop-filter .3s ease,backdrop-filter .3s ease}
 body.bsw #bswl{opacity:1;-webkit-backdrop-filter:blur(22px) saturate(1.25);backdrop-filter:blur(22px) saturate(1.25)}
 .dvwrap{padding-top:28px!important}
 .dvcard.dvx{display:block;padding:0;overflow:hidden}
@@ -9160,10 +9193,11 @@ body.thz,body.thz *,body.armed,body.armed *{-webkit-user-select:none!important;u
 #prbody{text-align:left}#prbody .dvcard .d{display:block}
 .prcode{display:flex;justify-content:center;gap:10px;margin:6px 0 10px}.prcode span{width:56px;height:70px;border-radius:16px;background:var(--s1);border:1.5px solid #7c6cff88;display:flex;align-items:center;justify-content:center;font-size:34px;font-weight:800;box-shadow:0 6px 20px #7c6cff33}
 .prin{width:100%;text-align:center;font-size:34px;font-weight:800;letter-spacing:14px;padding:12px 0 12px 14px;border-radius:16px;border:1.5px solid #7c6cff88;background:var(--s1);color:inherit}
-.prok{width:84px;height:84px;margin:6px auto;border-radius:50%;background:linear-gradient(145deg,#3ddc97,#2bb67a);display:flex;align-items:center;justify-content:center;color:#fff;animation:blipIn .55s cubic-bezier(.2,1.4,.3,1);box-shadow:0 0 40px #3ddc9788}.prok .i{width:44px;height:44px}
+.prok{width:84px;height:84px;margin:6px auto;border-radius:50%;background:linear-gradient(145deg,#3ddc97,#2bb67a);display:flex;align-items:center;justify-content:center;color:#fff;animation:okIn .5s cubic-bezier(.2,1.3,.3,1);box-shadow:0 0 40px #3ddc9788}.prok .i{width:44px;height:44px}
 #pairlay.ok .sweep,#pairlay.ok .rg{display:none}
 @keyframes prPulse{0%{transform:scale(.25);opacity:.9}100%{transform:scale(1);opacity:0}}
 @keyframes prSweep{to{transform:rotate(360deg)}}
+@keyframes okIn{0%{transform:scale(0);opacity:0}100%{transform:scale(1);opacity:1}}
 @keyframes blipIn{0%{transform:translate(-50%,-50%) scale(0);opacity:0}100%{transform:translate(-50%,-50%) scale(1);opacity:1}}
 #fx{position:fixed;inset:0;z-index:99990;pointer-events:none;overflow:hidden}
 #fx .fxg{position:absolute;left:-15%;right:-15%;top:-40px;height:260px;background:radial-gradient(ellipse at 50% 0,rgba(124,108,255,.9),rgba(76,150,255,.4) 42%,transparent 72%);opacity:0;filter:blur(4px)}
@@ -9182,7 +9216,9 @@ body.armed #root{animation:armW .16s linear infinite}
 body.shk #root,body.shk #tabs{animation:shkK .6s cubic-bezier(.3,.1,.2,1)}
 @keyframes armW{0%,100%{transform:translate(-1.5px,0) rotate(-.25deg)}50%{transform:translate(1.5px,0) rotate(.25deg)}}
 @keyframes shkK{0%,100%{transform:none}15%{transform:translate(-5px,3px) rotate(-.5deg)}30%{transform:translate(5px,-3px) rotate(.5deg)}45%{transform:translate(-4px,2px)}60%{transform:translate(3px,-2px)}80%{transform:translate(-1px,0)}}
-html,body{overflow-x:hidden;max-width:100%;overscroll-behavior-x:none}
+html{overflow-x:hidden}
+body{overflow-x:clip;max-width:100%}
+html,body{max-width:100%;overscroll-behavior-x:none}
 html:has(body.pl),html:has(body[style*="overflow: hidden"]){overflow:hidden!important}
 body.pl{overflow:hidden!important}
 #player{overscroll-behavior:none;touch-action:pan-x pan-y}
@@ -10156,6 +10192,7 @@ function uiRecover() {  // після трансляції/системного 
   try { if (V.webkitDisplayingFullscreen && V.webkitExitFullscreen) V.webkitExitFullscreen(); } catch (e) {}
   const pl = $('#player'), open = !!(pl && !pl.classList.contains('hide'));
   const b = document.body;
+  if (!open && V.webkitDisplayingFullscreen) { try { V.pause(); V.removeAttribute('src'); V.load(); } catch (e) {} }  // «осиротілий» системний плеєр на весь екран
   b.classList.remove('bsw', 'shk', 'armed', 'thz');
   if (!open) { b.classList.remove('pl'); if (!S.sheet && !PR.open) b.style.overflow = ''; }
   try { const fx = $('#fx'); if (fx) { fx.className = ''; fx.innerHTML = ''; } const h = $('#fxh'); if (h) h.classList.remove('on'); } catch (e) {}
@@ -10167,9 +10204,10 @@ function uiStuck() { const pl = $('#player'); if (pl && pl.classList.contains('h
 function setMirror(v) {
   if (!!S.mirror === v) return;
   S.mirror = v;
-  try { V.setAttribute('x-webkit-airplay', v ? 'deny' : 'allow'); } catch (e) {}  // під час дзеркалення не віддаємо відео окремим потоком — телефон лишається живим
+  try { V.setAttribute('x-webkit-airplay', v ? 'deny' : 'allow'); V.disableRemotePlayback = !!v; } catch (e) {}  // під час дзеркалення не віддаємо відео окремим потоком — телефон лишається живим
   try { applyPlayerMode(); } catch (e) {}
   if (!v) { setTimeout(uiRecover, 150); setTimeout(uiRecover, 900); }
+  if (v && S.cur) { setTimeout(() => { if (V.webkitDisplayingFullscreen && S.cur) { const c = S.cur, t = V.currentTime || P.good || 0; play(c.id, c.n, t, true); } }, 500); }  // системний плеєр не закрився — перезапускаємо серію у вбудованому
   if (v && S.cur) {  // трансляція почалась посеред серії: виходимо з системного плеєра, лишаємо наш із кнопками
     try { if (V.webkitDisplayingFullscreen && V.webkitExitFullscreen) V.webkitExitFullscreen(); } catch (e) {}
     if (V.paused && !V.ended) V.play().catch(() => {});
@@ -12762,7 +12800,9 @@ V.addEventListener('playing', () => { if (AUD && AUD.ctx.state !== 'running') AU
 function volRestore() { if (!ownVol()) return; const p = volGet(); if (p !== 100 || AUD) volApply(p); }
 
 let clrT = 0, PLAYS = 0, RELOADING = false;
-async function play(id, n, startT) {
+let PRET = 0;
+async function play(id, n, startT, _retry) {
+  if (!_retry) PRET = 0;
   clearTimeout(clrT);
   const it = item(id); if (!it) return;
   S.cur = {id, n}; PLAYS++;
@@ -12770,6 +12810,8 @@ async function play(id, n, startT) {
   $('#player').classList.remove('hide'); vcIcon(); VC.classList.remove('off');
   { const vb = $('#vvol'); if (vb) vb.classList.toggle('hide', !ownVol()); if (!ownVol()) $('#vvp').classList.add('hide'); }
   document.body.style.overflow = 'hidden'; document.body.classList.add('pl');
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (er) {}  // Web Audio (власна гучність) інакше глухне при вимкненому звуку/на iPad
+  if (IOS_APP && !_retry) { try { const r = await api('/api/net'); setMirror(!!r.captured); } catch (er) {} }  // свіжа перевірка трансляції перед стартом, щоб не відкрити системний плеєр
   applyPlayerMode(); setNowPlaying(it, e, n);
   $('#ptitle').innerHTML = `Серія ${esc(n)}<small>${esc(it.title)}</small>`;
   syncAuto(); skips = {}; skDone = {}; skSoft = null; skEnded = false; pReset(); paintMarks(); skipBtn(null);
@@ -12777,7 +12819,12 @@ async function play(id, n, startT) {
   V.pause(); V.removeAttribute('src'); V.load();
   pMarked = !!(e && e.watched); pSaveT = 0;
   try {
-    const s = await api(`/api/stream?id=${id}&n=${encodeURIComponent(n)}&q=${S.q}`);
+    let s = null, lastEr = null;
+    for (let a = 0; a < 4 && !s; a++) {  // тимчасові збої (сайт не відповів) — програма сама пробує ще раз
+      try { s = await api(`/api/stream?id=${id}&n=${encodeURIComponent(n)}&q=${S.q}`); }
+      catch (er) { lastEr = er; if (!S.cur || S.cur.n !== n || S.cur.id !== id) return; if (a < 3) { msg.innerHTML = ico('hourglass') + 'Повторюю спробу ' + (a + 1) + '/3…'; await new Promise(r => setTimeout(r, 900 + a * 700)); } }
+    }
+    if (!s) throw lastEr;
     if (!S.cur || S.cur.n !== n || S.cur.id !== id) return;
     if (s.type === 'hls' && !nativeHls) {
       msg.innerHTML = 'Цей браузер не вміє грати онлайн-потік. На iPhone це працює; або <a href="' + esc(it.url) + '" target="_blank">відкрийте сторінку сайту</a>.';
@@ -12800,6 +12847,7 @@ async function play(id, n, startT) {
         V.src = s.url; V.addEventListener('loadedmetadata', () => { if (keep > 1) V.currentTime = keep; V.play().catch(() => {}); }, {once: true});
         return;
       }
+      if (s.type !== 'file' && PRET < 2) { PRET++; const keep = V.currentTime || P.good || resume || 0; msg.classList.remove('hide'); msg.innerHTML = ico('hourglass') + 'Повторюю спробу…'; setTimeout(() => { if (S.cur && S.cur.id === id && S.cur.n === n) play(id, n, keep, true); }, 700); return; }
       msg.classList.remove('hide'); msg.innerHTML = ico('error') + esc('Не вдалося відтворити відео.' + (s.type !== 'file' ? ' Спробуйте іншу якість або завантажте серію.' : '')); };
     const p = V.play(); if (p && p.catch) p.catch(() => {});
   } catch (er) { msg.classList.remove('hide'); msg.innerHTML = ico('error') + esc(er.message); }
@@ -12969,7 +13017,7 @@ V.addEventListener('seeking', () => {
   P.sinceSeek = 0; P.lastT = t; nxCancel(); skSoft = null;
 });
 /* ---------- режим плеєра (iOS), Now Playing, повний екран, PiP ---------- */
-const ZM = {fill: false, on: false, d0: 0, base: 1, cur: 1};
+const ZM = {fill: false, on: false, d0: 0, base: 1, cur: 1, t: 0, f: 1};
 try { ZM.fill = localStorage.getItem('vfill') === '1'; } catch (e) {}
 function zmFull() {  // у скільки разів треба збільшити відео, щоб воно заповнило екран без чорних смуг
   const vw = V.videoWidth, vh = V.videoHeight, r = $('#stage').getBoundingClientRect();
@@ -12980,27 +13028,34 @@ function zmFull() {  // у скільки разів треба збільшит
 function zmApply(anim) {
   const f = zmFull(), sc = ZM.fill ? f : 1;
   V.style.transition = anim ? 'transform .3s cubic-bezier(.2,.8,.2,1)' : 'none';
-  V.style.transform = sc > 1.002 ? `scale(${sc})` : '';
+  V.style.transform = sc > 1.002 ? `scale3d(${sc},${sc},1)` : '';
 }
 (function zmInit() {
   const pl = $('#player'), dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  let raf = 0, tgt = 1;
+  const tick = () => {  // плавне наздоганяння цілі: тремтіння пальців не передається відео
+    raf = 0; ZM.cur += (tgt - ZM.cur) * .35; if (Math.abs(tgt - ZM.cur) < .0015) ZM.cur = tgt;
+    V.style.transform = `scale3d(${ZM.cur},${ZM.cur},1)`;
+    if (ZM.cur !== tgt && ZM.on) raf = requestAnimationFrame(tick);
+  };
   pl.addEventListener('touchstart', ev => {
-    if (ev.touches.length === 2 && !V.webkitDisplayingFullscreen) { ZM.on = true; ZM.d0 = dist(ev.touches) || 1; ZM.base = ZM.fill ? zmFull() : 1; ZM.cur = ZM.base; V.style.transition = 'none'; }
+    if (ev.touches.length === 2 && !V.webkitDisplayingFullscreen) { ZM.on = true; ZM.t = Date.now(); ZM.f = zmFull(); ZM.d0 = dist(ev.touches) || 1; ZM.base = ZM.fill ? ZM.f : 1; ZM.cur = tgt = ZM.base; V.style.transition = 'none'; }
   }, {passive: true});
   pl.addEventListener('touchmove', ev => {
-    if (!ZM.on || ev.touches.length !== 2) return;
-    ev.preventDefault();
-    const f = zmFull(), k = dist(ev.touches) / ZM.d0;
-    ZM.cur = Math.max(1, Math.min(f * 1.06, ZM.base * k));
-    V.style.transform = `scale(${ZM.cur})`;
+    if (!ZM.on) return;
+    ev.preventDefault(); ZM.t = Date.now();
+    if (ev.touches.length !== 2) return;
+    const k = dist(ev.touches) / ZM.d0;
+    tgt = Math.max(1, Math.min(ZM.f * 1.04, ZM.base * k));
+    if (!raf) raf = requestAnimationFrame(tick);
   }, {passive: false});
   const end = ev => {
     if (!ZM.on || (ev.touches && ev.touches.length >= 2)) return;
-    ZM.on = false;
+    ZM.on = false; ZM.t = Date.now(); if (raf) { cancelAnimationFrame(raf); raf = 0; }
     const f = zmFull(), mid = 1 + (f - 1) * .35;
     const want = f > 1.02 && ZM.cur > (ZM.fill ? 1 + (f - 1) * .65 : mid);
     if (want !== ZM.fill) { ZM.fill = want; try { localStorage.setItem('vfill', want ? '1' : '0'); } catch (e) {} try { gpHaptic(); } catch (e) {} }
-    zmApply(true); vcShow && vcShow();
+    zmApply(true);
   };
   ['touchend', 'touchcancel'].forEach(t => pl.addEventListener(t, end, {passive: true}));
   V.addEventListener('loadedmetadata', () => zmApply(false));
@@ -13077,6 +13132,7 @@ function vcSync() {
 }
 function vcIcon() { $('#vpp').innerHTML = ico(V.paused ? 'play' : 'pause'); }
 $('#stage').addEventListener('click', ev => {
+  if (Date.now() - ZM.t < 600) return;  // кінець щипка не має показувати елементи керування
   if (ev.target.closest('.skipbtn')) return;
   if (ev.target.closest('.cb, .sk, .top')) { vcShow(); return; }
   if (VC.classList.contains('off')) vcShow(); else { VC.classList.add('off'); clearTimeout(vcT); }
@@ -13194,7 +13250,11 @@ async function pullView() {
       if (['home', 'group'].includes(route().name) && !S.cur) render();
     }
     if (S.set) Object.assign(S.set, j);
+    ovSync();
   } catch (e) {}
+}
+function ovSync() {  // після зміни налаштувань ззовні (синхронізація/передача) оновлюємо кнопку гучності й режим плеєра
+  try { const vb = $('#vvol'); if (vb) vb.classList.toggle('hide', !ownVol()); if (!ownVol()) { const vp = $('#vvp'); if (vp) vp.classList.add('hide'); } else volPaint(); applyPlayerMode(); } catch (e) {}
 }
 async function askOffer(o) {
   S.lastOffer = o.hid;
@@ -13267,7 +13327,7 @@ async function syncFetch() {
     S.sync = j; paintSync();
     if (j.kind !== myKind() && !S._kindSent) { S._kindSent = true; api('/api/sync_cfg', {kind: myKind(), auto_name: DKIND[myKind()]}).then(r => { S.sync = r; paintSync(); }).catch(() => {}); }
     if (j.handoff && j.handoff.hid !== S.lastHid) applyHandoff(j.handoff);
-    if (j.gen !== g0 && !S.cur) { loadLib('vis').catch(() => {}); if (j.sync_settings) pullView(); }
+    if (j.gen !== g0) { if (!S.cur) loadLib('vis').catch(() => {}); if (j.sync_settings) pullView(); }
     return j;
   } catch (e) {}
 }
@@ -13369,8 +13429,16 @@ function rcStart(pid, auto) {
 }
 function rcStop() { RC.pid = null; const el = $('#rcbar'); if (el) { el.classList.add('hide'); el.innerHTML = ''; } document.body.classList.remove('rcon'); }
 async function rcCmd(c, v) { if (!RC.pid) return; try { await api('/api/sync_rc', {peer: RC.pid, c, v}); } catch (e) { toast(e.message, true); } }
+function rcOpt(a) {  // одразу показуємо результат натискання, не чекаючи відповіді іншого пристрою
+  RC.hold = Date.now() + 1400;
+  const st = RC.st || (RC.st = {});
+  if (a === 'pp') { st.paused = !st.paused; const e = $('#rcpp'); if (e) e.innerHTML = ico(st.paused ? 'play' : 'pause'); }
+  else if (a === 'back' || a === 'fwd') { st.t = Math.max(0, Math.min(st.dur || 1e9, (st.t || 0) + (a === 'back' ? -10 : 10))); const c = $('#rcc'); if (c) c.textContent = fmtT(st.t); const sk = $('#rcseek'); if (sk && st.dur) sk.value = Math.round(1000 * st.t / st.dur); }
+  else if (a === 'prev' || a === 'next') { RC.hold = Date.now() + 2200; const e = $('#rcs'); if (e) e.textContent = 'Перемикаю серію…'; const c = $('#rcc'); if (c) c.textContent = '0:00'; const sk = $('#rcseek'); if (sk) sk.value = 0; }
+}
 function rcAct(b) {
   const a = b.dataset.rc;
+  rcOpt(a);
   if (a === 'min') { RC.min = true; $('#rcbar').classList.add('min'); }
   else if (a === 'open') { RC.min = false; $('#rcbar').classList.remove('min'); }
   else if (a === 'stop') { rcCmd('close'); rcStop(); }
@@ -13387,6 +13455,7 @@ function rcAct(b) {
   ['touchstart', 'pointerdown'].forEach(t => el.addEventListener(t, ev => ev.stopPropagation()));
 })();
 function rcPaint(st) {
+  if (Date.now() < (RC.hold || 0)) return;
   RC.st = st; const it = $('#rct'); if (!it) return;
   it.textContent = st.title ? st.title : 'Грає на «' + RC.name + '»';
   $('#rcs').textContent = 'Серія ' + st.ep + ' · «' + RC.name + '»';
