@@ -6251,7 +6251,7 @@ def net_state():
 SETTINGS = {'mobile_download': False, 'auto_skip': False, 'auto_skip_opening': True, 'auto_skip_ending': True, 'auto_next': True,
             'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': True, 'ios_player': True, 'np_ep_cover': True,
             'bg_keep': True, 'bg_check': False, 'island': True, 'island_dl': True, 'island_check': False,
-            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'recent_min': 3, 'handoff': False, 'xgest': 'both', 'client': {},
+            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'recent_min': 3, 'handoff': True, 'rc': True, 'rc_in': True, 'rc_out': True, 'dv2': False, 'xgest': 'both', 'client': {},
             'site_order': ['aniliberty', 'yummyani', 'animevost', 'animru'], 'view': {}}
 
 
@@ -6266,6 +6266,8 @@ def settings_load():
       SETTINGS.update({k: v for k, v in d.items() if k in SETTINGS})
       if 'auto_skip' not in d and (d.get('auto_skip_opening') or d.get('auto_skip_ending')):
         SETTINGS['auto_skip'] = True
+      if not SETTINGS.get('dv2'):  # одноразова міграція: передача між пристроями й пульт тепер увімкнені за замовчуванням
+        SETTINGS.update({'handoff': True, 'rc': True, 'rc_in': True, 'rc_out': True, 'dv2': True})
   except Exception:
     pass
 
@@ -6847,7 +6849,7 @@ class Handler(BaseHTTPRequestHandler):
           '/api/sync_unpair': lambda: api_sync_unpair(b.get('id')),
           '/api/sync_now': lambda: api_sync_now(),
           '/api/sync_xfer': lambda: api_sync_xfer(b.get('id'), b.get('mode')),
-          '/api/sync_push_settings': lambda: api_sync_push_settings(b.get('peer')),
+          '/api/sync_push_settings': lambda: api_sync_push_settings(b.get('peer'), b.get('scope') or 'all'),
           '/api/sync_offer': lambda: api_sync_offer_answer(b.get('hid'), bool(b.get('ok'))),
           '/api/sync_alias': lambda: api_sync_alias(b.get('id'), b.get('name')),
           '/api/sync_cast': lambda: api_sync_cast(b.get('peer'), b),
@@ -7948,6 +7950,21 @@ SYNC = {'st': None, 'srv': None, 'srv_err': '', 'started': False, 'found': {}, '
         'status': {}, 'wake': threading.Event(), 'scanning': 0.0, 'last_rescan': 0.0, 'pair_until': 0.0, 'last_scan': 0.0}
 SYNC_SETTINGS_KEYS = ['view', 'auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'auto_check', 'auto_check_hours', 'blur_thumbs',
                       'np_ep_cover', 'skip_mode', 'vol_max', 'own_vol', 'recent_min', 'site_order']
+SYNC_GROUPS = {'view': ['view'], 'player': ['auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'skip_mode', 'vol_max', 'own_vol', 'np_ep_cover']}
+SYNC_SCOPES = ('all', 'view', 'player', 'other')
+
+
+def _sgroup(k):
+  for g, ks in SYNC_GROUPS.items():
+    if k in ks:
+      return g
+  return 'other'
+
+
+def _sync_group_on(st, k):
+  return bool(st.get('sync_' + _sgroup(k)))
+
+
 SYNC_BASE_FIELDS = ['url', 'title', 'dubbing', 'base_dub', 'all_dubs', 'folder', 'known', 'ep_titles', 'meta', 'sources', 'poster_v']
 
 
@@ -7972,7 +7989,7 @@ def _sync_state():
     st.setdefault('id', uuid.uuid4().hex[:16])
     st.setdefault('epoch', uuid.uuid4().hex[:12])
     st.setdefault('name', 'iPhone' if nm.lower() in ('localhost', 'iphone', '') else nm)
-    for k, v in (('sync', bool(st.get('enabled'))), ('sync_settings', False), ('seq', 0), ('clock', 0), ('regs', {}), ('last', {}), ('peers', {}), ('kind', 'phone'), ('name_user', False)):
+    for k, v in (('sync', bool(st.get('enabled'))), ('sync_settings', False), ('sync_view', True), ('sync_player', True), ('sync_other', bool(st.get('sync_settings'))), ('seq', 0), ('clock', 0), ('regs', {}), ('last', {}), ('peers', {}), ('kind', 'phone'), ('name_user', False)):
       st.setdefault(k, v)
     SYNC['st'] = st
     return st
@@ -8039,10 +8056,9 @@ def _sync_snapshot(st):
   for gid, lst in groups.items():
     kids = [k for _o, k in sorted(lst)]
     out['go/' + gid] = (json.dumps(kids), kids, None)
-  if st.get('sync_settings'):
-    for k in SYNC_SETTINGS_KEYS:
-      if k in SETTINGS:
-        out['s/' + k] = (json.dumps(SETTINGS[k]), SETTINGS[k], None)
+  for k in SYNC_SETTINGS_KEYS:
+    if k in SETTINGS and _sync_group_on(st, k):
+      out['s/' + k] = (json.dumps(SETTINGS[k]), SETTINGS[k], None)
   return out
 
 
@@ -8129,7 +8145,7 @@ def _sync_apply_one(st, k, r):
   parts = k.split('/')
   kind = parts[0]
   if kind == 's':
-    if st.get('sync_settings') and parts[1] in SYNC_SETTINGS_KEYS:
+    if parts[1] in SYNC_SETTINGS_KEYS and _sync_group_on(st, parts[1]):
       api_settings({parts[1]: v})
       last[k] = json.dumps(SETTINGS.get(parts[1]))
     return False
@@ -8417,7 +8433,7 @@ def _sync_command(body):
   if body.get('type') == 'settings_offer':
     vals = body.get('settings')
     if isinstance(vals, dict):
-      SYNC['offer'] = {'hid': uuid.uuid4().hex[:10], 'from': str(body.get('from') or '')[:30], 'n': len(vals), 'settings': {k: v for k, v in vals.items() if k in SYNC_SETTINGS_KEYS}, 'ts': time.time()}
+      SYNC['offer'] = {'hid': uuid.uuid4().hex[:10], 'from': str(body.get('from') or '')[:30], 'n': len(vals), 'scope': body.get('scope') if body.get('scope') in SYNC_SCOPES else 'all', 'settings': {k: v for k, v in vals.items() if k in SYNC_SETTINGS_KEYS}, 'ts': time.time()}
     return {'ok': True}
   if body.get('type') == 'ping':
     return {'ok': True, 'sync': bool(_sync_state().get('sync'))}
@@ -8433,12 +8449,14 @@ def _sync_command(body):
     return {'ok': True}
   if body.get('type') == 'pstate':
     stt = dict(PLAYER['state'])
+    if not (SETTINGS.get('rc') and SETTINGS.get('rc_in')):
+      stt = {'on': False}
     if time.time() - PLAYER['ts'] > 6:
       stt = {'on': False}
     return {'ok': True, 'state': stt}
   if body.get('type') == 'pcmd':
-    if not SETTINGS.get('handoff'):
-      return {'ok': False, 'error': 'На іншому пристрої вимкнено передачу сеансу'}
+    if not (SETTINGS.get('rc') and SETTINGS.get('rc_in')):
+      return {'ok': False, 'error': 'На іншому пристрої вимкнено керування пультом'}
     PLAYER['cmds'].append({'c': body.get('c'), 'v': body.get('v')})
     del PLAYER['cmds'][:-20]
     return {'ok': True}
@@ -8604,7 +8622,7 @@ def api_sync_state():
   ho = SYNC.get('handoff')
   if ho and time.time() - ho['ts'] > 600:
     SYNC['handoff'] = ho = None
-  return {'offer': ({k: v for k, v in SYNC['offer'].items() if k != 'settings'} if SYNC.get('offer') else None), 'handoff': ho, 'kind': st['kind'], 'sync': bool(st['sync']), 'enabled': bool(st['sync']), 'pairing': _pairing(), 'handoff_on': bool(SETTINGS.get('handoff')), 'name': st['name'], 'id': st['id'], 'sync_settings': bool(st['sync_settings']), 'peers': peers,
+  return {'offer': ({k: v for k, v in SYNC['offer'].items() if k != 'settings'} if SYNC.get('offer') else None), 'handoff': ho, 'kind': st['kind'], 'sync': bool(st['sync']), 'enabled': bool(st['sync']), 'pairing': _pairing(), 'handoff_on': bool(SETTINGS.get('handoff')), 'rc_on': bool(SETTINGS.get('rc')), 'rc_in': bool(SETTINGS.get('rc_in')), 'rc_out': bool(SETTINGS.get('rc_out')), 'rc_in_on': bool(SETTINGS.get('rc') and SETTINGS.get('rc_in')), 'rc_out_on': bool(SETTINGS.get('rc') and SETTINGS.get('rc_out')), 'name': st['name'], 'id': st['id'], 'sync_view': bool(st['sync_view']), 'sync_player': bool(st['sync_player']), 'sync_other': bool(st['sync_other']), 'sync_settings': bool(st['sync_view'] or st['sync_player'] or st['sync_other']), 'peers': peers,
           'found': found, 'incoming': {'name': pd['name'], 'code': pd['code']} if pd else None,
           'outgoing': {'name': po['name'], 'id': po['id']} if po else None, 'gen': SYNC['gen'], 'ip': _local_ip(), 'port': SYNC_PORT,
           'err': SYNC['srv_err'], 'scanning': now - SYNC['scanning'] < 8}
@@ -8621,8 +8639,9 @@ def api_sync_cfg(d):
       nm = re.sub(r'\s+', ' ', str(d['name'] or '')).strip()[:30]
       if nm:
         st['name'], st['name_user'] = nm, True
-    if 'sync_settings' in d:
-      st['sync_settings'] = bool(d['sync_settings'])
+    for gk in ('sync_view', 'sync_player', 'sync_other'):
+      if gk in d:
+        st[gk] = bool(d[gk])
     if 'sync' in d:
       st['sync'] = bool(d['sync'])
     _sync_save()
@@ -8750,10 +8769,11 @@ def api_sync_xfer(pid, mode):
   return api_sync_state()
 
 
-def api_sync_push_settings(pid):
-  """Разово запропонувати свої налаштування одному пристрою; той має підтвердити, інші пристрої не зачіпаються."""
-  vals = {k: SETTINGS[k] for k in SYNC_SETTINGS_KEYS if k in SETTINGS}
-  _peer_cmd(pid, {'type': 'settings_offer', 'settings': vals, 'from': _sync_state()['name']}, 10)
+def api_sync_push_settings(pid, scope='all'):
+  """Разово запропонувати свої налаштування (усі або лише певного типу) одному пристрою; той має підтвердити, інші пристрої не зачіпаються."""
+  scope = scope if scope in SYNC_SCOPES else 'all'
+  vals = {k: SETTINGS[k] for k in SYNC_SETTINGS_KEYS if k in SETTINGS and (scope == 'all' or _sgroup(k) == scope)}
+  _peer_cmd(pid, {'type': 'settings_offer', 'settings': vals, 'scope': scope, 'from': _sync_state()['name']}, 10)
   return {'ok': True}
 
 
@@ -9062,9 +9082,26 @@ body{padding-bottom:calc(84px + var(--bot))}
 #rcbar.min .rcfull{display:none}#rcbar.min .rcpill{display:flex}
 .rcvl{display:flex;align-items:center;gap:8px;margin-top:6px;color:var(--mu);font-size:12px}.rcvl input{flex:1}.rcvl .rcvi .i{width:20px;height:20px}#rcvn{min-width:34px;text-align:right}
 .rcb .cb,.rcx{-webkit-tap-highlight-color:transparent}
-body.bsw #root,body.bsw #player{filter:blur(14px);opacity:.78;transition:filter .24s,opacity .24s}
-#root,#player{transition:filter .3s,opacity .3s}
+#bswl{position:fixed;inset:0;z-index:99980;pointer-events:none;opacity:0;background:rgba(12,14,26,.12);-webkit-backdrop-filter:blur(0px);backdrop-filter:blur(0px);transition:opacity .3s ease,-webkit-backdrop-filter .3s ease,backdrop-filter .3s ease}
+body.bsw #bswl{opacity:1;-webkit-backdrop-filter:blur(22px) saturate(1.25);backdrop-filter:blur(22px) saturate(1.25)}
 .dvwrap{padding-top:28px!important}
+.dvcard.dvx{display:block;padding:0;overflow:hidden}
+.dvxh{display:flex;align-items:center;gap:10px;padding:12px 12px 12px 14px}
+.dvxl{flex:1;min-width:0;display:flex;align-items:center;gap:12px;cursor:pointer}
+.dvxl .tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.dvxc{background:none;border:0;color:var(--mu);width:34px;height:34px;display:flex;align-items:center;justify-content:center;flex:none;transition:transform .25s}
+.dvx.open .dvxc{transform:rotate(180deg)}
+.dvxb{display:none;border-top:1px solid #ffffff12;padding:4px 14px 6px}
+.dvx.open .dvxb{display:block}
+.dvxb.off{opacity:.45}
+.dvck{display:flex;align-items:center;gap:12px;padding:10px 0;cursor:pointer}
+.dvck span{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}.dvck b{font-size:14.5px;font-weight:600}.dvck small{font-size:12px;color:var(--mu);line-height:1.3}
+.dvck input{-webkit-appearance:none;appearance:none;width:24px;height:24px;border-radius:7px;border:2px solid var(--mu);flex:none;position:relative;background:none;margin:0}
+.dvck input:checked{background:var(--ac);border-color:var(--ac)}
+.dvck input:checked::after{content:"";position:absolute;left:6px;top:2px;width:6px;height:11px;border:solid #fff;border-width:0 2.5px 2.5px 0;transform:rotate(45deg)}
+.cm .px{display:none;padding:0 0 4px 14px}.cm .px.o{display:block}
+.cm .chv{margin-left:auto;display:flex;transition:transform .2s}.cm .xo .chv{transform:rotate(180deg)}
+
 .dvic{flex:none;aspect-ratio:1}.dvic .i,.prme .i,.blip .bi .i{flex:none}
 .seg button{white-space:nowrap;display:flex!important;align-items:center;justify-content:center;text-align:center;line-height:1.15;min-height:38px;padding:0 6px!important;font-family:inherit}
 .seg{align-items:stretch}
@@ -9078,7 +9115,7 @@ body.bsw #root,body.bsw #player{filter:blur(14px);opacity:.78;transition:filter 
 .gph.e .gglow{animation:gGlowE 4.4s infinite}
 @keyframes gFingerE{0%{opacity:0;transform:translateY(0)}10%{opacity:.9}35%{box-shadow:0 0 0 10px #fff0;transform:translateY(0)}60%{transform:translateY(-34px);opacity:.9}75%,100%{opacity:0;transform:translateY(-40px)}}
 @keyframes gGlowE{0%,40%{opacity:0}55%,70%{opacity:1}90%,100%{opacity:0}}
-@media (min-width:700px){#player .top{padding-top:calc(34px + var(--top))!important;background:linear-gradient(#000 0,#000 72%,transparent)!important}}
+@media (min-width:700px){#player .top{padding-top:calc(14px + var(--top))!important;background:linear-gradient(#000 0,#000 72%,transparent)!important}}
 body.nocast [data-act=pcast]{display:none!important}
 body.thz,body.thz *,body.armed,body.armed *{-webkit-user-select:none!important;user-select:none!important;-webkit-touch-callout:none!important}
 .xf{padding:8px 4px 6px}.xf .xl{display:block;font-size:11.5px;color:var(--mu);margin:0 4px 6px}
@@ -9148,7 +9185,8 @@ body.shk #root,body.shk #tabs{animation:shkK .6s cubic-bezier(.3,.1,.2,1)}
 html,body{overflow-x:hidden;max-width:100%;overscroll-behavior-x:none}
 html:has(body.pl),html:has(body[style*="overflow: hidden"]){overflow:hidden!important}
 body.pl{overflow:hidden!important}
-#player{overscroll-behavior:none;touch-action:manipulation}
+#player{overscroll-behavior:none;touch-action:pan-x pan-y}
+#player video{transform-origin:50% 50%;will-change:transform}
 #root{overflow-x:clip;touch-action:pan-y pinch-zoom}
 .rrow,.dtabs,.sfil,.srcs,.dubs{touch-action:pan-x pan-y}
 #splash>*:not(.ld){translate:0 -52px}
@@ -9956,7 +9994,7 @@ input,select,textarea{font-size:16px}
   <div class="msg hide" id="pmsg"></div>
 </div>
 <div id="rcbar" class="hide"></div>
-<div id="fx"></div><div id="fxh"></div>
+<div id="bswl"></div><div id="fx"></div><div id="fxh"></div>
 <div id="toast"></div>
 
 <script>
@@ -10114,17 +10152,34 @@ function paintNet() {
   el.title = 'Network' + (S.net.iface ? ' · ' + S.net.iface : '');
   el.className = 'net ' + st + ' flip'; el.innerHTML = ico(NETICO[st]) + NETLBL[st];
 }
+function uiRecover() {  // після трансляції/системного плеєра повертаємо інтерфейс у робочий стан
+  try { if (V.webkitDisplayingFullscreen && V.webkitExitFullscreen) V.webkitExitFullscreen(); } catch (e) {}
+  const pl = $('#player'), open = !!(pl && !pl.classList.contains('hide'));
+  const b = document.body;
+  b.classList.remove('bsw', 'shk', 'armed', 'thz');
+  if (!open) { b.classList.remove('pl'); if (!S.sheet && !PR.open) b.style.overflow = ''; }
+  try { const fx = $('#fx'); if (fx) { fx.className = ''; fx.innerHTML = ''; } const h = $('#fxh'); if (h) h.classList.remove('on'); } catch (e) {}
+  document.documentElement.style.pointerEvents = ''; b.style.pointerEvents = '';
+  try { zmApply(false); } catch (e) {}
+  window.dispatchEvent(new Event('resize'));
+}
+function uiStuck() { const pl = $('#player'); if (pl && pl.classList.contains('hide') && document.body.classList.contains('pl')) uiRecover(); }
 function setMirror(v) {
   if (!!S.mirror === v) return;
   S.mirror = v;
+  try { V.setAttribute('x-webkit-airplay', v ? 'deny' : 'allow'); } catch (e) {}  // під час дзеркалення не віддаємо відео окремим потоком — телефон лишається живим
   try { applyPlayerMode(); } catch (e) {}
+  if (!v) { setTimeout(uiRecover, 150); setTimeout(uiRecover, 900); }
   if (v && S.cur) {  // трансляція почалась посеред серії: виходимо з системного плеєра, лишаємо наш із кнопками
     try { if (V.webkitDisplayingFullscreen && V.webkitExitFullscreen) V.webkitExitFullscreen(); } catch (e) {}
     if (V.paused && !V.ended) V.play().catch(() => {});
   }
   if (IOS_APP) toast(v ? 'Трансляція екрана: увімкнено вбудований плеєр' : 'Трансляцію вимкнено: знову системний плеєр', false, 'cast');
 }
-setInterval(() => { if (S.cur && IOS_APP) api('/api/net').then(r => setMirror(!!r.captured)).catch(() => {}); }, 1500);
+function pollMirror() { if (IOS_APP) api('/api/net').then(r => { setMirror(!!r.captured); uiStuck(); }).catch(() => {}); }
+setInterval(pollMirror, 1500);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { pollMirror(); setTimeout(uiStuck, 300); } });
+window.addEventListener('pageshow', () => { pollMirror(); setTimeout(uiStuck, 300); });
 async function pollNet() {
   let st = 'online', ifn = '';
   try { const r = await api('/api/net'); st = r.state; ifn = r.iface || ''; setMirror(!!r.captured); } catch (e) { st = navigator.onLine === false ? 'offline' : S.net.state; }
@@ -11839,7 +11894,7 @@ const A = {
   async dxfer(el) { try { S.sync = await api('/api/sync_xfer', {id: el.dataset.id, mode: el.dataset.x}); paintSync(); } catch (e) { toast(e.message, true); } },
   async dpush(el) {
     const p = peerOf(el.dataset.id); closeSheet();
-    try { await api('/api/sync_push_settings', {peer: el.dataset.id}); toast('Запропоновано «' + (p ? p.name : '') + '» — чекаємо підтвердження', false, 'check'); } catch (e) { toast(e.message, true); }
+    try { await api('/api/sync_push_settings', {peer: el.dataset.id, scope: el.dataset.sc || 'all'}); toast('Запропоновано «' + (p ? p.name : '') + '» — чекаємо підтвердження', false, 'check'); } catch (e) { toast(e.message, true); }
   },
   async dvrename() {
     const y = S.sync; if (!y) return;
@@ -11852,6 +11907,8 @@ const A = {
     if (!ok) return;
     try { S.sync = await api('/api/sync_cfg', {sync_settings: all}); paintSync(); } catch (e) { toast(e.message, true); }
   },
+  dpx() { if (S.sheet) { S.sheet.px = !S.sheet.px; renderSheet(); } },
+  dvx(el) { S.dvOpen = S.dvOpen || {}; S.dvOpen[el.dataset.k] = !S.dvOpen[el.dataset.k]; const b = $('#dvbox'); if (b) b.dataset.h = ''; paintSync(); },
   dmenu(el) { const r = el.getBoundingClientRect(); openSheet('dmenu', {id: el.dataset.id, rect: r}); },
   async dsync(el) { closeSheet(); A.syncnow(); },
   async drename(el) {
@@ -12606,6 +12663,20 @@ document.addEventListener('change', ev => {
     if (D.more && nwVisible(D).length < 12 && ev.target.dataset.nf !== 'sort') nwLoad(true);
     return;
   }
+  if (ev.target.id === 'rcsw') {
+    const v = ev.target.checked; ev.target.blur();
+    api('/api/settings', {rc: v}).then(() => { if (S.set) S.set.rc = v; return syncFetch(); }).catch(e => toast(e.message, true));
+    return;
+  }
+  if (ev.target.dataset && ev.target.dataset.ck) {
+    const t = ev.target, k = t.dataset.ck, v = t.checked; t.blur();
+    if (k === 'rc_in' || k === 'rc_out') { api('/api/settings', {[k]: v}).then(() => { if (S.set) S.set[k] = v; return syncFetch(); }).catch(e => toast(e.message, true)); return; }
+    (async () => {
+      if (k === 'sy_other' && v && !(await askConfirm('Синхронізувати всі інші налаштування?', 'Вони передаватимуться між пристроями й можуть перезаписати значення на іншому.', 'Увімкнути', false))) { t.checked = false; return; }
+      try { S.sync = await api('/api/sync_cfg', {['sync_' + k.slice(3)]: v}); paintSync(); } catch (e) { toast(e.message, true); }
+    })();
+    return;
+  }
   if (ev.target.id === 'hosw') {
     const v = ev.target.checked;
     api('/api/settings', {handoff: v}).then(() => { if (S.set) S.set.handoff = v; if (S.sync) S.sync.handoff_on = v; paintSync(); }).catch(e => toast(e.message, true));
@@ -12898,6 +12969,45 @@ V.addEventListener('seeking', () => {
   P.sinceSeek = 0; P.lastT = t; nxCancel(); skSoft = null;
 });
 /* ---------- режим плеєра (iOS), Now Playing, повний екран, PiP ---------- */
+const ZM = {fill: false, on: false, d0: 0, base: 1, cur: 1};
+try { ZM.fill = localStorage.getItem('vfill') === '1'; } catch (e) {}
+function zmFull() {  // у скільки разів треба збільшити відео, щоб воно заповнило екран без чорних смуг
+  const vw = V.videoWidth, vh = V.videoHeight, r = $('#stage').getBoundingClientRect();
+  if (!vw || !vh || !r.width || !r.height) return 1;
+  const va = vw / vh, ca = r.width / r.height;
+  return Math.max(ca / va, va / ca, 1);
+}
+function zmApply(anim) {
+  const f = zmFull(), sc = ZM.fill ? f : 1;
+  V.style.transition = anim ? 'transform .3s cubic-bezier(.2,.8,.2,1)' : 'none';
+  V.style.transform = sc > 1.002 ? `scale(${sc})` : '';
+}
+(function zmInit() {
+  const pl = $('#player'), dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  pl.addEventListener('touchstart', ev => {
+    if (ev.touches.length === 2 && !V.webkitDisplayingFullscreen) { ZM.on = true; ZM.d0 = dist(ev.touches) || 1; ZM.base = ZM.fill ? zmFull() : 1; ZM.cur = ZM.base; V.style.transition = 'none'; }
+  }, {passive: true});
+  pl.addEventListener('touchmove', ev => {
+    if (!ZM.on || ev.touches.length !== 2) return;
+    ev.preventDefault();
+    const f = zmFull(), k = dist(ev.touches) / ZM.d0;
+    ZM.cur = Math.max(1, Math.min(f * 1.06, ZM.base * k));
+    V.style.transform = `scale(${ZM.cur})`;
+  }, {passive: false});
+  const end = ev => {
+    if (!ZM.on || (ev.touches && ev.touches.length >= 2)) return;
+    ZM.on = false;
+    const f = zmFull(), mid = 1 + (f - 1) * .35;
+    const want = f > 1.02 && ZM.cur > (ZM.fill ? 1 + (f - 1) * .65 : mid);
+    if (want !== ZM.fill) { ZM.fill = want; try { localStorage.setItem('vfill', want ? '1' : '0'); } catch (e) {} try { gpHaptic(); } catch (e) {} }
+    zmApply(true); vcShow && vcShow();
+  };
+  ['touchend', 'touchcancel'].forEach(t => pl.addEventListener(t, end, {passive: true}));
+  V.addEventListener('loadedmetadata', () => zmApply(false));
+  V.addEventListener('playing', () => zmApply(false));
+  window.addEventListener('resize', () => zmApply(false));
+  window.addEventListener('orientationchange', () => setTimeout(() => zmApply(false), 300));
+})();
 function airplayInit() {
   try {
     const b = $('#apbtn'); if (b && IOS_APP && V.webkitShowPlaybackTargetPicker) b.hidden = false;
@@ -12950,7 +13060,7 @@ $('#vpip').addEventListener('click', async () => {
     else await V.requestPictureInPicture();
   } catch (e) { toast('Картинка в картинці недоступна для цього відео', true); }
 });
-V.addEventListener('webkitendfullscreen', () => { vcShow(); });
+V.addEventListener('webkitendfullscreen', () => { vcShow(); setTimeout(() => { zmApply(false); uiStuck(); }, 120); });
 /* ---------- власні елементи керування ---------- */
 const VC = $('#vc'), VS = $('#vseek'); let vcT = 0, seeking = false;
 function vcShow() {
@@ -13014,6 +13124,12 @@ const DKIND = {phone: 'iPhone', tablet: 'iPad', pc: 'Комп’ютер'};
 const myKind = () => (/iPad/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent)) || (navigator.maxTouchPoints > 1 && Math.min(screen.width, screen.height) >= 700)) ? 'tablet' : 'phone';
 const dico = k => ico(k === 'tablet' ? 'tablet' : k === 'pc' ? 'pc' : 'phone');
 const peerOf = id => ((S.sync && S.sync.peers) || []).find(p => p.id === id);
+function dvxHTML(k, icon, title, desc, id, on, subs) {
+  const o = !!(S.dvOpen && S.dvOpen[k]);
+  return `<div class="dvcard dvx ${o ? 'open' : ''}"><div class="dvxh"><div class="dvxl" data-act="dvx" data-k="${k}"><div class="dvic ft">${ico(icon)}</div><div class="tx"><b>${title}</b><span class="d">${desc}</span></div></div>
+    <button class="dvxc" data-act="dvx" data-k="${k}" aria-label="Розгорнути">${ico('chev')}</button><label class="sw"><input type="checkbox" id="${id}" ${on ? 'checked' : ''}></label></div>
+    <div class="dvxb ${on ? '' : 'off'}">${subs.map(c => `<label class="dvck"><input type="checkbox" data-ck="${c[0]}" ${c[2] ? 'checked' : ''} ${on ? '' : 'disabled'}><span><b>${c[1]}</b>${c[3] ? `<small>${c[3]}</small>` : ''}</span></label>`).join('')}</div></div>`;
+}
 function devBody() {
   const y = S.sync;
   if (!y) return '<div class="dvhint">Завантаження…</div>';
@@ -13028,9 +13144,13 @@ function devBody() {
   if (nP) {
     h += '<div class="dvsec">Можливості</div>';
     h += `<label class="dvcard dvsw"><div class="dvic ft">${ico('cast')}</div><div class="tx"><b>Передача між пристроями</b><span class="d">Перекидайте вкладку, серію з поточного моменту, пошук і прокрутку на інший пристрій. Увімкніть на обох.</span></div><span class="sw"><input type="checkbox" id="hosw" ${y.handoff_on ? 'checked' : ''}></span></label>`;
-    h += `<label class="dvcard dvsw"><div class="dvic ft">${ico('refresh')}</div><div class="tx"><b>Синхронізація</b><span class="d">Бібліотека, перегляд, позиція, архів і видалення. Увімкніть на обох.</span></div><span class="sw"><input type="checkbox" id="sysw" ${y.sync ? 'checked' : ''}></span></label>`;
-    if (y.sync) h += `<div class="seg" role="tablist"><button data-act="symode" data-m="lib" class="${y.sync_settings ? '' : 'on'}">Бібліотека</button><button data-act="symode" data-m="all" class="${y.sync_settings ? 'on' : ''}">З налаштуваннями</button></div>
-      <p class="dvhint">${y.sync_settings ? 'Разом із налаштуваннями плеєра, автоперевірки й гучності. Функції розробника не передаються.' : 'Налаштування лишаються окремими на кожному пристрої.'}</p>`;
+    h += dvxHTML('sync', 'refresh', 'Синхронізація', 'Бібліотека, перегляд, позиція, архів і видалення. Увімкніть на обох.', 'sysw', y.sync, [
+      ['sy_view', 'Вид бібліотеки', y.sync_view, 'Сортування, групи й вигляд карток'],
+      ['sy_player', 'Налаштування плеєра', y.sync_player, 'Автопропуск, автоперехід, гучність'],
+      ['sy_other', 'Усі інші налаштування', y.sync_other, 'Автоперевірка, розмиття, порядок сайтів тощо. Функції розробника не передаються']]);
+    h += dvxHTML('rc', 'cast', 'Пульт', 'Керуйте серією, що грає на іншому пристрої, прямо з цього.', 'rcsw', y.rc_on, [
+      ['rc_in', 'Дозволити керувати цим пристроєм', y.rc_in, 'Інший пристрій зможе ставити паузу, перемотувати й міняти серію тут'],
+      ['rc_out', 'Керувати іншими з цього пристрою', y.rc_out, 'Показувати пульт, коли на іншому пристрої грає серія']]);
     const g = (S.set && S.set.xgest) || 'both';
     h += `<div class="dvsec">Жест перекидання</div>
       <div class="seg" role="tablist">${[['both', 'Обидва'], ['top', 'Зверху'], ['edge', 'Справа']].map(([m, t]) => `<button data-act="xgest" data-m="${m}" class="${g === m ? 'on' : ''}">${t}</button>`).join('')}</div>
@@ -13051,7 +13171,8 @@ function dmenuHTML(s) {
     <div class="tx"><b>${esc(p.name)}</b><span class="dst ${p.online ? 'on' : ''}">${p.online ? 'У мережі' : 'Не в мережі'}</span>
     <span class="d">${esc(DKIND[p.kind] || '')}${p.sync && p.last ? ' · синхр. ' + syAgo(p.last) : ''}</span></div></div>
     <div class="cm">${p.online && S.sync && S.sync.sync ? `<button data-act="dsync" data-id="${esc(p.id)}">${ico('refresh')} Синхронізувати зараз</button>` : ''}
-    ${p.online ? `<button data-act="dpush" data-id="${esc(p.id)}">${ico('download')} Передати сюди мої налаштування</button>` : ''}
+    ${p.online ? `<button data-act="dpx" class="${s.px ? 'xo' : ''}">${ico('download')} Передати налаштування <span class="chv">${ico('chev')}</span></button>
+    <div class="px ${s.px ? 'o' : ''}">${[['all', 'Усе'], ['view', 'Вид бібліотеки'], ['player', 'Налаштування плеєра'], ['other', 'Інші налаштування']].map(([m, t]) => `<button data-act="dpush" data-id="${esc(p.id)}" data-sc="${m}">${t}</button>`).join('')}</div>` : ''}
     <div class="xf"><span class="xl">Перекидання на цей пристрій</span><div class="seg sm">${[['std', 'Звичайне'], ['only', 'Єдиний'], ['never', 'Ніколи']].map(([m, t]) => `<button data-act="dxfer" data-id="${esc(p.id)}" data-x="${m}" class="${(p.xfer || 'std') === m ? 'on' : ''}">${t}</button>`).join('')}</div></div>
     <button data-act="drename" data-id="${esc(p.id)}">${ico('edit')} Змінити назву</button>
     <button class="dng" data-act="dunpair" data-id="${esc(p.id)}">${ico('trash')} Відʼєднати</button></div>`;
@@ -13077,7 +13198,8 @@ async function pullView() {
 }
 async function askOffer(o) {
   S.lastOffer = o.hid;
-  const yes = await askConfirm('Прийняти налаштування?', `«${o.from}» пропонує передати свої налаштування (${o.n}). Поточні налаштування на цьому пристрої буде замінено.`, 'Прийняти', false);
+  const SCN = {all: 'усі налаштування', view: 'вид бібліотеки', player: 'налаштування плеєра', other: 'інші налаштування'};
+  const yes = await askConfirm('Прийняти налаштування?', `«${o.from}» пропонує передати: ${SCN[o.scope] || SCN.all} (${o.n}). Поточні значення на цьому пристрої буде замінено.`, 'Прийняти', false);
   try { S.sync = await api('/api/sync_offer', {hid: o.hid, ok: !!yes}); if (yes) { await pullView(); toast('Налаштування прийнято', false, 'check'); render(); } } catch (e) { toast(e.message, true); }
 }
 function paintPair() {
@@ -13186,7 +13308,7 @@ async function throwTo(pid, mode, extra) {
     await api('/api/sync_cast', b);
     gpHaptic();
     fxRun('out');
-    if (S.cur) { blurSwap(() => { closePlayer(); if (mode === 'cast') rcStart(pid); }); }
+    if (S.cur) { blurSwap(() => { closePlayer(); if (mode === 'cast' && S.sync && S.sync.rc_out_on) rcStart(pid); }); }
   } catch (e) { toast(e.message, true); }
 }
 async function applyHandoff(h) {
@@ -13210,7 +13332,7 @@ async function applyHandoff(h) {
 // плеєр звітує про стан і забирає команди пульта
 let PST = {on: false, busy: false};
 setInterval(async () => {
-  if (PST.busy || !(S.sync && S.sync.handoff_on)) return;
+  if (PST.busy || !(S.sync && S.sync.rc_in_on)) return;
   if (!S.cur && !PST.on) return;
   PST.busy = true;
   try {
@@ -13243,9 +13365,9 @@ function rcStart(pid, auto) {
    <div class="rcsk"><span id="rcc">0:00</span><input type="range" id="rcseek" min="0" max="1000" value="0"><span id="rcd">0:00</span></div>
    <div class="rcb"><button class="cb sm" data-rc="prev">${ico('prev')}</button><button class="cb" data-rc="back">${ico('back10')}</button><button class="cb big" id="rcpp" data-rc="pp">${ico('pause')}</button><button class="cb" data-rc="fwd">${ico('fwd10')}</button><button class="cb sm" data-rc="next">${ico('next')}</button></div>
    <div class="rcvl"><span class="rcvi">${ico('vol')}</span><input type="range" id="rcvol" min="0" max="100" value="100"><span id="rcvn">100</span></div></div>`;
-  document.body.classList.add('rc');
+  document.body.classList.add('rcon');
 }
-function rcStop() { RC.pid = null; const el = $('#rcbar'); if (el) { el.classList.add('hide'); el.innerHTML = ''; } document.body.classList.remove('rc'); }
+function rcStop() { RC.pid = null; const el = $('#rcbar'); if (el) { el.classList.add('hide'); el.innerHTML = ''; } document.body.classList.remove('rcon'); }
 async function rcCmd(c, v) { if (!RC.pid) return; try { await api('/api/sync_rc', {peer: RC.pid, c, v}); } catch (e) { toast(e.message, true); } }
 function rcAct(b) {
   const a = b.dataset.rc;
@@ -13279,6 +13401,7 @@ async function rcPoll() {
   if (RC.busy) return;
   RC.busy = true;
   try {
+    if (RC.pid && !(S.sync && S.sync.rc_out_on)) { rcStop(); return; }
     if (RC.pid) {
       if (RC.drag || RC.vdrag) return;
       let st = {};
@@ -13290,7 +13413,7 @@ async function rcPoll() {
       if (RC.miss >= lim && Date.now() - RC.t0 > 6000) { const q = RC.seen && !RC.auto; const nm = RC.name; rcStop(); if (q) toast(st ? 'Відтворення на «' + nm + '» завершено' : 'Звʼязок із «' + nm + '» втрачено', !st); }
       return;
     }
-    if (S.cur || !(S.sync && S.sync.handoff_on)) return;
+    if (S.cur || !(S.sync && S.sync.rc_out_on)) return;
     RC.n++; if (RC.n % 3) return;
     for (const p of onlinePeers()) {
       try { const st = (await api('/api/sync_pstate', {peer: p.id})).state || {}; if (st.on && !S.cur) { rcStart(p.id, true); rcPaint(st); RC.seen = true; return; } } catch (e) {}
