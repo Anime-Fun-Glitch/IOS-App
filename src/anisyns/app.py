@@ -334,6 +334,59 @@ def _native_webview(app, url):
     return wv, child.view
 
 
+def _guard_external(app):
+    """AirPlay / дзеркалення: жодне вікно програми не має жити на зовнішньому дисплеї (інакше телефон лишається чорним,
+    а на приймачі видно «великий» інтерфейс). Ховаємо такі вікна й повертаємо головне вікно на екран телефону —
+    тоді iOS сама дзеркалить головне вікно."""
+    from rubicon.objc import ObjCClass
+    UIScreen = ObjCClass('UIScreen')
+    main = UIScreen.mainScreen
+    ui = ObjCClass('UIApplication').sharedApplication
+    win = app.main_window._impl.native
+    try:
+        if win.screen != main:  # головне вікно «переїхало» на зовнішній екран
+            win.screen = main
+    except Exception:
+        pass
+    try:
+        if win.isHidden():
+            win.hidden = False
+    except Exception:
+        pass
+    try:
+        scenes = ui.connectedScenes.allObjects()
+        for i in range(int(scenes.count)):
+            sc = scenes.objectAtIndex(i)
+            try:
+                role = str(sc.session.role)
+            except Exception:
+                role = ''
+            if 'ExternalDisplay' not in role:
+                continue
+            ws = sc.windows
+            for j in range(int(ws.count)):
+                w = ws.objectAtIndex(j)
+                if w != win:
+                    w.hidden = True
+                    try:
+                        w.rootViewController = None
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    try:  # старий шлях: UIWindow, прив'язаний до UIScreen №2
+        scr = UIScreen.screens
+        for i in range(int(scr.count)):
+            sc = scr.objectAtIndex(i)
+            if sc == main:
+                continue
+            for w in ui.windows:
+                if w != win and w.screen == sc:
+                    w.hidden = True
+    except Exception:
+        pass
+
+
 async def _inset_loop(app, wv, view):
     """Фоновий цикл (раз на 0,4 с): safe-area → сторінка; раз на ~1,2 с перевіряє Python-сервер і піднімає, якщо iOS його зупинила;
     тримає програму активною (тихе аудіо), коли треба; оновлює Dynamic Island."""
@@ -343,6 +396,10 @@ async def _inset_loop(app, wv, view):
     last, tick, ka = None, 0, _KeepAlive()
     isl_last, isl_t, isl_port = None, 0.0, None
     while True:
+        try:
+            _guard_external(app)
+        except Exception:
+            pass
         try:
             ins = view.safeAreaInsets
             cur = (round(float(ins.top)), round(float(ins.left)), round(float(ins.bottom)), round(float(ins.right)))

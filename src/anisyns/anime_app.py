@@ -23,7 +23,6 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urljoin, urlparse
 
-
 import requests
 
 MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)'
@@ -8064,6 +8063,11 @@ def _sync_snapshot(st):
   for k in SYNC_SETTINGS_KEYS:
     if k in SETTINGS and _sync_group_on(st, k):
       out['s/' + k] = (json.dumps(SETTINGS[k]), SETTINGS[k], None)
+  with _NOTIF_LOCK:
+    for x in NOTIFS:
+      if x.get('type') == 'new' and x.get('read') and x.get('kid') and x.get('eps'):
+        for e in x['eps']:
+          out[f"nr/{x['kid']}/{e}"] = ('1', 1, None)
   return out
 
 
@@ -8071,6 +8075,9 @@ def _sync_purge_kid(st, kid):
   for d in (st['regs'], st['last']):
     for k in [k for k in d if k.startswith((f'w/{kid}/', f'p/{kid}/', f'f/{kid}'))]:
       del d[k]
+
+
+VIEW_DEF_PY = {'gtitle': True, 'sort': 'my', 'ongoing': False, 'timer': False, 'title': True, 'seasonOnly': False, 'site': True, 'stats': True, 'badge': True, 'cols': 2}
 
 
 def _sync_scan():
@@ -8086,7 +8093,7 @@ def _sync_scan():
       ts = None
       if k.startswith('s/') and k not in last and k not in st['regs']:
         # налаштування, яких ми ще не фіксували: значення за замовчуванням не повинні перебивати змінені на іншому пристрої
-        if val == SETTINGS_DEF.get(k[2:]):
+        if val == SETTINGS_DEF.get(k[2:]) or (k == 's/view' and isinstance(val, dict) and all(VIEW_DEF_PY.get(a) == b for a, b in val.items())):
           ts = 1
       elif k not in last and k not in st['regs']:
         # Вперше бачимо цей запис (пристрій довго не синхронізувався або щойно підключений): ставимо не «зараз», а час, коли
@@ -8155,8 +8162,25 @@ def _sync_apply_one(st, k, r):
   kind = parts[0]
   if kind == 's':
     if parts[1] in SYNC_SETTINGS_KEYS and _sync_group_on(st, parts[1]):
+      before = json.dumps(SETTINGS.get(parts[1]))
       api_settings({parts[1]: v})
       last[k] = json.dumps(SETTINGS.get(parts[1]))
+      return last[k] != before  # зміна → піднімаємо «gen», і відкритий інтерфейс сам підтягне нові налаштування
+    return False
+  if kind == 'nr':  # повідомлення про нові серії: прочитано на одному пристрої — прочитано всюди
+    if v and len(parts) >= 3:
+      with _NOTIF_LOCK:
+        ch = False
+        for x in NOTIFS:
+          if x.get('type') == 'new' and not x.get('read') and x.get('kid') == parts[1] and x.get('eps') and parts[2] in [str(e) for e in x['eps']]:
+            rd = {k2.split('/', 2)[2] for k2, r2 in st['regs'].items() if k2.startswith(f'nr/{parts[1]}/') and r2.get('v')}
+            if all(str(e) in rd for e in x['eps']):
+              x['read'] = True
+              ch = True
+        if ch:
+          _notif_save()
+      last[k] = '1'
+      return ch
     return False
   if kind == 'go':
     # порядок аніме всередині групи: перелічені першими в заданому порядку, решта (невідомі цьому пристрою) — після
@@ -9936,6 +9960,30 @@ input,select,textarea{font-size:16px}
 @keyframes spFade{0%{opacity:0;transform:translateY(8px)}100%{opacity:1;transform:none}}
 @keyframes spRun{0%{left:-45%}100%{left:100%}}
 @media (prefers-reduced-motion:reduce){#splash *{animation-duration:.01s!important;animation-delay:0s!important}}
+html:has(body.nosc){overflow:hidden!important}body.nosc{overflow:hidden!important}
+.dsplit{display:none}
+@media (min-width:900px){
+  #root.detail .dcols{grid-template-columns:var(--dlw,400px) 24px minmax(0,1fr)!important;gap:8px 0!important}
+  .dsplit{display:flex;align-items:center;justify-content:center;position:sticky;top:calc(var(--barh,58px) + 12px);height:calc(100vh - var(--barh,58px) - 100px);margin-top:12px;cursor:col-resize;touch-action:none;-webkit-user-select:none;user-select:none}
+  .dsplit::before{content:"";width:3px;height:100%;border-radius:2px;background:#ffffff12;transition:background .2s}
+  .dsplit::after{content:"";position:absolute;left:50%;top:50%;width:5px;height:46px;margin:-23px 0 0 -2.5px;border-radius:3px;background:#ffffff40;transition:background .2s,height .2s}
+  .dsplit:hover::before,.dsplit.on::before{background:var(--ac)}
+  .dsplit.on::after{background:#fff;height:64px;margin-top:-32px}
+}
+@media (min-width:900px) and (max-height:520px){
+  #root.detail .dl{position:static!important;max-height:none!important;overflow:visible!important}
+  .dsplit{display:none!important}
+  #root.detail .dcols{grid-template-columns:minmax(300px,380px) minmax(0,1fr)!important;gap:8px 20px!important}
+}
+@media (min-width:700px){
+  .grid.c3{grid-template-columns:repeat(auto-fill,minmax(138px,1fr));gap:10px;padding:14px 18px}
+  .rgrid{grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:14px 12px;padding:10px 4px 6px}
+}
+@media (min-width:1100px){.grid.c3{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}}
+@media (max-width:699px){
+  .bar,.hdr2,#hdrtog{background:#0d0e13!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+  .hdr2{top:calc(var(--barh,58px) - 1px)}
+}
 </style>
 <script>
 /* Безпечні зони (виріз / Dynamic Island / індикатор «Home»). Якщо WebView розтягнутий на весь екран, а env() віддає 0 —
@@ -9958,11 +10006,15 @@ input,select,textarea{font-size:16px}
     else if (long >= 812) { top = 47; bot = 34; }             // iPhone X … 14 Plus (виріз)
     return {top: top, bot: bot, short: short};
   }
-  window.__insets = function (t, l, b, r) {  // нативні безпечні зони з iOS (надійніше, ніж env())
-    window.__nat = 1;
+  function setIns(t, l, b, r) {
+    if (window.innerWidth > window.innerHeight && window.innerHeight < 520) t = 0;  // iPhone в ландшафті: рядка стану зверху немає
     root.style.setProperty('--top', t + 'px'); root.style.setProperty('--bot', b + 'px');
     root.style.setProperty('--lft', l + 'px'); root.style.setProperty('--rgt', r + 'px');
+  }
+  window.__insets = function (t, l, b, r) {  // нативні безпечні зони з iOS (надійніше, ніж env())
+    window.__nat = 1; window.__lastIns = [t, l, b, r]; setIns(t, l, b, r);
   };
+  window.addEventListener('resize', function () { if (window.__lastIns) { var a = window.__lastIns; setTimeout(function () { setIns(a[0], a[1], a[2], a[3]); }, 60); } });
   function apply() {
     if (window.__nat) return;
     var landscape = window.innerWidth > window.innerHeight;
@@ -9976,6 +10028,7 @@ input,select,textarea{font-size:16px}
         b = landscape ? Math.min(g.bot, 21) : g.bot;
       }
     }
+    if (landscape && window.innerHeight < 520) t = 0;
     root.style.setProperty('--top', t + 'px');
     root.style.setProperty('--bot', b + 'px');
   }
@@ -10037,7 +10090,16 @@ input,select,textarea{font-size:16px}
 <script>
 'use strict';
 const $ = (s, el = document) => el.querySelector(s);
-setTimeout(() => { const sp = document.getElementById('splash'); if (sp) { sp.classList.add('out'); setTimeout(() => sp.remove(), 700); } }, 2300);  // заставку лишаємо на екрані, поки програється анімація
+(function () {  // заставка йде, поки застосунок не готовий: налаштування, бібліотека, безпечні зони — інтерфейс підлаштовується під нею, а не після
+  const t0 = Date.now();
+  (function chk() {
+    const sp = document.getElementById('splash'); if (!sp) return;
+    const el = Date.now() - t0, ios = document.documentElement.dataset.ios === '1';
+    const ready = S.setReady && S.libLoaded && (!ios || window.__nat || el > 3600);
+    if ((el >= 2300 && ready) || el > 7000) { requestAnimationFrame(() => requestAnimationFrame(() => { sp.classList.add('out'); setTimeout(() => sp.remove(), 700); })); }
+    else setTimeout(chk, 120);
+  })();
+})();  // заставку лишаємо на екрані, поки програється анімація
 const IOS_APP = document.documentElement.dataset.ios === '1';  // працюємо всередині iPhone-застосунку
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ls = {
@@ -10151,7 +10213,7 @@ async function loadLib(quiet) {
   if (my !== LIBSEQ) return;  // прийшла застаріла відповідь — новіший запит уже в дорозі/виконаний
   const sig = JSON.stringify(j.items) + '|' + JSON.stringify(j.tmp || []);
   if (quiet === 'vis' && S._libSig === sig) return;  // повернулись із фону, а нічого не змінилось — не перемальовуємо (інакше картки «блимають»)
-  S._libSig = sig; S.items = j.items; S.tmp = j.tmp || []; S.ffmpeg = j.ffmpeg;
+  S._libSig = sig; S.items = j.items; S.tmp = j.tmp || []; S.ffmpeg = j.ffmpeg; S.libLoaded = true;
   try { sessionStorage.setItem('libCache', JSON.stringify({items: S.items, tmp: S.tmp, ffmpeg: S.ffmpeg})); } catch (e) {}
   if (quiet !== true) render();
 }
@@ -10249,6 +10311,26 @@ window.addEventListener('hashchange', () => {
   if (y) { try { window.__hdrJump && window.__hdrJump(y); } catch (e) {} }
   if (y) { requestAnimationFrame(() => window.scrollTo(0, y)); setTimeout(() => { if (Math.abs(window.scrollY - y) > 2) window.scrollTo(0, y); }, 120); }
 });
+try { const w = parseInt(localStorage.getItem('dlw'), 10); if (w >= 300) document.documentElement.style.setProperty('--dlw', w + 'px'); } catch (e) {}
+document.addEventListener('pointerdown', ev => {  // перетягування смужки між інформацією про аніме та серіями (iPad/широкі екрани)
+  const d = ev.target.closest && ev.target.closest('.dsplit'); if (!d) return;
+  ev.preventDefault();
+  const col = d.parentNode, cw = col.getBoundingClientRect().width, w0 = col.querySelector('.dl').getBoundingClientRect().width, x0 = ev.clientX;
+  d.classList.add('on'); try { d.setPointerCapture(ev.pointerId); } catch (e) {}
+  const mv = e => { document.documentElement.style.setProperty('--dlw', Math.round(Math.max(300, Math.min(cw * .62, w0 + e.clientX - x0))) + 'px'); };
+  const up = () => { d.classList.remove('on'); d.removeEventListener('pointermove', mv); d.removeEventListener('pointerup', up); d.removeEventListener('pointercancel', up); try { localStorage.setItem('dlw', String(parseInt(getComputedStyle(document.documentElement).getPropertyValue('--dlw'), 10) || '')); } catch (e) {} };
+  d.addEventListener('pointermove', mv); d.addEventListener('pointerup', up); d.addEventListener('pointercancel', up);
+});
+/* кожна вкладка нижнього меню пам'ятає, де ви були (відкрите аніме в бібліотеці тощо) */
+const TABMEM = {};
+const tabOf = () => { const n = route().name; return n === 'detail' || n === 'group' ? 'home' : n === 'storage' ? 'settings' : n; };
+TABMEM[tabOf()] = location.hash || '#/';
+window.addEventListener('hashchange', () => { TABMEM[tabOf()] = location.hash || '#/'; });
+document.addEventListener('click', ev => {
+  const a = ev.target.closest && ev.target.closest('#tabs a'); if (!a) return;
+  const t = TABS.find(x => x[1] === a.getAttribute('href')); if (!t || t[0] === tabOf()) return;
+  const m = TABMEM[t[0]]; if (m && m !== t[1]) { ev.preventDefault(); location.hash = m; }
+}, true);
 // тримає на місці картку, що була вгорі екрана, поки список перемальовується (вхід/вихід з редагування)
 function keepAnchor(fn) {
   let id = null, top = 0;
@@ -11113,7 +11195,7 @@ function detailHTML(id) {
     <button class="btn" data-act="site" data-id="${it.id}" aria-label="Відкрити сайт (подвійний тап — скопіювати посилання)">${ico('globe')}</button>
   </div>
   ${desc ? `<div class="desc ${S.descOpen ? '' : 'cl'}">${esc(desc)}</div>${desc.length > 220 ? `<button class="more" data-act="more">${S.descOpen ? 'Згорнути' : 'Читати далі'}</button>` : ''}` : ''}
-  </div><div class="dr">
+  </div><div class="dsplit" aria-label="Змінити ширину"></div><div class="dr">
   ${tabsHTML}
   ${onEps ? `<div class="tools">
     ${sm ? `<button class="btn sm on" data-act="selmode">${ico('check')} Готово</button>
@@ -13148,12 +13230,20 @@ V.addEventListener('timeupdate', () => { vcSync(); skipTick(); });
 ['playing', 'seeked', 'loadeddata', 'canplay'].forEach(e => V.addEventListener(e, skipTick));
 setInterval(() => { if (S.cur && !V.paused) skipTick(); }, 400);
 V.addEventListener('loadedmetadata', vcSync);
+function clearNowPlaying() {  // прибираємо картку «Мої аніме» з екрана блокування/Центру керування
+  try {
+    const ms = navigator.mediaSession; if (!ms) return;
+    ms.metadata = null;
+    ['play', 'pause', 'previoustrack', 'nexttrack', 'seekbackward', 'seekforward', 'seekto', 'stop'].forEach(k => { try { ms.setActionHandler(k, null); } catch (e) {} });
+    ms.playbackState = 'none';
+  } catch (e) {}
+}
 function closePlayer() {
   nxCancel(); savePos(true);
   let wasFs = false;
   try { if (V.webkitDisplayingFullscreen && V.webkitExitFullscreen) { wasFs = true; V.webkitExitFullscreen(); } } catch (e) {}
   document.title = 'Мої аніме'; V.removeAttribute('poster');
-  try { if ('mediaSession' in navigator) navigator.mediaSession.metadata = null; } catch (e) {}
+  clearNowPlaying(); setTimeout(clearNowPlaying, 400);
   V.pause();
   clearTimeout(clrT);
   // джерело знімаємо не одразу, а коли системний повноекранний плеєр вже закрився: зняття src під час його анімації могло вбивати програму
@@ -13438,12 +13528,12 @@ function rcOpt(a) {  // одразу показуємо результат на�
   else if (a === 'prev' || a === 'next') { RC.hold = Date.now() + 2200; const e = $('#rcs'); if (e) e.textContent = 'Перемикаю серію…'; const c = $('#rcc'); if (c) c.textContent = '0:00'; const sk = $('#rcseek'); if (sk) sk.value = 0; }
 }
 function rcAct(b) {
-  const a = b.dataset.rc;
+  const a = b.dataset.rc, wasPaused = !!(RC.st && RC.st.paused);
   rcOpt(a);
   if (a === 'min') { RC.min = true; $('#rcbar').classList.add('min'); }
   else if (a === 'open') { RC.min = false; $('#rcbar').classList.remove('min'); }
   else if (a === 'stop') { rcCmd('close'); rcStop(); }
-  else if (a === 'pp') rcCmd(RC.st && RC.st.paused ? 'play' : 'pause');
+  else if (a === 'pp') rcCmd(wasPaused ? 'play' : 'pause');
   else if (a === 'prev') rcCmd('prev'); else if (a === 'next') rcCmd('next');
   else if (a === 'back') rcCmd('seekby', -10); else if (a === 'fwd') rcCmd('seekby', 10);
 }
@@ -13622,7 +13712,20 @@ function diagSend(ev) {
     }
     sync();
   };
-  setInterval(() => { if (!document.hidden) { fit(); if (tog.classList.contains('on')) sync(); } }, 400);  // панель може змінити висоту (відкрили фільтри) — ручка йде за її нижнім краєм
+  setInterval(() => {
+    if (document.hidden) return;
+    fit();
+    const h = document.querySelector('.hdr2'), mx = document.documentElement.scrollHeight - window.innerHeight;
+    if (h && !S.hdrPin && mx < 160 && (S.hdrHide || h.classList.contains('hdr-off'))) { S.hdrHide = false; apply(h, false, true); }  // нема що гортати — панель не ховаємо
+    if (tog.classList.contains('on')) sync();
+  }, 400);
+  const nosc = () => {  // порожній пошук: сторінку не можна прокручувати (особливо з клавіатурою)
+    const on = route().name === 'search' && !document.querySelector('#root .card');
+    if (document.body.classList.toggle('nosc', on) && on && window.scrollY) window.scrollTo(0, 0);
+  };
+  setInterval(nosc, 300);
+  addEventListener('scroll', () => { if (document.body.classList.contains('nosc') && window.scrollY) window.scrollTo(0, 0); }, {passive: true});
+  document.addEventListener('focusin', ev => { if (ev.target.closest && ev.target.closest('input') && route().name === 'search') [50, 250, 600].forEach(t => setTimeout(() => { if (document.body.classList.contains('nosc')) window.scrollTo(0, 0); }, t)); });  // панель може змінити висоту (відкрили фільтри) — ручка йде за її нижнім краєм
   tog.addEventListener('click', () => {
     const h = document.querySelector('.hdr2'); if (!h) return;
     lastChg = Date.now();
@@ -13742,8 +13845,8 @@ flushPos();
 api('/api/settings').then(j => {
   S.set = j; syncAuto();
   if (j.view && Object.keys(j.view).length) { S.view = {...VIEW_DEF, ...j.view}; try { localStorage.setItem('libview', JSON.stringify(S.view)); } catch (e) {} if (['home', 'group'].includes(route().name)) render(); }
-  else if (S.view) api('/api/settings', {view: S.view}).catch(() => {});
-}).catch(() => {});
+  else if (S.view && JSON.stringify(S.view) !== JSON.stringify(VIEW_DEF)) api('/api/settings', {view: S.view}).catch(() => {});  // лише змінений вигляд (дефолт не перебиває чужий)
+}).catch(() => {}).then(() => { S.setReady = true; });
 pollAC(true); setInterval(() => pollAC(), 45000);
 pollNet();
 fx();
