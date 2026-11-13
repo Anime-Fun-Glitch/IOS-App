@@ -342,7 +342,42 @@ async def _inset_loop(app, wv, view):
     from anisyns import anime_app
     last, tick, ka = None, 0, _KeepAlive()
     isl_last, isl_t, isl_port = None, 0.0, None
+    cap_last, cap_n = None, 0
     while True:
+        try:  # AirPlay / запис екрана: WebKit після зміни дисплея може «застигнути» або взяти хибний (широкий) розмір — будимо його
+            cap = bool(anime_app.SCREEN_PROVIDER['fn']()) if anime_app.SCREEN_PROVIDER.get('fn') else False
+            if cap != cap_last:
+                if cap_last is not None:
+                    cap_n = 6
+                cap_last = cap
+            if cap:  # якщо iOS «переселила» головне вікно на сцену зовнішнього екрана — повертаємо на екран телефону (лише читаємо, міняємо тільки при розбіжності)
+                try:
+                    from rubicon.objc import ObjCClass
+                    w0 = app.main_window._impl.native
+                    ws = w0.windowScene
+                    if ws is not None and 'ExternalDisplay' in str(ws.session.role):
+                        arr = ObjCClass('UIApplication').sharedApplication.connectedScenes.allObjects()
+                        for i in range(int(arr.count)):
+                            sc = arr.objectAtIndex(i)
+                            if 'ExternalDisplay' not in str(sc.session.role):
+                                w0.windowScene = sc
+                                w0.hidden = False
+                                cap_n = max(cap_n, 4)
+                                break
+                except Exception:
+                    pass
+            if cap_n > 0:
+                cap_n -= 1
+                view.setNeedsLayout()
+                view.layoutIfNeeded()
+                wv.setNeedsLayout()
+                wv.layoutIfNeeded()
+                wv.alpha = 0.99 if cap_n % 2 else 1.0
+                wv.evaluateJavaScript("(function(){var d=document.documentElement;d.style.display='none';void d.offsetHeight;d.style.display='';window.dispatchEvent(new Event('resize'));})()", completionHandler=None)
+                if cap_n == 0:
+                    wv.alpha = 1.0
+        except Exception:
+            pass
         try:
             ins = view.safeAreaInsets
             cur = (round(float(ins.top)), round(float(ins.left)), round(float(ins.bottom)), round(float(ins.right)))

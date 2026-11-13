@@ -9984,6 +9984,51 @@ html:has(body.nosc){overflow:hidden!important}body.nosc{overflow:hidden!importan
   .bar,.hdr2,#hdrtog{background:#0d0e13!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
   .hdr2{top:calc(var(--barh,58px) - 1px)}
 }
+
+body.rmpg #rcbar{display:none!important}
+.rmnow{position:sticky!important;top:calc(var(--top,0px) + 58px);z-index:6;transition:padding .2s}
+.rmnow.mini{padding:8px 12px;border-radius:16px;box-shadow:0 8px 24px #000a}
+.rmnow.mini .rmcv{width:38px;border-radius:8px}.rmnow.mini .rmtx{padding-right:56px}.rmnow.mini .rmtx span:not(.rmdev){display:none}.rmnow.mini .rmdev{display:none}.rmnow.mini .rmtx b{font-size:14px;-webkit-line-clamp:1}
+.rmnow.mini .rcx,.rmnow.mini .rcsk,.rmnow.mini .rcvl,.rmnow.mini .rmstopb{display:none}
+.rmnow.mini .rcb{position:absolute;right:8px;top:50%;transform:translateY(-50%);margin:0;gap:0}.rmnow.mini .rcb .cb:not(.big){display:none}.rmnow.mini .rcb .cb.big{width:42px;height:42px}.rmnow.mini .rcb .cb.big .i{width:22px;height:22px}
+.rmstopb{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:12px;padding:10px;border:0;border-radius:12px;background:#ffffff12;color:#ffffffc0;font-size:13px;font-weight:600}.rmstopb .i{width:16px;height:16px}
+.rmeps .rme .th{border-radius:14px}
+.rmwrap{padding:4px 16px 120px;max-width:980px;margin:0 auto}
+.rmnow{position:relative;overflow:hidden;border-radius:22px;background:var(--cd,#171a26);border:1px solid #ffffff14;padding:16px;box-shadow:0 10px 30px #0006}
+.rmnow .rmbg{position:absolute;inset:-30px;background-size:cover;background-position:center;filter:blur(34px) saturate(1.3);opacity:.45;transform:scale(1.2)}
+.rmnow>*:not(.rmbg){position:relative}
+.rmrow{display:flex;align-items:center;gap:14px}
+.rmcv{flex:none;width:84px;aspect-ratio:2/3;border-radius:12px;background:#ffffff14 center/cover;display:grid;place-items:center;color:var(--mu);box-shadow:0 6px 18px #0008}
+.rmtx{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.rmtx b{font-size:17px;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.rmtx span{font-size:13px;color:#ffffffb8}
+.rmtx .rmdev{display:flex;align-items:center;gap:6px;color:var(--ac);font-weight:600;font-size:12.5px}.rmtx .rmdev .i{width:15px;height:15px}
+.rmnow .rcx{background:#ffffff14;border:0;color:#fff;width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none}
+.rmnow .rcsk{margin-top:14px}.rmnow .rcb{margin-top:4px;gap:20px}
+.rmnow .rcb .cb{color:#fff}.rmnow .rcb .cb.big{width:62px;height:62px;border-radius:50%;background:var(--ac)!important;color:#fff}
+.rmh{display:flex;align-items:baseline;justify-content:space-between;margin:22px 4px 10px}.rmh h3{margin:0;font-size:17px}.rmh span{font-size:12.5px;color:var(--mu)}
+.rmas{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px;margin:0 -16px;padding-left:16px;padding-right:16px;scroll-snap-type:x proximity;scroll-padding-left:16px;-webkit-overflow-scrolling:touch;scrollbar-width:none}.rmas::-webkit-scrollbar{display:none}
+.rma{flex:none;width:92px;background:none;border:0;color:inherit;text-align:left;padding:0;scroll-snap-align:start;-webkit-tap-highlight-color:transparent}
+.rma i{display:grid;place-items:center;aspect-ratio:2/3;border-radius:12px;background:#ffffff12 center/cover;font-style:normal;font-size:30px;font-weight:800;color:#ffffff30;border:2px solid transparent;transition:transform .15s,border-color .15s}
+.rma span{display:block;margin-top:6px;font-size:12px;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--mu)}
+.rma.on i{border-color:var(--ac)}.rma.on span{color:#fff}.rma.pl i{box-shadow:0 0 0 2px #0d0e13,0 0 0 4px var(--ac2,var(--ac))}.rma:active i{transform:scale(.96)}
+.rmeps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media (min-width:560px){.rmeps{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (min-width:900px){.rmeps{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.rme{background:none;border:0;color:inherit;text-align:left;padding:0;-webkit-tap-highlight-color:transparent;min-width:0}
+.rme .th{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#1b1e2c center/cover;border:2px solid transparent;transition:transform .15s,border-color .15s}
+.rme .th img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.rme .th::after{content:"";position:absolute;inset:0;background:linear-gradient(to top,#000b 0%,#0000 55%)}
+.rme .num{position:absolute;left:8px;bottom:6px;z-index:1;font-weight:800;font-size:17px;text-shadow:0 1px 6px #000}
+.rme .eq{position:absolute;z-index:1;right:6px;top:6px;display:flex;align-items:center;gap:4px;background:var(--ac);color:#fff;border-radius:10px;padding:3px 8px;font-size:11.5px;font-weight:700}.rme .eq .i{width:12px;height:12px}
+.rme .nw{position:absolute;z-index:1;left:6px;top:6px;background:#0e9f84;color:#fff;border-radius:8px;padding:2px 7px;font-size:11px;font-weight:700}
+.rme .rs{position:absolute;z-index:1;right:8px;bottom:6px;display:flex;align-items:center;gap:3px;font-size:11px;color:#ffffffd0}.rme .rs .i{width:11px;height:11px}
+.rme .n{font-size:13px;font-weight:650;margin-top:6px}.rme .tt{font-size:12px;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rme.cur .th{border-color:var(--ac)}.rme.w .th{opacity:.55}.rme.cur .th,.rme.pend .th{opacity:1}.rme:active .th{transform:scale(.97)}.rme.pend .th{animation:rmp 1s ease-in-out infinite alternate}
+@keyframes rmp{from{filter:brightness(1)}to{filter:brightness(1.4)}}
+.rmempty{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;padding:60px 20px;color:var(--mu)}.rmempty b{color:#fff;font-size:18px}
+.rmei{width:72px;height:72px;border-radius:50%;background:#ffffff10;display:grid;place-items:center;color:var(--ac)}.rmei .i{width:34px;height:34px}
+.rmpk{display:flex;flex-direction:column;gap:10px;margin-top:12px;width:min(320px,100%)}
 </style>
 <script>
 /* Безпечні зони (виріз / Dynamic Island / індикатор «Home»). Якщо WebView розтягнутий на весь екран, а env() віддає 0 —
@@ -10189,6 +10234,7 @@ const ICONS = {
   devices: '<rect x="2.5" y="6" width="13" height="10" rx="1.8"/><path d="M6.5 19.5h5"/><rect x="16.5" y="9" width="5" height="9" rx="1.4"/>',
   cast: '<path d="M3 8V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5"/><path d="M3 12a9 9 0 0 1 9 9M3 16a5 5 0 0 1 5 5M3 20h.01" stroke-width="2.4"/>',
   airplay: '<path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1"/><path d="m12 15 5 6H7z"/>',
+  expand: '<path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/>',
   spinner: '<path d="M12 3a9 9 0 1 0 9 9"/>'
 };
 const FILLED = {play: 1, prev: 1, next: 1, spark: 1};
@@ -10238,7 +10284,7 @@ function route() {
   if (m) return {name: 'detail', id: m[1]};
   const g = location.hash.match(/^#\/g\/(\w+)/);
   if (g) return {name: 'group', id: g[1]};
-  const t = location.hash.match(/^#\/(search|new|devices|settings|storage)/);
+  const t = location.hash.match(/^#\/(search|new|devices|settings|storage|remote)/);
   return t ? {name: t[1]} : {name: 'home'};
 }
 const NETLBL = {wifi: 'Wi‑Fi', cell: 'Cellular', offline: 'Offline', online: 'Online', unknown: '—'};
@@ -10325,7 +10371,7 @@ document.addEventListener('pointerdown', ev => {  // перетягування 
 });
 /* кожна вкладка нижнього меню пам'ятає, де ви були (відкрите аніме в бібліотеці тощо) */
 const TABMEM = {};
-const tabOf = () => { const n = route().name; return n === 'detail' || n === 'group' ? 'home' : n === 'storage' ? 'settings' : n; };
+const tabOf = () => { const n = route().name; return n === 'detail' || n === 'group' ? 'home' : n === 'storage' ? 'settings' : n === 'remote' ? 'devices' : n; };
 TABMEM[tabOf()] = location.hash || '#/';
 window.addEventListener('hashchange', () => { TABMEM[tabOf()] = location.hash || '#/'; });
 document.addEventListener('click', ev => {
@@ -10406,7 +10452,7 @@ function morphInto(root, html) { const t = document.createElement('template'); t
 function render() {
   if (DR.on) return;  // триває перетягування картки
   const r = route();
-  const pages = {detail: () => detailHTML(r.id), search: searchHTML, new: newHTML, devices: devicesHTML, settings: settingsHTML, storage: storageHTML, group: () => groupHTML(r.id)};
+  const pages = {remote: rmHTML, detail: () => detailHTML(r.id), search: searchHTML, new: newHTML, devices: devicesHTML, settings: settingsHTML, storage: storageHTML, group: () => groupHTML(r.id)};
   const root = $('#root');
   ENTER = S.enterPending; S.enterPending = false;
   const ekey = r.name + ':' + (r.id || '') + (r.name === 'home' ? ':' + S.libTab : '');
@@ -10431,7 +10477,7 @@ function render() {
     if (!om[r.id] || S.listFresh) { S.listFresh = false; om[r.id] = dit.temp ? (S.lastList === 'new' ? 'new' : 'search') : (S.lastList || 'home'); try { sessionStorage.setItem('origTab', JSON.stringify(om)); } catch (e) {} }
     S.origTab = om[r.id] || (dit.temp ? 'search' : 'home');
   }
-  const tab = r.name === 'detail' ? S.origTab : r.name === 'storage' ? 'settings' : r.name === 'group' ? 'home' : r.name;
+  const tab = r.name === 'detail' ? S.origTab : r.name === 'storage' ? 'settings' : r.name === 'group' ? 'home' : r.name === 'remote' ? 'devices' : r.name;
   if (r.name === 'settings' || r.name === 'storage') storLoad();
   if (S.tabKey !== tab) { S.tabKey = tab; $('#tabs').innerHTML = tabsHTML(tab); }
   root.classList.toggle('detail', r.name === 'detail');
@@ -10448,6 +10494,7 @@ function render() {
   tickCd();
   if (r.name === 'search') observeImgs();
   if (r.name === 'new') { observeImgs(); nwEnsure(); }
+  rmSwitch(r.name === 'remote');
 }
 let ENTER = false;
 const ENTERED = new Set();
@@ -13500,6 +13547,7 @@ setInterval(async () => {
       else if (c.c === 'seekby') V.currentTime = Math.max(0, (V.currentTime || 0) + (Number(c.v) || 0));
       else if (c.c === 'vol') { const v = Number(c.v) || 0; if (ownVol()) { volApply(v); volPaint(); } else { try { V.volume = Math.max(0, Math.min(1, v / 100)); } catch (e) {} } }
       else if (c.c === 'next') A.pnext(); else if (c.c === 'prev') A.pprev(); else if (c.c === 'close') closePlayer();
+      else if (c.c === 'ep') { const v = c.v || {}; if (v.id && item(v.id)) play(v.id, v.n, 0); }
     }
   } catch (e) {} finally { PST.busy = false; }
 }, 1000);
@@ -13512,15 +13560,21 @@ function rcLayout() {
 function rcStart(pid, auto) {
   const p = peerOf(pid); RC.pid = pid; RC.name = p ? p.name : 'пристрій'; RC.t0 = Date.now(); RC.miss = 0; RC.st = null; RC.drag = RC.vdrag = false; RC.seen = false; RC.auto = !!auto; RC.min = false;
   const el = $('#rcbar'); rcLayout(); el.classList.remove('hide', 'min');
+  document.body.classList.add('rcon');
+  if (route().name === 'remote') { el.innerHTML = ''; renderRm(); return; }
+  rcBarFill();
+}
+function rcBarFill() {
+  const el = $('#rcbar'); if (!el) return;
   el.innerHTML = `<button class="rcpill" data-rc="open" aria-label="Пульт">${ico('cast')}</button>
    <div class="rcfull"><div class="rch"><span class="rci">${ico('cast')}</span><div class="tx"><b id="rct">Запускаю на «${esc(RC.name)}»…</b><span id="rcs">Пульт керування</span></div>
-    <button class="rcx" data-rc="min" aria-label="Згорнути">${ico('chev')}</button><button class="rcx" data-rc="stop" aria-label="Зупинити відтворення">${ico('close')}</button></div>
+    <button class="rcx" data-rc="exp" aria-label="Розгорнути пульт">${ico('expand')}</button><button class="rcx" data-rc="min" aria-label="Згорнути">${ico('chev')}</button><button class="rcx" data-rc="stop" aria-label="Зупинити відтворення">${ico('close')}</button></div>
    <div class="rcsk"><span id="rcc">0:00</span><input type="range" id="rcseek" min="0" max="1000" value="0"><span id="rcd">0:00</span></div>
    <div class="rcb"><button class="cb sm" data-rc="prev">${ico('prev')}</button><button class="cb" data-rc="back">${ico('back10')}</button><button class="cb big" id="rcpp" data-rc="pp">${ico('pause')}</button><button class="cb" data-rc="fwd">${ico('fwd10')}</button><button class="cb sm" data-rc="next">${ico('next')}</button></div>
    <div class="rcvl"><span class="rcvi">${ico('vol')}</span><input type="range" id="rcvol" min="0" max="100" value="100"><span id="rcvn">100</span></div></div>`;
-  document.body.classList.add('rcon');
+  if (RC.st) rcPaint(RC.st, true);
 }
-function rcStop() { RC.pid = null; const el = $('#rcbar'); if (el) { el.classList.add('hide'); el.innerHTML = ''; } document.body.classList.remove('rcon'); }
+function rcStop() { RC.pid = null; const el = $('#rcbar'); if (el) { el.classList.add('hide'); el.innerHTML = ''; } document.body.classList.remove('rcon'); if (route().name === 'remote') renderRm(); }
 async function rcCmd(c, v) { if (!RC.pid) return; try { await api('/api/sync_rc', {peer: RC.pid, c, v}); } catch (e) { toast(e.message, true); } }
 function rcOpt(a) {  // одразу показуємо результат натискання, не чекаючи відповіді іншого пристрою
   RC.hold = Date.now() + 1400;
@@ -13530,6 +13584,7 @@ function rcOpt(a) {  // одразу показуємо результат на�
   else if (a === 'prev' || a === 'next') { RC.hold = Date.now() + 2200; const e = $('#rcs'); if (e) e.textContent = 'Перемикаю серію…'; const c = $('#rcc'); if (c) c.textContent = '0:00'; const sk = $('#rcseek'); if (sk) sk.value = 0; }
 }
 function rcAct(b) {
+  if (b.dataset.rc === 'exp') { location.hash = '#/remote'; return; }
   const a = b.dataset.rc, wasPaused = !!(RC.st && RC.st.paused);
   rcOpt(a);
   if (a === 'min') { RC.min = true; $('#rcbar').classList.add('min'); }
@@ -13547,8 +13602,8 @@ function rcAct(b) {
   el.addEventListener('touchend', tap, {passive: false}); el.addEventListener('pointerup', ev => { if (ev.pointerType === 'mouse') tap(ev); });
   ['touchstart', 'pointerdown'].forEach(t => el.addEventListener(t, ev => ev.stopPropagation()));
 })();
-function rcPaint(st) {
-  if (Date.now() < (RC.hold || 0)) return;
+function rcPaint(st, force) {
+  if (!force && Date.now() < (RC.hold || 0)) return;
   RC.st = st; const it = $('#rct'); if (!it) return;
   it.textContent = st.title ? st.title : 'Грає на «' + RC.name + '»';
   $('#rcs').textContent = 'Серія ' + st.ep + ' · «' + RC.name + '»';
@@ -13557,7 +13612,108 @@ function rcPaint(st) {
   $('#rcpp').innerHTML = ico(st.paused ? 'play' : 'pause');
   const vm = st.vmax || 100, vr = $('#rcvol'); vr.max = vm; vr.disabled = st.own === false;
   if (!RC.vdrag) { vr.value = st.vol == null ? 100 : st.vol; $('#rcvn').textContent = st.own === false ? 'сист.' : Math.round(vr.value); }
+  rmSync(st);
 }
+// ───────── сторінка «Пульт»: розгорнутий пульт з вибором аніме та серії ─────────
+S.rm = {kid: null, manual: false, pend: null};
+window.addEventListener('scroll', () => { const n = $('#rmnow'); if (n) n.classList.toggle('mini', window.scrollY > 230); }, {passive: true});
+function rmSwitch(on) {
+  document.body.classList.toggle('rmpg', on);
+  const el = $('#rcbar'); if (!el || !RC.pid) return;
+  if (on) el.innerHTML = '';
+  else if (!el.innerHTML.trim()) rcBarFill();
+}
+function rmKid() {
+  const st = RC.st || {};
+  if (!S.rm.manual && st.id && item(st.id)) S.rm.kid = st.id;
+  if (!S.rm.kid || !item(S.rm.kid)) S.rm.kid = (S.items[0] || {}).id || null;
+  return S.rm.kid;
+}
+function rmHTML() {
+  return `<div class="bar"><button class="back" data-act="rmback">‹ Назад</button><h1>Пульт</h1>${netHTML()}</div><div id="rmbox" class="rmwrap">${rmBody()}</div>`;
+}
+function rmBody() {
+  if (!RC.pid) {
+    const ps = (S.sync && S.sync.rc_out_on) ? onlinePeers() : [];
+    return `<div class="rmempty"><div class="rmei">${ico('cast')}</div><b>Пульт не активний</b>
+      <span>${ps.length ? 'Оберіть пристрій, яким хочете керувати.' : (S.sync && S.sync.rc_out_on ? 'Немає підключених пристроїв у мережі.' : 'Керування іншими пристроями вимкнено в розділі «Пристрої».')}</span>
+      <div class="rmpk">${ps.map(p => `<button class="btn" data-act="rmpick" data-id="${esc(p.id)}">${dico(p.kind)} ${esc(p.name)}</button>`).join('')}</div></div>`;
+  }
+  const st = RC.st || {}, pit = st.id ? item(st.id) : null, kid = rmKid(), it = kid ? item(kid) : null;
+  const pimg = pit && pit.meta && pit.meta.poster ? esc(pit.meta.poster) : '';
+  const on = !!st.id;
+  const now = `<div class="rmnow" id="rmnow">${pimg ? `<i class="rmbg" style="background-image:url('${pimg}')"></i>` : ''}
+    <div class="rmrow"><div class="rmcv"${pimg ? ` style="background-image:url('${pimg}')"` : ''}>${pimg ? '' : ico('cast')}</div>
+      <div class="rmtx"><span class="rmdev">${ico('cast')} ${esc(RC.name)}</span><b id="rct">${on ? esc(st.title || 'Грає') : 'Нічого не грає'}</b><span id="rcs">${on ? 'Серія ' + esc(st.ep) : 'Оберіть серію нижче — вона запуститься там'}</span></div>
+      <button class="rcx" data-act="rmleave" aria-label="Відключити пульт (відтворення триває)">${ico('close')}</button></div>
+    <div class="rcsk"><span id="rcc">${fmtT(st.t)}</span><input type="range" id="rcseek" min="0" max="1000" value="${st.dur ? Math.round(1000 * st.t / st.dur) : 0}"><span id="rcd">${fmtT(st.dur)}</span></div>
+    <div class="rcb"><button class="cb sm" data-act="rmc" data-rc="prev">${ico('prev')}</button><button class="cb" data-act="rmc" data-rc="back">${ico('back10')}</button><button class="cb big" id="rcpp" data-act="rmc" data-rc="pp">${ico(st.paused ? 'play' : 'pause')}</button><button class="cb" data-act="rmc" data-rc="fwd">${ico('fwd10')}</button><button class="cb sm" data-act="rmc" data-rc="next">${ico('next')}</button></div>
+    <div class="rcvl"><span class="rcvi">${ico('vol')}</span><input type="range" id="rcvol" min="0" max="${st.vmax || 100}" value="${st.vol == null ? 100 : st.vol}"${st.own === false ? ' disabled' : ''}><span id="rcvn">${st.own === false ? 'сист.' : Math.round(st.vol == null ? 100 : st.vol)}</span></div>
+    ${on ? `<button class="rmstopb" data-act="rmstop">${ico('pause')} Зупинити відтворення на пристрої</button>` : ''}</div>`;
+  return now + '<div id="rmlist">' + rmList() + '</div>';
+}
+function rmList() {
+  const st = RC.st || {}, kid = rmKid(), it = kid ? item(kid) : null;
+  const all = S.items.filter(x => !x.temp);
+  const strip = all.length ? `<div class="rmh"><h3>Аніме</h3><span>${all.length}</span></div><div class="rmas">${all.map(x => {
+    const q = x.meta && x.meta.poster;
+    return `<button class="rma${x.id === kid ? ' on' : ''}${x.id === st.id ? ' pl' : ''}" data-act="rmanime" data-id="${esc(x.id)}"><i style="${q ? `background-image:url('${esc(q)}')` : ''}">${q ? '' : esc((x.title || '?')[0])}</i><span>${esc(lname(x))}</span></button>`;
+  }).join('')}</div>` : '';
+  let eps = '';
+  if (it) {
+    const q = it.meta && it.meta.poster;
+    eps = `<div class="rmh"><h3>${esc(lname(it))}</h3><span>${epsW((it.episodes || []).length)}</span></div><div class="rmeps">${(it.episodes || []).map(e => {
+      const cur = st.id === it.id && String(st.ep) === String(e.n), pend = S.rm.pend && S.rm.pend.kid === it.id && String(S.rm.pend.n) === String(e.n);
+      const img = e.th ? `<img loading="lazy" alt="" src="/thumb/${it.id}/${encodeURIComponent(e.n)}?v=${e.downloaded ? 1 : 0}" onerror="this.remove()">` : '';
+      return `<button class="rme${cur ? ' cur' : ''}${e.watched ? ' w' : ''}${pend ? ' pend' : ''}" data-act="rmep" data-n="${esc(e.n)}"><div class="th"${q ? ` style="background-image:url('${esc(q)}')"` : ''}>${img}<span class="num">${esc(e.n)}</span>${cur ? `<span class="eq">${ico('play')} Грає</span>` : pend ? `<span class="eq">${ico('spinner')}</span>` : ''}${e.new ? '<span class="nw">нова</span>' : ''}${e.pos > 5 && !e.watched ? `<span class="rs">${ico('clock')}${fmtT(e.pos)}</span>` : ''}</div><div class="n">Серія ${esc(e.n)}</div>${e.title ? `<div class="tt">${esc(e.title)}</div>` : ''}</button>`;
+    }).join('')}</div>`;
+  }
+  return strip + eps;
+}
+function renderRm(full) {  // full — перемалювати все; інакше лише список аніме/серій (картка плеєра й повзунки лишаються живими)
+  const b = $('#rmbox'); if (!b || route().name !== 'remote') return;
+  const y = window.scrollY, first = !b.querySelector('#rmlist') || !b.querySelector('#rmnow') !== !RC.pid;
+  if (full || first) {
+    const sl = b.querySelector('.rmas'), x = sl ? sl.scrollLeft : 0;
+    b.innerHTML = rmBody();
+    const n = b.querySelector('.rmas'); if (n) { n.scrollLeft = x; const c = n.querySelector('.rma.on'); if (c && !x) n.scrollLeft = Math.max(0, c.offsetLeft - 16); }
+  } else {
+    const l = $('#rmlist'), sl = l.querySelector('.rmas'), x = sl ? sl.scrollLeft : 0, ey = $('.rmeps');
+    l.innerHTML = rmList();
+    const n = l.querySelector('.rmas'); if (n) n.scrollLeft = x;
+  }
+  window.scrollTo(0, y);
+}
+function rmSync(st) {
+  if (route().name !== 'remote') return;
+  const key = (st.id || '') + '|' + (st.ep || '');
+  if (key === RC.rkey) return;
+  const sid = (RC.rkey || '').split('|')[0];
+  RC.rkey = key;
+  if (S.rm.pend && String(S.rm.pend.n) === String(st.ep) && S.rm.pend.kid === st.id) S.rm.pend = null;
+  renderRm(sid !== (st.id || '') && !RC.drag && !RC.vdrag);
+}
+Object.assign(A, {
+  rmback() { if (history.length > 1) history.back(); else location.hash = '#/devices'; },
+  rmc(el) { rcAct(el); },
+  rmstop() { rcCmd('close'); S.rm.pend = null; renderRm(true); },
+  rmleave() { rcStop(); toast('Пульт відключено, відтворення триває', false, 'cast'); },
+  rmpick(el) { if (!(S.sync && S.sync.rc_out_on)) return; S.rm.manual = false; rcStart(el.dataset.id); },
+  rmanime(el) { S.rm.kid = el.dataset.id; S.rm.manual = true; renderRm(); },  // лише перегляд: відтворення на іншому пристрої не чіпаємо
+  async rmep(el) {
+    const kid = rmKid(), n = el.dataset.n, st = RC.st || {};
+    if (!kid || !RC.pid) return;
+    S.rm.pend = {kid, n}; RC.hold = Date.now() + 3000; RC.seen = RC.seen || false;
+    const e = $('#rcs'); if (e) e.textContent = 'Запускаю серію ' + n + '…';
+    renderRm();
+    gpHaptic && gpHaptic();
+    try {
+      if (st.id === kid) await api('/api/sync_rc', {peer: RC.pid, c: 'ep', v: {id: kid, n}});
+      else await api('/api/sync_cast', {peer: RC.pid, mode: 'cast', id: kid, play: {n, t: 0}});
+      RC.t0 = Date.now(); RC.miss = 0;
+    } catch (er) { S.rm.pend = null; RC.hold = 0; toast(er.message, true); renderRm(); }
+  },
+});
 // автоматично: якщо на іншому пристрої зараз грає серія — пропонуємо пульт
 async function rcPoll() {
   if (RC.busy) return;
@@ -13572,7 +13728,7 @@ async function rcPoll() {
       if (st && st.on) { RC.seen = true; RC.miss = 0; rcPaint(st); if (S.cur && RC.auto) rcStop(); return; }
       RC.miss++;
       const lim = RC.seen || RC.auto ? 3 : 25;  // після перекидання даємо час на запуск серії
-      if (RC.miss >= lim && Date.now() - RC.t0 > 6000) { const q = RC.seen && !RC.auto; const nm = RC.name; rcStop(); if (q) toast(st ? 'Відтворення на «' + nm + '» завершено' : 'Звʼязок із «' + nm + '» втрачено', !st); }
+      if (RC.miss >= lim && Date.now() - RC.t0 > 6000 && route().name !== 'remote') { const q = RC.seen && !RC.auto; const nm = RC.name; rcStop(); if (q) toast(st ? 'Відтворення на «' + nm + '» завершено' : 'Звʼязок із «' + nm + '» втрачено', !st); }
       return;
     }
     if (S.cur || !(S.sync && S.sync.rc_out_on)) return;
