@@ -10092,13 +10092,15 @@ html:has(body.nosc){overflow:hidden!important}body.nosc{overflow:hidden!importan
 const $ = (s, el = document) => el.querySelector(s);
 (function () {  // заставка йде, поки застосунок не готовий: налаштування, бібліотека, безпечні зони — інтерфейс підлаштовується під нею, а не після
   const t0 = Date.now();
-  (function chk() {
+  function chk() {
     const sp = document.getElementById('splash'); if (!sp) return;
     const el = Date.now() - t0, ios = document.documentElement.dataset.ios === '1';
-    const ready = S.setReady && S.libLoaded && (!ios || window.__nat || el > 3600);
+    let ready = false;
+    try { ready = S.setReady && S.libLoaded && (!ios || window.__nat || el > 3600); } catch (e) {}  // S оголошено нижче в цьому ж скрипті
     if ((el >= 2300 && ready) || el > 7000) { requestAnimationFrame(() => requestAnimationFrame(() => { sp.classList.add('out'); setTimeout(() => sp.remove(), 700); })); }
     else setTimeout(chk, 120);
-  })();
+  }
+  setTimeout(chk, 0);  // не синхронно: S (const) ще не створено — це ламало весь скрипт, і заставка крутилась вічно
 })();  // заставку лишаємо на екрані, поки програється анімація
 const IOS_APP = document.documentElement.dataset.ios === '1';  // працюємо всередині iPhone-застосунку
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
