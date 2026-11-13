@@ -1929,6 +1929,124 @@ def generic_links(iframe_url, referer):
   return links, hdrs, skips_anywhere(html, url)
 
 
+def _host_of(iframe):
+  try:
+    return urlparse('https:' + iframe if iframe.startswith('//') else iframe).netloc.lower()
+  except Exception:
+    return ''
+
+
+def _hls_to_links(m3u8, hdrs, fallback_q='720p'):
+  vs = hls_variants(m3u8, hdrs)
+  if vs:
+    return dict(vs)
+  return {fallback_q: m3u8}
+
+
+def vk_links(iframe_url, referer, html=None):
+  """VK/OK-відео (vk.ru/video_ext.php): шукаємо в сторінці mp4 за якостями та HLS (okcdn). Посилання прив'язані до IP — беремо з телефона."""
+  url = 'https:' + iframe_url if iframe_url.startswith('//') else iframe_url
+  hdrs = {'Referer': 'https://vk.ru/', 'Origin': 'https://vk.ru'}
+  if html is None:
+    html = http_get(url, headers={'Referer': referer}, timeout=10, retries=1).text
+  t = htmllib.unescape(html).replace('\\/', '/').replace('\\u0026', '&').replace('\\u002F', '/')
+  links = {}
+  for m in re.finditer(r'["\']?(?:url|mp4_)(144|240|360|480|720|1080|1440|2160)["\']?\s*[:=]\s*["\'](https?://[^"\']+)["\']', t):
+    links.setdefault(m.group(1) + 'p', m.group(2))
+  hls = re.search(r'https?://[^\s"\'<>\\]+?\.(?:okcdn|mycdn|vkuser)\.[a-z]+/[^\s"\'<>\\]*?(?:video\.m3u8|\.m3u8)[^\s"\'<>\\]*', t) \
+      or re.search(r'["\'](?:hls|hls_ondemand|hls_fmp4)["\']\s*:\s*["\'](https?://[^"\']+)["\']', t)
+  if hls:
+    hu = hls.group(1) if hls.lastindex else hls.group(0)
+    for q, u in _hls_to_links(hu, hdrs).items():
+      links.setdefault(q, u)
+  if not links:
+    links, h2, sk = generic_links(iframe_url, referer)
+    return links, h2, sk
+  return links, hdrs, skips_anywhere(html, url)
+
+
+CVH_API = 'https://plapi.cdnvideohub.com/api/v1'
+
+
+def _cvh_norm(x):
+  return re.sub(r'\s+', ' ', str(x or '')).strip().lower()
+
+
+def cvh_links(iframe_url, referer):
+  """CVH (cdnvideohub): плейлист за anime_id → відео VK за серією й озвучкою → джерела hls/mpeg."""
+  url = 'https:' + iframe_url if iframe_url.startswith('//') else iframe_url
+  q = parse_qs(urlparse(url).query)
+  g = lambda k: (q.get(k) or [''])[0]
+  title_id, dub, ep = g('anime_id') or g('id') or g('title_id'), g('dubbing_code') or g('voice'), g('episode')
+  if not title_id:
+    m = re.search(r'data-title-id="(\d+)"', http_get(url, headers={'Referer': referer}, timeout=10, retries=1).text)
+    title_id = m.group(1) if m else ''
+  if not title_id:
+    raise RuntimeError('CVH: немає anime_id')
+  hdr = {'Referer': 'https://player.cdnvideohub.com/', 'Origin': 'https://player.cdnvideohub.com', 'Accept': 'application/json'}
+  params = {'pub': '745', 'aggr': 'mali', 'id': title_id}
+  data = None
+  for extra in ({'ep': ep} if ep else {}, {}):
+    try:
+      r = http_get(CVH_API + '/player/sv/playlist', params={**params, **extra}, headers=hdr, timeout=10, retries=1)
+      if r.status_code == 200 and r.text.strip():
+        data = r.json()
+        break
+    except Cancelled:
+      raise
+    except Exception:
+      continue
+  items = (data or {}).get('items') if isinstance(data, dict) else data
+  items = [i for i in (items or []) if isinstance(i, dict) and i.get('vkId')]
+  if not items:
+    raise RuntimeError('CVH: порожній плейлист')
+  try:
+    epn = float(str(ep).replace(',', '.')) if ep != '' else None
+  except Exception:
+    epn = None
+  cand = [i for i in items if epn is None or i.get('episode') is None or float(i.get('episode')) == epn] or []
+  if not cand:
+    raise RuntimeError('CVH: немає цієї серії')
+  d = _cvh_norm(dub)
+  def vname(i):
+    return _cvh_norm(i.get('voiceStudio'))
+  pick = [i for i in cand if d and (vname(i) == d or vname(i).startswith(d) or d.startswith(vname(i)) and vname(i))] or cand
+  # у межах озвучки пробуємо всі відео, поки не знайдемо джерела
+  last = None
+  for it in pick[:4]:
+    try:
+      r = http_get(f'{CVH_API}/player/sv/video/{int(it["vkId"])}', headers=hdr, timeout=10, retries=1)
+      if r.status_code != 200 or not r.text.strip():
+        continue
+      src = (r.json() or {}).get('sources') or {}
+    except Cancelled:
+      raise
+    except Exception as ex:
+      last = ex
+      continue
+    links = {}
+    h = {'Referer': 'https://player.cdnvideohub.com/', 'Origin': 'https://player.cdnvideohub.com'}
+    if src.get('hlsUrl'):
+      links.update(_hls_to_links(src['hlsUrl'], h))
+    if src.get('mpegLowUrl'):
+      links.setdefault('360p', src['mpegLowUrl'])
+    if links:
+      return links, h, {}
+  raise RuntimeError('CVH: не вдалося отримати джерела' + (f' ({last})' if last else ''))
+
+
+def player_links(name, iframe, referer):
+  """Вибір розбору за плеєром (назва або хост iframe). Щоб додати новий плеєр — допишіть гілку сюди."""
+  nl, host = (name or '').lower(), _host_of(iframe)
+  if 'kodik' in nl or 'kodik' in host:
+    return 'kodik'
+  if 'cvh' in nl or 'cdnvideohub' in host or 'cvh' in iframe.lower():
+    return cvh_links(iframe, referer) + (None,)
+  if nl in ('vk', 'vkvideo') or 'vk' in nl.split() or re.search(r'(^|\.)(vk\.(ru|com)|vkvideo\.ru|ok\.ru)$', host):
+    return vk_links(iframe, referer) + (None,)
+  return generic_links(iframe, referer) + (None,)
+
+
 def resolve_players(players, referer, base_skips=None):
   """players: [(назва, iframe)]. Опитує всі плеєри паралельно й бере найкращу якість із усіх.
   Повертає {'links': {q: url}, 'hdrs': {q: заголовки}, 'players': {q: назва}}."""
@@ -1937,12 +2055,12 @@ def resolve_players(players, referer, base_skips=None):
   def one(pl):
     name, iframe = pl
     try:
-      if 'kodik' in name.lower() or 'kodik' in iframe.lower():
+      pl_res = player_links(name, iframe, referer)
+      if pl_res == 'kodik':
         links, h, sk = kodik_links(iframe, referer)
         th = KODIK_THUMBS.pop(iframe, None)
       else:
-        links, h, sk = generic_links(iframe, referer)
-        th = None
+        links, h, sk, th = pl_res
       return name, links, (h, sk, th)
     except Cancelled:
       raise
@@ -3046,7 +3164,8 @@ def title_keys(*names):
         keys.append((b, sn))
       if ':' in p:  # «Назва: довгий підзаголовок» — основа до двокрапки може бути єдиною назвою на іншому сайті
         hb = _season_base(p.split(':', 1)[0])[0]
-        if len(hb) >= 10 and (hb, sn) not in weak:
+        # короткий підзаголовок («Гонка «Стальной шар»», «Dead Apple») — це окремий твір/сезон, а не опис; склеюємо лише з довгим описовим
+        if len(hb) >= 10 and len(_season_base(p.split(':', 1)[1])[0]) >= 24 and (hb, sn) not in weak:
           weak.append((hb, sn))
       elif len(b) >= 2 and (b, sn) not in plain:
         plain.append((b, sn))
@@ -3054,13 +3173,15 @@ def title_keys(*names):
   return keys
 
 
-def _keys_match(a, b):
+def _keys_match(a, b, weak=True):
   for ba, sa in a:
     for bb, sb in b:
       if sa != sb:
         continue
       if ba == bb or _fuzzy(ba, bb):
         return True
+  if not weak:
+    return False
   # слабкі ключі (основа до двокрапки) порівнюються лише з назвами без підзаголовка — щоб «Fate: A» не склеювалось з «Fate: B»
   for x, y in ((a, b), (b, a)):
     for wb, ws in getattr(x, 'weak', ()):
@@ -3075,16 +3196,32 @@ def group_results(items, order):
   n = len(items)
   keys = [title_keys(x['title'], x.get('orig')) for x in items]
   par = list(range(n))
+  sites = [{items[i]['site']} for i in range(n)]  # сайти в групі (за коренем)
 
   def find(i):
     while par[i] != i:
       par[i] = par[par[i]]
       i = par[i]
     return i
-  for i in range(n):
-    for j in range(i + 1, n):
-      if items[i]['site'] != items[j]['site'] and find(i) != find(j) and _keys_match(keys[i], keys[j]):
-        par[find(j)] = find(i)
+
+  def years_ok(i, j):
+    ya, yb = items[i].get('year'), items[j].get('year')
+    try:
+      return not (ya and yb) or abs(int(ya) - int(yb)) <= 1
+    except Exception:
+      return True
+  for weak in (False, True):  # спершу суворі збіги, потім слабкі (основа до двокрапки)
+    for i in range(n):
+      for j in range(i + 1, n):
+        if items[i]['site'] == items[j]['site']:
+          continue
+        ri, rj = find(i), find(j)
+        if ri == rj or (sites[ri] & sites[rj]):  # два записи одного сайту в одну групу не кладемо — це різні сезони/твори
+          continue
+        if not _keys_match(keys[i], keys[j], weak=weak) or (weak and not years_ok(i, j)):
+          continue
+        par[rj] = ri
+        sites[ri] |= sites[rj]
   groups = {}
   for i in range(n):
     groups.setdefault(find(i), []).append(items[i])
@@ -3267,7 +3404,8 @@ def _find_alternatives(e):
         lst = SEARCHERS[sid](q)
       except Exception:
         continue
-      hit = [x for x in lst if _keys_match(mine, title_keys(x['title'], x.get('orig')))]
+      kk = [(x, title_keys(x['title'], x.get('orig'))) for x in lst]
+      hit = [x for x, k in kk if _keys_match(mine, k, weak=False)] or [x for x, k in kk if _keys_match(mine, k)]  # строгі збіги важливіші за слабкі
       if hit:
         with lock:
           found.append({'url': hit[0]['url'], 'title': hit[0]['title'], 'site': sid})
@@ -11275,7 +11413,8 @@ function detailHTML(id) {
   ${onEps ? `<div class="tools">
     ${sm ? `<button class="btn sm on" data-act="selmode">${ico('check')} Готово</button>
       <button class="btn sm" data-act="selall">Вибрати всі</button>
-      <button class="btn sm" data-act="selmissing" style="grid-column:1/-1">${ico('cloud')} Лише нескачані</button>`
+      <button class="btn sm" data-act="selmissing">${ico('cloud')} Нескачані</button>
+      <button class="btn sm" data-act="selunw" title="Нескачані та ще не переглянуті">${ico('eye')} Непереглянуті</button>`
          : `<button class="btn sm" data-act="selmode">${ico('check')} Вибрати</button>
       <button class="btn sm" data-act="upto">${ico('eye')} Подивився до…</button>`}
     <div class="row2x">
@@ -11447,10 +11586,11 @@ function applySelMode() {  // вхід/вихід з режиму вибору �
     const tmp = document.createElement('div');
     tmp.innerHTML = sm ? `<button class="btn sm on" data-act="selmode">${ico('check')} Готово</button>
       <button class="btn sm" data-act="selall">Вибрати всі</button>
-      <button class="btn sm" data-act="selmissing" style="grid-column:1/-1">${ico('cloud')} Лише нескачані</button>`
+      <button class="btn sm" data-act="selmissing">${ico('cloud')} Нескачані</button>
+      <button class="btn sm" data-act="selunw" title="Нескачані та ще не переглянуті">${ico('eye')} Непереглянуті</button>`
       : `<button class="btn sm" data-act="selmode">${ico('check')} Вибрати</button>
       <button class="btn sm" data-act="upto">${ico('eye')} Подивився до…</button>`;
-    const old = [...tools.children].filter(c => c.matches('button[data-act=selmode],button[data-act=selall],button[data-act=selmissing],button[data-act=upto]'));
+    const old = [...tools.children].filter(c => c.matches('button[data-act=selmode],button[data-act=selall],button[data-act=selmissing],button[data-act=selunw],button[data-act=upto]'));
     const anchor = old[0];
     [...tmp.children].forEach(n => tools.insertBefore(n, anchor));
     old.forEach(n => n.remove());
@@ -12387,6 +12527,12 @@ const A = {
     S.sel = new Set(it.episodes.filter(e => !e.downloaded).map(e => String(e.n))); S.selMode = S.sel.size > 0;
     applySelMode();
     if (!S.sel.size) toast('Усе вже скачано');
+  },
+  selunw() {
+    const it = item(route().id);
+    S.sel = new Set(it.episodes.filter(e => !e.downloaded && !e.watched).map(e => String(e.n))); S.selMode = S.sel.size > 0;
+    applySelMode();
+    if (!S.sel.size) toast('Немає непереглянутих нескачаних серій');
   },
   async download() {
     const id = route().id;
