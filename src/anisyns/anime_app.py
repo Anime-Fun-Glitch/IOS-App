@@ -5191,7 +5191,7 @@ def _purge_foreign(e, top):
             sub.pop(k, None)
 
 
-def api_check(kid, bg=False):
+def api_check(kid, bg=False, quiet=False):
   if net_state()['state'] == 'offline':
     raise ValueError('Немає інтернету.')
   key, e = _find(kid)
@@ -5207,6 +5207,9 @@ def api_check(kid, bg=False):
     except Exception:
       pass
     new = _apply_current(e, cur, {x['ordinal']: x['title'] for x in eps})
+    if quiet:  # щойно синхронізоване аніме: усе, що вийшло до цього, не «нове» і без сповіщень
+      e['new'] = []
+      new = []
     e['chk_ts'] = time.time()
     if new:
       e['last_new_ts'] = time.time()
@@ -8133,6 +8136,18 @@ def _sync_find(kid):
   return None, None
 
 
+def _sync_fresh(kid):
+  for d in (1.5, 20, 90):  # мережа/сайт можуть бути недоступні в першу мить
+    time.sleep(d)
+    try:
+      if net_state()['state'] == 'offline':
+        continue
+      api_check(kid, bg=True, quiet=True)
+      return
+    except Exception:
+      continue
+
+
 def _sync_create(v):
   key = v.get('key') or (str(v.get('url')) + '||' + str(v.get('dubbing') or ''))
   with LOCK:
@@ -8209,7 +8224,8 @@ def _sync_apply_one(st, k, r):
       last.pop(k, None)
       return True
     if e is None:
-      _sync_create(v)
+      _nk = _sync_create(v)
+      threading.Thread(target=_sync_fresh, args=(_nk,), daemon=True).start()  # база з регістра може бути старою (напр. 19 серій замість 20) — одразу оновлюємо список серій із сайту
       last[k] = 'P'
       for k2, r2 in list(st['regs'].items()):  # поля, що прийшли раніше за саме аніме
         if k2 != k and k2.split('/')[1:2] == [kid]:
@@ -9685,7 +9701,7 @@ body.dragging{-webkit-user-select:none;user-select:none;-webkit-touch-callout:no
 #player .stage{position:absolute;inset:0;background:#000}
 #player video{position:absolute;inset:0;width:100%;height:100%;background:#000;object-fit:contain}
 .vc{position:absolute;inset:0;transition:opacity .2s}
-.vc.off{opacity:0}.vc.off *{pointer-events:none}
+.vc.off{opacity:0}.vc.off *,.vc.off .cb,.vc.off .sk,.vc.off .top,.vc.off button,.vc.off input{pointer-events:none!important}  /* поки елементи сховані — кнопки неактивні: перший дотик лише показує їх */
 .vc .mid3{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);display:flex;justify-content:center;align-items:center;gap:34px;pointer-events:none}
 .vc .cb{pointer-events:auto;width:56px;height:56px;border-radius:50%;border:0;background:#000a;color:#fff;display:grid;place-items:center}
 .vc .cb.big{width:72px;height:72px}
@@ -9986,49 +10002,59 @@ html:has(body.nosc){overflow:hidden!important}body.nosc{overflow:hidden!importan
 }
 
 body.rmpg #rcbar{display:none!important}
-.rmnow{position:sticky!important;top:calc(var(--top,0px) + 58px);z-index:6;transition:padding .2s}
-.rmnow.mini{padding:8px 12px;border-radius:16px;box-shadow:0 8px 24px #000a}
-.rmnow.mini .rmcv{width:38px;border-radius:8px}.rmnow.mini .rmtx{padding-right:56px}.rmnow.mini .rmtx span:not(.rmdev){display:none}.rmnow.mini .rmdev{display:none}.rmnow.mini .rmtx b{font-size:14px;-webkit-line-clamp:1}
-.rmnow.mini .rcx,.rmnow.mini .rcsk,.rmnow.mini .rcvl,.rmnow.mini .rmstopb{display:none}
-.rmnow.mini .rcb{position:absolute;right:8px;top:50%;transform:translateY(-50%);margin:0;gap:0}.rmnow.mini .rcb .cb:not(.big){display:none}.rmnow.mini .rcb .cb.big{width:42px;height:42px}.rmnow.mini .rcb .cb.big .i{width:22px;height:22px}
-.rmstopb{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:12px;padding:10px;border:0;border-radius:12px;background:#ffffff12;color:#ffffffc0;font-size:13px;font-weight:600}.rmstopb .i{width:16px;height:16px}
-.rmeps .rme .th{border-radius:14px}
-.rmwrap{padding:4px 16px 120px;max-width:980px;margin:0 auto}
-.rmnow{position:relative;overflow:hidden;border-radius:22px;background:var(--cd,#171a26);border:1px solid #ffffff14;padding:16px;box-shadow:0 10px 30px #0006}
-.rmnow .rmbg{position:absolute;inset:-30px;background-size:cover;background-position:center;filter:blur(34px) saturate(1.3);opacity:.45;transform:scale(1.2)}
-.rmnow>*:not(.rmbg){position:relative}
-.rmrow{display:flex;align-items:center;gap:14px}
-.rmcv{flex:none;width:84px;aspect-ratio:2/3;border-radius:12px;background:#ffffff14 center/cover;display:grid;place-items:center;color:var(--mu);box-shadow:0 6px 18px #0008}
+.rmwrap{padding:4px 16px 120px;max-width:980px;margin:0 auto;animation:rmUp .35s cubic-bezier(.2,.8,.2,1) backwards}
+@keyframes rmUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.rmwrap button,.rmwrap select{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.rmnow{position:relative;border-radius:22px;background:linear-gradient(160deg,#20233a,#161827);border:1px solid #ffffff14;padding:16px;box-shadow:0 8px 22px #0007;transition:padding .22s ease,border-radius .22s ease}
+.rmrow{display:flex;align-items:center;gap:14px;position:relative}
+.rmcv{flex:none;width:84px;aspect-ratio:2/3;border-radius:12px;background:#ffffff14 center/cover;display:grid;place-items:center;color:var(--mu);transition:width .22s ease,border-radius .22s ease}
 .rmtx{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
 .rmtx b{font-size:17px;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .rmtx span{font-size:13px;color:#ffffffb8}
 .rmtx .rmdev{display:flex;align-items:center;gap:6px;color:var(--ac);font-weight:600;font-size:12.5px}.rmtx .rmdev .i{width:15px;height:15px}
 .rmnow .rcx{background:#ffffff14;border:0;color:#fff;width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none}
+.rmnow .rcx:active{background:#ffffff26}
+.rmctl{transition:opacity .2s}.rmnow.idle .rmctl{opacity:.35;pointer-events:none}
 .rmnow .rcsk{margin-top:14px}.rmnow .rcb{margin-top:4px;gap:20px}
-.rmnow .rcb .cb{color:#fff}.rmnow .rcb .cb.big{width:62px;height:62px;border-radius:50%;background:var(--ac)!important;color:#fff}
+.rmnow .rcb .cb{color:#fff;background:none;transition:transform .12s}.rmnow .rcb .cb:active{transform:scale(.9)}
+.rmnow .rcb .cb.big{width:62px;height:62px;border-radius:50%;background:var(--ac)!important;color:#fff!important}
+.rmnow .rcb .cb.big .i{color:#fff;stroke:#fff;opacity:1}
+.rmnow .rcb .cb.big .i[fill=currentColor]{fill:#fff}
 .rmh{display:flex;align-items:baseline;justify-content:space-between;margin:22px 4px 10px}.rmh h3{margin:0;font-size:17px}.rmh span{font-size:12.5px;color:var(--mu)}
-.rmas{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px;margin:0 -16px;padding-left:16px;padding-right:16px;scroll-snap-type:x proximity;scroll-padding-left:16px;-webkit-overflow-scrolling:touch;scrollbar-width:none}.rmas::-webkit-scrollbar{display:none}
-.rma{flex:none;width:92px;background:none;border:0;color:inherit;text-align:left;padding:0;scroll-snap-align:start;-webkit-tap-highlight-color:transparent}
-.rma i{display:grid;place-items:center;aspect-ratio:2/3;border-radius:12px;background:#ffffff12 center/cover;font-style:normal;font-size:30px;font-weight:800;color:#ffffff30;border:2px solid transparent;transition:transform .15s,border-color .15s}
+.rmwrap .dtabs{margin:0 0 8px}.rmwrap .sortrow{margin:2px 0 12px}
+.rmas{display:flex;gap:10px;overflow-x:auto;padding:2px 16px 8px;margin:0 -16px;scroll-snap-type:x proximity;scroll-padding-left:16px;-webkit-overflow-scrolling:touch;scrollbar-width:none}.rmas::-webkit-scrollbar{display:none}
+.rmas.sub{margin-top:2px}.rmsubh{font-size:12.5px;color:var(--mu);margin:8px 2px 4px;animation:rmUp .25s both}
+.rmnone{color:var(--mu);padding:20px 4px;font-size:14px}
+.rma{flex:none;width:92px;background:none;border:0;color:inherit;text-align:left;padding:0;scroll-snap-align:start;contain:layout paint}
+.rma i{position:relative;display:grid;place-items:center;aspect-ratio:2/3;border-radius:12px;background:#ffffff12 center/cover;font-style:normal;font-size:30px;font-weight:800;color:#ffffff30;border:2px solid transparent;transition:border-color .18s,transform .15s}
+.rma i em{position:absolute;right:5px;bottom:5px;font-style:normal;font-size:11px;font-weight:700;color:#fff;background:#000b;border-radius:9px;padding:1px 7px}
 .rma span{display:block;margin-top:6px;font-size:12px;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--mu)}
-.rma.on i{border-color:var(--ac)}.rma.on span{color:#fff}.rma.pl i{box-shadow:0 0 0 2px #0d0e13,0 0 0 4px var(--ac2,var(--ac))}.rma:active i{transform:scale(.96)}
-.rmeps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.rma.on i{border-color:var(--ac)}.rma.on span{color:#fff}.rma.pl i{box-shadow:0 0 0 2px #0d0e13,0 0 0 4px var(--ac2,var(--ac))}.rma:active i{transform:scale(.95)}
+.rma.grp.open i{border-style:dashed}
+.rmeps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 12px}
 @media (min-width:560px){.rmeps{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (min-width:900px){.rmeps{grid-template-columns:repeat(4,minmax(0,1fr))}}
-.rme{background:none;border:0;color:inherit;text-align:left;padding:0;-webkit-tap-highlight-color:transparent;min-width:0}
-.rme .th{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#1b1e2c center/cover;border:2px solid transparent;transition:transform .15s,border-color .15s}
+.rmeps.in .rme{animation:rmUp .32s cubic-bezier(.2,.8,.2,1) backwards;animation-delay:calc(var(--i) * 28ms)}
+.rme{background:none;border:0;color:inherit;text-align:left;padding:0;min-width:0;content-visibility:auto;contain-intrinsic-size:auto 150px}
+.rme .th{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#1b1e2c center/cover;border:2px solid transparent;transition:border-color .18s,transform .14s}
 .rme .th img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-.rme .th::after{content:"";position:absolute;inset:0;background:linear-gradient(to top,#000b 0%,#0000 55%)}
+.rme .th::after{content:"";position:absolute;inset:0;background:linear-gradient(to top,#000b 0%,#0000 55%);pointer-events:none}
 .rme .num{position:absolute;left:8px;bottom:6px;z-index:1;font-weight:800;font-size:17px;text-shadow:0 1px 6px #000}
 .rme .eq{position:absolute;z-index:1;right:6px;top:6px;display:flex;align-items:center;gap:4px;background:var(--ac);color:#fff;border-radius:10px;padding:3px 8px;font-size:11.5px;font-weight:700}.rme .eq .i{width:12px;height:12px}
 .rme .nw{position:absolute;z-index:1;left:6px;top:6px;background:#0e9f84;color:#fff;border-radius:8px;padding:2px 7px;font-size:11px;font-weight:700}
 .rme .rs{position:absolute;z-index:1;right:8px;bottom:6px;display:flex;align-items:center;gap:3px;font-size:11px;color:#ffffffd0}.rme .rs .i{width:11px;height:11px}
 .rme .n{font-size:13px;font-weight:650;margin-top:6px}.rme .tt{font-size:12px;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rme.cur .th{border-color:var(--ac)}.rme.w .th{opacity:.55}.rme.cur .th,.rme.pend .th{opacity:1}.rme:active .th{transform:scale(.97)}.rme.pend .th{animation:rmp 1s ease-in-out infinite alternate}
-@keyframes rmp{from{filter:brightness(1)}to{filter:brightness(1.4)}}
+.rme.cur .th{border-color:var(--ac)}.rme.w .th{opacity:.55}.rme.cur .th,.rme.pend .th{opacity:1}.rme:active .th{transform:scale(.97)}.rme.pend .th{border-color:var(--ac2,var(--ac))}
+.rme .eq .spin{animation:spin .8s linear infinite}
+.rmmini{position:fixed;left:12px;right:12px;top:calc(var(--top,0px) + 62px);z-index:30;max-width:956px;margin:0 auto;display:flex;align-items:center;gap:8px;padding:7px 8px 7px 10px;border-radius:16px;background:#1b1e30;border:1px solid #ffffff18;box-shadow:0 8px 20px #000a;opacity:0;transform:translateY(-10px);pointer-events:none;transition:opacity .2s,transform .22s cubic-bezier(.2,.8,.2,1)}
+.rmmini.on{opacity:1;transform:none;pointer-events:auto}
+.rmmini .rmcv{width:34px;border-radius:7px}.rmmini b{flex:1;min-width:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rmmini .cb{flex:none;width:40px;height:40px;border:0;border-radius:50%;background:none;color:#fff;display:grid;place-items:center;transition:transform .12s}.rmmini .cb:active{transform:scale(.9)}
+.rmmini .cb .i{width:22px;height:22px}.rmmini .cb.big{background:var(--ac);width:42px;height:42px}.rmmini .cb.big .i{color:#fff;stroke:#fff}.rmmini .cb.big .i[fill=currentColor]{fill:#fff}
 .rmempty{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;padding:60px 20px;color:var(--mu)}.rmempty b{color:#fff;font-size:18px}
 .rmei{width:72px;height:72px;border-radius:50%;background:#ffffff10;display:grid;place-items:center;color:var(--ac)}.rmei .i{width:34px;height:34px}
 .rmpk{display:flex;flex-direction:column;gap:10px;margin-top:12px;width:min(320px,100%)}
+@media (prefers-reduced-motion:reduce){.rmwrap,.rmeps.in .rme,.rmsubh{animation:none}}
 </style>
 <script>
 /* Безпечні зони (виріз / Dynamic Island / індикатор «Home»). Якщо WebView розтягнутий на весь екран, а env() віддає 0 —
@@ -12982,6 +13008,9 @@ async function play(id, n, startT, _retry) {
       if (s.type !== 'file' && PRET < 2) { PRET++; const keep = V.currentTime || P.good || resume || 0; msg.classList.remove('hide'); msg.innerHTML = ico('hourglass') + 'Повторюю спробу…'; setTimeout(() => { if (S.cur && S.cur.id === id && S.cur.n === n) play(id, n, keep, true); }, 700); return; }
       msg.classList.remove('hide'); msg.innerHTML = ico('error') + esc('Не вдалося відтворити відео.' + (s.type !== 'file' ? ' Спробуйте іншу якість або завантажте серію.' : '')); };
     const p = V.play(); if (p && p.catch) p.catch(() => {});
+    if (IOS_APP && S.set.ios_player !== false && !S.mirror && !S.awp && Math.min(screen.width, screen.height) >= 700) {  // iPad не відкриває системний плеєр сам (відео йде вбудовано) — просимо його при старті
+      V.addEventListener('playing', () => { try { if (S.cur && S.cur.id === id && S.cur.n === n && !V.webkitDisplayingFullscreen && V.webkitEnterFullscreen) V.webkitEnterFullscreen(); } catch (er) {} }, {once: true});
+    }
   } catch (er) { msg.classList.remove('hide'); msg.innerHTML = ico('error') + esc(er.message); }
 }
 async function pollSkips(id, n) {  // скачана серія без таймінгів інтро/аутро: сервер довантажує їх із сайту у фоні
@@ -13547,10 +13576,10 @@ setInterval(async () => {
       else if (c.c === 'seekby') V.currentTime = Math.max(0, (V.currentTime || 0) + (Number(c.v) || 0));
       else if (c.c === 'vol') { const v = Number(c.v) || 0; if (ownVol()) { volApply(v); volPaint(); } else { try { V.volume = Math.max(0, Math.min(1, v / 100)); } catch (e) {} } }
       else if (c.c === 'next') A.pnext(); else if (c.c === 'prev') A.pprev(); else if (c.c === 'close') closePlayer();
-      else if (c.c === 'ep') { const v = c.v || {}; if (v.id && item(v.id)) play(v.id, v.n, 0); }
+      else if (c.c === 'ep') { const v = c.v || {}; if (v.id && item(v.id)) play(v.id, v.n, Number(v.t) || 0); }
     }
   } catch (e) {} finally { PST.busy = false; }
-}, 1000);
+}, 500);
 // пульт: цей пристрій керує плеєром на іншому
 const RC = {pid: null, name: '', t0: 0, miss: 0, drag: false, vdrag: false, busy: false, st: null, seen: false, auto: false, min: false, n: 0};
 function rcLayout() {
@@ -13558,7 +13587,7 @@ function rcLayout() {
   document.documentElement.style.setProperty('--tabh', Math.round(h) + 'px');
 }
 function rcStart(pid, auto) {
-  const p = peerOf(pid); RC.pid = pid; RC.name = p ? p.name : 'пристрій'; RC.t0 = Date.now(); RC.miss = 0; RC.st = null; RC.drag = RC.vdrag = false; RC.seen = false; RC.auto = !!auto; RC.min = false;
+  const p = peerOf(pid); RC.pid = pid; RC.name = p ? p.name : 'пристрій'; RC.t0 = Date.now(); RC.miss = 0; RC.st = null; RC.drag = RC.vdrag = false; RC.seen = false; RC.auto = !!auto; RC.min = false; RC.idle = false; RC.lost = false;
   const el = $('#rcbar'); rcLayout(); el.classList.remove('hide', 'min');
   document.body.classList.add('rcon');
   if (route().name === 'remote') { el.innerHTML = ''; renderRm(); return; }
@@ -13605,18 +13634,24 @@ function rcAct(b) {
 function rcPaint(st, force) {
   if (!force && Date.now() < (RC.hold || 0)) return;
   RC.st = st; const it = $('#rct'); if (!it) return;
+  const now = Date.now();
+  let keepT = false, keepV = false;  // щойно задану перемотку/гучність не перезаписуємо застарілим станом із пристрою
+  if (RC.seekT) { if (now < RC.seekT.until && Math.abs((st.t || 0) - RC.seekT.t) > 4) keepT = true; else RC.seekT = null; }
+  if (RC.volT) { if (now < RC.volT.until && st.vol != null && Math.abs(st.vol - RC.volT.v) > 2) keepV = true; else RC.volT = null; }
   it.textContent = st.title ? st.title : 'Грає на «' + RC.name + '»';
   $('#rcs').textContent = 'Серія ' + st.ep + ' · «' + RC.name + '»';
-  if (!RC.drag) { $('#rcc').textContent = fmtT(st.t); $('#rcseek').value = st.dur ? Math.round(1000 * st.t / st.dur) : 0; }
+  if (!RC.drag && !keepT) { $('#rcc').textContent = fmtT(st.t); $('#rcseek').value = st.dur ? Math.round(1000 * st.t / st.dur) : 0; }
   $('#rcd').textContent = fmtT(st.dur);
   $('#rcpp').innerHTML = ico(st.paused ? 'play' : 'pause');
+  { const p2 = $('#rcpp2'); if (p2) p2.innerHTML = ico(st.paused ? 'play' : 'pause'); const mt = $('#rmmt'); if (mt) mt.textContent = (st.title || 'Грає') + ' · ' + st.ep; }
   const vm = st.vmax || 100, vr = $('#rcvol'); vr.max = vm; vr.disabled = st.own === false;
-  if (!RC.vdrag) { vr.value = st.vol == null ? 100 : st.vol; $('#rcvn').textContent = st.own === false ? 'сист.' : Math.round(vr.value); }
+  if (!RC.vdrag && !keepV) { vr.value = st.vol == null ? 100 : st.vol; $('#rcvn').textContent = st.own === false ? 'сист.' : Math.round(vr.value); }
   rmSync(st);
 }
 // ───────── сторінка «Пульт»: розгорнутий пульт з вибором аніме та серії ─────────
-S.rm = {kid: null, manual: false, pend: null};
-window.addEventListener('scroll', () => { const n = $('#rmnow'); if (n) n.classList.toggle('mini', window.scrollY > 230); }, {passive: true});
+S.rm = {kid: null, manual: false, pend: null, tab: 'lib', sort: null, grp: null, ongoing: false};
+function rmScrollChk() { const n = $('#rmnow'), m = $('#rmmini'); if (n && m) { const on = window.scrollY > n.offsetTop + n.offsetHeight - 70; if (on !== m.classList.contains('on')) m.classList.toggle('on', on); } }
+window.addEventListener('scroll', rmScrollChk, {passive: true});
 function rmSwitch(on) {
   document.body.classList.toggle('rmpg', on);
   const el = $('#rcbar'); if (!el || !RC.pid) return;
@@ -13632,6 +13667,68 @@ function rmKid() {
 function rmHTML() {
   return `<div class="bar"><button class="back" data-act="rmback">‹ Назад</button><h1>Пульт</h1>${netHTML()}</div><div id="rmbox" class="rmwrap">${rmBody()}</div>`;
 }
+function rmItems() {  // ті самі правила, що й у бібліотеці: вкладка, сортування
+  let list = S.items.filter(x => !x.temp && (S.rm.tab === 'all' || !!x.archived === (S.rm.tab === 'arc')));
+  if (S.rm.ongoing) list = list.filter(x => x.meta && x.meta.next && x.meta.next.ts);
+  const v = S.rm.sort || S.view.sort;
+  if (v === 'next') list = [...list].sort((a, b) => ((a.meta.next && a.meta.next.ts) || 1e15) - ((b.meta.next && b.meta.next.ts) || 1e15));
+  else if (v === 'new') list = [...list].sort((a, b) => (b.stats.new || 0) - (a.stats.new || 0));
+  else if (v === 'title') list = [...list].sort((a, b) => lname(a).localeCompare(lname(b), 'uk'));
+  else if (v === 'recent') list = [...list].sort((a, b) => (b.last_watch || 0) - (a.last_watch || 0));
+  return list;
+}
+function rmTiles() {
+  const out = [], seen = new Set();
+  for (const x of rmItems()) {
+    const m = x.group ? groupMembers(x.group) : [];
+    if (m.length < 1) { out.push({it: x}); continue; }
+    if (seen.has(x.group)) continue;
+    seen.add(x.group);
+    if (S.rm.tab === 'arc' && m.some(y => !y.archived)) continue;
+    out.push({g: x.group, m});
+  }
+  return out;
+}
+const rmPoster = x => { const q = x && x.meta && x.meta.poster; return q ? `background-image:url('${esc(q)}')` : ''; };
+function rmFilters() {  // той самий вигляд, що й фільтри бібліотеки
+  const items = S.items.filter(x => !x.temp), na = items.filter(x => x.archived).length, nl = items.length - na;
+  const opt = [['my', 'Мій порядок'], ['next', 'Найближча серія'], ['new', 'Нові серії'], ['recent', 'Недавній перегляд'], ['title', 'За назвою А–Я']];
+  const cur = S.rm.sort || S.view.sort;
+  let h = '';
+  if (na || S.rm.tab !== 'lib') h += `<div class="dtabs">${[['all', 'Усе', items.length], ['lib', 'Бібліотека', nl], ['arc', 'Переглянуті', na]].map(([k, l, n]) => `<button class="${S.rm.tab === k ? 'on' : ''}" data-act="rmtab" data-t="${k}">${l}<small>${n}</small></button>`).join('')}</div>`;
+  if (items.length > 1) h += `<div class="sortrow"><div class="ssel"><select id="rmsort" aria-label="Сортування">${opt.map(([k, l]) => `<option value="${k}"${cur === k ? ' selected' : ''}>${l}</option>`).join('')}</select></div><button class="tg${S.rm.ongoing ? ' on' : ''}" data-act="rmongoing">Виходять зараз</button></div>`;
+  return h;
+}
+function rmStrip() {
+  const st = RC.st || {}, kid = rmKid(), tiles = rmTiles();
+  if (!tiles.length) return '<div class="rmnone">Тут поки порожньо</div>';
+  return tiles.map(t => {
+    if (t.g) {
+      const on = t.m.some(x => x.id === kid), pl = t.m.some(x => x.id === st.id), f = t.m.find(x => !x.archived) || t.m[0];
+      return `<button class="rma grp${on ? ' on' : ''}${pl ? ' pl' : ''}${S.rm.grp === t.g ? ' open' : ''}" data-act="rmgrp" data-g="${esc(t.g)}"><i style="${rmPoster(f)}">${rmPoster(f) ? '' : esc((f.title || '?')[0])}<em>${t.m.length}</em></i><span>${esc(gname(t.m) || lname(f))}</span></button>`;
+    }
+    const x = t.it;
+    return `<button class="rma${x.id === kid ? ' on' : ''}${x.id === st.id ? ' pl' : ''}" data-act="rmanime" data-id="${esc(x.id)}"><i style="${rmPoster(x)}">${rmPoster(x) ? '' : esc((x.title || '?')[0])}</i><span>${esc(lname(x))}</span></button>`;
+  }).join('');
+}
+function rmSub() {
+  if (!S.rm.grp) return '';
+  const m = groupMembers(S.rm.grp), st = RC.st || {}, kid = rmKid();
+  if (!m.length) return '';
+  return `<div class="rmsubh">${esc(gname(m) || 'Група')}</div><div class="rmas sub">${m.map(x => `<button class="rma${x.id === kid ? ' on' : ''}${x.id === st.id ? ' pl' : ''}" data-act="rmanime" data-id="${esc(x.id)}"><i style="${rmPoster(x)}">${rmPoster(x) ? '' : esc((x.title || '?')[0])}</i><span>${esc(lname(x))}</span></button>`).join('')}</div>`;
+}
+function rmEpsHead() {
+  const it = item(rmKid()); return it ? `<h3>${esc(lname(it))}</h3><span>${epsW((it.episodes || []).length)}</span>` : '';
+}
+function rmEps() {
+  const st = RC.st || {}, it = item(rmKid()); if (!it) return '';
+  const q = it.meta && it.meta.poster;
+  return (it.episodes || []).map((e, i) => {
+    const cur = st.id === it.id && String(st.ep) === String(e.n), pend = S.rm.pend && S.rm.pend.kid === it.id && String(S.rm.pend.n) === String(e.n);
+    const img = e.th ? `<img decoding="async" loading="lazy" alt="" src="/thumb/${it.id}/${encodeURIComponent(e.n)}?v=${e.downloaded ? 1 : 0}" onerror="this.remove()">` : '';
+    return `<button class="rme${cur ? ' cur' : ''}${e.watched ? ' w' : ''}${pend ? ' pend' : ''}" data-act="rmep" data-n="${esc(e.n)}" style="--i:${Math.min(i, 10)}"><div class="th"${q ? ` style="background-image:url('${esc(q)}')"` : ''}>${img}<span class="num">${esc(e.n)}</span>${cur ? `<span class="eq">${ico('play')} Грає</span>` : pend ? `<span class="eq">${ico('spinner')}</span>` : ''}${e.new ? '<span class="nw">нова</span>' : ''}${e.pos > 5 && !e.watched ? `<span class="rs">${ico('clock')}${fmtT(e.pos)}</span>` : ''}</div><div class="n">Серія ${esc(e.n)}</div>${e.title ? `<div class="tt">${esc(e.title)}</div>` : ''}</button>`;
+  }).join('');
+}
 function rmBody() {
   if (!RC.pid) {
     const ps = (S.sync && S.sync.rc_out_on) ? onlinePeers() : [];
@@ -13639,50 +13736,46 @@ function rmBody() {
       <span>${ps.length ? 'Оберіть пристрій, яким хочете керувати.' : (S.sync && S.sync.rc_out_on ? 'Немає підключених пристроїв у мережі.' : 'Керування іншими пристроями вимкнено в розділі «Пристрої».')}</span>
       <div class="rmpk">${ps.map(p => `<button class="btn" data-act="rmpick" data-id="${esc(p.id)}">${dico(p.kind)} ${esc(p.name)}</button>`).join('')}</div></div>`;
   }
-  const st = RC.st || {}, pit = st.id ? item(st.id) : null, kid = rmKid(), it = kid ? item(kid) : null;
+  const st = RC.st || {}, pit = st.id ? item(st.id) : null;
   const pimg = pit && pit.meta && pit.meta.poster ? esc(pit.meta.poster) : '';
   const on = !!st.id;
-  const now = `<div class="rmnow" id="rmnow">${pimg ? `<i class="rmbg" style="background-image:url('${pimg}')"></i>` : ''}
+  const sub = on ? 'Серія ' + esc(st.ep) : (RC.lost ? 'Немає звʼязку з пристроєм' : 'Оберіть серію нижче — вона запуститься там');
+  const now = `<div class="rmnow${on ? '' : ' idle'}" id="rmnow">
     <div class="rmrow"><div class="rmcv"${pimg ? ` style="background-image:url('${pimg}')"` : ''}>${pimg ? '' : ico('cast')}</div>
-      <div class="rmtx"><span class="rmdev">${ico('cast')} ${esc(RC.name)}</span><b id="rct">${on ? esc(st.title || 'Грає') : 'Нічого не грає'}</b><span id="rcs">${on ? 'Серія ' + esc(st.ep) : 'Оберіть серію нижче — вона запуститься там'}</span></div>
+      <div class="rmtx"><span class="rmdev">${ico('cast')} ${esc(RC.name)}</span><b id="rct">${on ? esc(st.title || 'Грає') : 'Нічого не грає'}</b><span id="rcs">${sub}</span></div>
       <button class="rcx" data-act="rmleave" aria-label="Відключити пульт (відтворення триває)">${ico('close')}</button></div>
+    <div class="rmctl">
     <div class="rcsk"><span id="rcc">${fmtT(st.t)}</span><input type="range" id="rcseek" min="0" max="1000" value="${st.dur ? Math.round(1000 * st.t / st.dur) : 0}"><span id="rcd">${fmtT(st.dur)}</span></div>
     <div class="rcb"><button class="cb sm" data-act="rmc" data-rc="prev">${ico('prev')}</button><button class="cb" data-act="rmc" data-rc="back">${ico('back10')}</button><button class="cb big" id="rcpp" data-act="rmc" data-rc="pp">${ico(st.paused ? 'play' : 'pause')}</button><button class="cb" data-act="rmc" data-rc="fwd">${ico('fwd10')}</button><button class="cb sm" data-act="rmc" data-rc="next">${ico('next')}</button></div>
-    <div class="rcvl"><span class="rcvi">${ico('vol')}</span><input type="range" id="rcvol" min="0" max="${st.vmax || 100}" value="${st.vol == null ? 100 : st.vol}"${st.own === false ? ' disabled' : ''}><span id="rcvn">${st.own === false ? 'сист.' : Math.round(st.vol == null ? 100 : st.vol)}</span></div>
-    ${on ? `<button class="rmstopb" data-act="rmstop">${ico('pause')} Зупинити відтворення на пристрої</button>` : ''}</div>`;
-  return now + '<div id="rmlist">' + rmList() + '</div>';
+    <div class="rcvl"><span class="rcvi">${ico('vol')}</span><input type="range" id="rcvol" min="0" max="${st.vmax || 100}" value="${st.vol == null ? 100 : st.vol}"${st.own === false ? ' disabled' : ''}><span id="rcvn">${st.own === false ? 'сист.' : Math.round(st.vol == null ? 100 : st.vol)}</span></div></div></div>`;
+  const mini = `<div class="rmmini" id="rmmini"><div class="rmcv"${pimg ? ` style="background-image:url('${pimg}')"` : ''}></div><b id="rmmt">${on ? esc(st.title || 'Грає') + ' · ' + esc(st.ep) : 'Нічого не грає'}</b><button class="cb sm" data-act="rmc" data-rc="back">${ico('back10')}</button><button class="cb big" id="rcpp2" data-act="rmc" data-rc="pp">${ico(st.paused ? 'play' : 'pause')}</button><button class="cb sm" data-act="rmc" data-rc="next">${ico('next')}</button></div>`;
+  return now + mini + `<div id="rmlist"><div class="rmh"><h3>Аніме</h3></div><div id="rmflt">${rmFilters()}</div><div class="rmas" id="rmstrip">${rmStrip()}</div><div id="rmsub">${rmSub()}</div><div class="rmh" id="rmeh">${rmEpsHead()}</div><div class="rmeps" id="rmeps">${rmEps()}</div></div>`;
 }
-function rmList() {
-  const st = RC.st || {}, kid = rmKid(), it = kid ? item(kid) : null;
-  const all = S.items.filter(x => !x.temp);
-  const strip = all.length ? `<div class="rmh"><h3>Аніме</h3><span>${all.length}</span></div><div class="rmas">${all.map(x => {
-    const q = x.meta && x.meta.poster;
-    return `<button class="rma${x.id === kid ? ' on' : ''}${x.id === st.id ? ' pl' : ''}" data-act="rmanime" data-id="${esc(x.id)}"><i style="${q ? `background-image:url('${esc(q)}')` : ''}">${q ? '' : esc((x.title || '?')[0])}</i><span>${esc(lname(x))}</span></button>`;
-  }).join('')}</div>` : '';
-  let eps = '';
-  if (it) {
-    const q = it.meta && it.meta.poster;
-    eps = `<div class="rmh"><h3>${esc(lname(it))}</h3><span>${epsW((it.episodes || []).length)}</span></div><div class="rmeps">${(it.episodes || []).map(e => {
-      const cur = st.id === it.id && String(st.ep) === String(e.n), pend = S.rm.pend && S.rm.pend.kid === it.id && String(S.rm.pend.n) === String(e.n);
-      const img = e.th ? `<img loading="lazy" alt="" src="/thumb/${it.id}/${encodeURIComponent(e.n)}?v=${e.downloaded ? 1 : 0}" onerror="this.remove()">` : '';
-      return `<button class="rme${cur ? ' cur' : ''}${e.watched ? ' w' : ''}${pend ? ' pend' : ''}" data-act="rmep" data-n="${esc(e.n)}"><div class="th"${q ? ` style="background-image:url('${esc(q)}')"` : ''}>${img}<span class="num">${esc(e.n)}</span>${cur ? `<span class="eq">${ico('play')} Грає</span>` : pend ? `<span class="eq">${ico('spinner')}</span>` : ''}${e.new ? '<span class="nw">нова</span>' : ''}${e.pos > 5 && !e.watched ? `<span class="rs">${ico('clock')}${fmtT(e.pos)}</span>` : ''}</div><div class="n">Серія ${esc(e.n)}</div>${e.title ? `<div class="tt">${esc(e.title)}</div>` : ''}</button>`;
-    }).join('')}</div>`;
-  }
-  return strip + eps;
+function rmPaintEps() {
+  const h = $('#rmeh'), e = $('#rmeps'); if (!h || !e) return;
+  h.innerHTML = rmEpsHead(); e.classList.remove('in'); e.innerHTML = rmEps(); void e.offsetWidth; e.classList.add('in');
 }
-function renderRm(full) {  // full — перемалювати все; інакше лише список аніме/серій (картка плеєра й повзунки лишаються живими)
+function rmPaintStrip(keepScroll) {
+  const s = $('#rmstrip'), sb = $('#rmsub'); if (!s) return;
+  const x = s.scrollLeft; s.innerHTML = rmStrip(); s.scrollLeft = x;
+  if (sb) sb.innerHTML = rmSub();
+}
+function rmMarkStrip() {  // лише перемикаємо підсвітку — без перемальовування
+  const kid = rmKid(), st = RC.st || {};
+  document.querySelectorAll('#rmstrip .rma, #rmsub .rma').forEach(b => {
+    if (b.dataset.id) { b.classList.toggle('on', b.dataset.id === kid); b.classList.toggle('pl', b.dataset.id === st.id); }
+    else if (b.dataset.g) { const m = groupMembers(b.dataset.g); b.classList.toggle('on', m.some(x => x.id === kid)); b.classList.toggle('pl', m.some(x => x.id === st.id)); }
+  });
+}
+function renderRm(full) {  // full — перемалювати все; інакше лише список серій (картка плеєра й повзунки лишаються живими)
   const b = $('#rmbox'); if (!b || route().name !== 'remote') return;
-  const y = window.scrollY, first = !b.querySelector('#rmlist') || !b.querySelector('#rmnow') !== !RC.pid;
+  const first = !b.querySelector('#rmlist') || !b.querySelector('#rmnow') !== !RC.pid;
   if (full || first) {
-    const sl = b.querySelector('.rmas'), x = sl ? sl.scrollLeft : 0;
+    const y = window.scrollY, sl = b.querySelector('#rmstrip'), x = sl ? sl.scrollLeft : 0;
     b.innerHTML = rmBody();
-    const n = b.querySelector('.rmas'); if (n) { n.scrollLeft = x; const c = n.querySelector('.rma.on'); if (c && !x) n.scrollLeft = Math.max(0, c.offsetLeft - 16); }
-  } else {
-    const l = $('#rmlist'), sl = l.querySelector('.rmas'), x = sl ? sl.scrollLeft : 0, ey = $('.rmeps');
-    l.innerHTML = rmList();
-    const n = l.querySelector('.rmas'); if (n) n.scrollLeft = x;
-  }
-  window.scrollTo(0, y);
+    const n = b.querySelector('#rmstrip'); if (n) { n.scrollLeft = x; const c = n.querySelector('.rma.on'); if (c && !x) n.scrollLeft = Math.max(0, c.offsetLeft - 16); }
+    window.scrollTo(0, y); rmScrollChk();
+  } else { rmMarkStrip(); rmPaintEps(); }
 }
 function rmSync(st) {
   if (route().name !== 'remote') return;
@@ -13693,25 +13786,32 @@ function rmSync(st) {
   if (S.rm.pend && String(S.rm.pend.n) === String(st.ep) && S.rm.pend.kid === st.id) S.rm.pend = null;
   renderRm(sid !== (st.id || '') && !RC.drag && !RC.vdrag);
 }
+document.addEventListener('change', ev => { if (ev.target.id === 'rmsort') { S.rm.sort = ev.target.value; rmPaintStrip(); } });
 Object.assign(A, {
   rmback() { if (history.length > 1) history.back(); else location.hash = '#/devices'; },
   rmc(el) { rcAct(el); },
-  rmstop() { rcCmd('close'); S.rm.pend = null; renderRm(true); },
   rmleave() { rcStop(); toast('Пульт відключено, відтворення триває', false, 'cast'); },
   rmpick(el) { if (!(S.sync && S.sync.rc_out_on)) return; S.rm.manual = false; rcStart(el.dataset.id); },
-  rmanime(el) { S.rm.kid = el.dataset.id; S.rm.manual = true; renderRm(); },  // лише перегляд: відтворення на іншому пристрої не чіпаємо
+  rmongoing() { S.rm.ongoing = !S.rm.ongoing; $('#rmflt').innerHTML = rmFilters(); rmPaintStrip(); },
+  rmtab(el) { S.rm.tab = el.dataset.t; S.rm.grp = null; $('#rmflt').innerHTML = rmFilters(); rmPaintStrip(); },
+  rmgrp(el) { S.rm.grp = S.rm.grp === el.dataset.g ? null : el.dataset.g; rmPaintStrip(); const m = groupMembers(el.dataset.g); if (S.rm.grp && m.length && !m.some(x => x.id === S.rm.kid)) { S.rm.kid = m[0].id; S.rm.manual = true; rmPaintStrip(); rmPaintEps(); } },
+  rmanime(el) { S.rm.kid = el.dataset.id; S.rm.manual = true; rmMarkStrip(); rmPaintEps(); },  // лише перегляд: відтворення на іншому пристрої не чіпаємо
   async rmep(el) {
-    const kid = rmKid(), n = el.dataset.n, st = RC.st || {};
-    if (!kid || !RC.pid) return;
-    S.rm.pend = {kid, n}; RC.hold = Date.now() + 3000; RC.seen = RC.seen || false;
-    const e = $('#rcs'); if (e) e.textContent = 'Запускаю серію ' + n + '…';
-    renderRm();
-    gpHaptic && gpHaptic();
+    const kid = rmKid(), n = el.dataset.n, st = RC.st || {}, it = item(kid), e = it && it.episodes.find(x => String(x.n) === String(n));
+    if (!kid || !RC.pid || !e) return;
+    if (st.id === kid && String(st.ep) === String(n)) return;  // ця серія вже грає
+    const t = e.pos > 5 && !e.watched ? e.pos : 0;  // продовжуємо з того місця, де зупинились
+    document.querySelectorAll('#rmeps .rme.pend').forEach(x => { x.classList.remove('pend'); const q = x.querySelector('.eq'); if (q) q.remove(); });
+    el.classList.add('pend'); const th = el.querySelector('.th'); if (th && !th.querySelector('.eq')) th.insertAdjacentHTML('beforeend', `<span class="eq">${ico('spinner')}</span>`);
+    S.rm.pend = {kid, n}; RC.hold = Date.now() + 3000;
+    const r = $('#rcs'); if (r) r.textContent = 'Запускаю серію ' + n + (t ? ' з ' + fmtT(t) : '') + '…';
+    gpHaptic();
+    setTimeout(() => { if (S.rm.pend && S.rm.pend.kid === kid && S.rm.pend.n === n) { S.rm.pend = null; document.querySelectorAll('#rmeps .rme.pend').forEach(x => { x.classList.remove('pend'); const q = x.querySelector('.eq'); if (q) q.remove(); }); } }, 9000);
     try {
-      if (st.id === kid) await api('/api/sync_rc', {peer: RC.pid, c: 'ep', v: {id: kid, n}});
-      else await api('/api/sync_cast', {peer: RC.pid, mode: 'cast', id: kid, play: {n, t: 0}});
-      RC.t0 = Date.now(); RC.miss = 0;
-    } catch (er) { S.rm.pend = null; RC.hold = 0; toast(er.message, true); renderRm(); }
+      if (st.id === kid) await api('/api/sync_rc', {peer: RC.pid, c: 'ep', v: {id: kid, n, t}});
+      else await api('/api/sync_cast', {peer: RC.pid, mode: 'cast', id: kid, play: {n, t}});
+      RC.t0 = Date.now(); RC.miss = 0; RC.idle = false; setTimeout(rcPoll, 900);
+    } catch (er) { S.rm.pend = null; RC.hold = 0; el.classList.remove('pend'); const q = el.querySelector('.eq'); if (q) q.remove(); toast(er.message, true); }
   },
 });
 // автоматично: якщо на іншому пристрої зараз грає серія — пропонуємо пульт
@@ -13725,8 +13825,12 @@ async function rcPoll() {
       let st = {};
       try { st = (await api('/api/sync_pstate', {peer: RC.pid})).state || {}; } catch (e) { st = null; }
       if (!RC.pid) return;
-      if (st && st.on) { RC.seen = true; RC.miss = 0; rcPaint(st); if (S.cur && RC.auto) rcStop(); return; }
+      if (st && st.on) { RC.seen = true; RC.miss = 0; RC.lost = false; if (RC.idle) { RC.idle = false; RC.rkey = ''; if (route().name === 'remote') { RC.st = st; renderRm(true); } } rcPaint(st); if (S.cur && RC.auto) rcStop(); return; }
       RC.miss++;
+      if (route().name === 'remote') {  // на сторінці пульта не відключаємось, а показуємо «нічого не грає»
+        if (RC.miss >= 2 && (!RC.idle || (!st) !== !!RC.lost)) { RC.idle = true; RC.lost = !st; RC.st = null; RC.rkey = ''; renderRm(true); }
+        return;
+      }
       const lim = RC.seen || RC.auto ? 3 : 25;  // після перекидання даємо час на запуск серії
       if (RC.miss >= lim && Date.now() - RC.t0 > 6000 && route().name !== 'remote') { const q = RC.seen && !RC.auto; const nm = RC.name; rcStop(); if (q) toast(st ? 'Відтворення на «' + nm + '» завершено' : 'Звʼязок із «' + nm + '» втрачено', !st); }
       return;
@@ -13739,13 +13843,17 @@ async function rcPoll() {
   } finally { RC.busy = false; }
 }
 setInterval(rcPoll, 1000);
+let RCVT = 0;
 document.addEventListener('input', ev => {
   if (ev.target.id === 'rcseek') { RC.drag = true; const d = (RC.st && RC.st.dur) || 0; $('#rcc').textContent = fmtT(d * ev.target.value / 1000); }
-  if (ev.target.id === 'rcvol') { RC.vdrag = true; $('#rcvn').textContent = Math.round(ev.target.value); }
+  if (ev.target.id === 'rcvol') {
+    RC.vdrag = true; const v = Number(ev.target.value); $('#rcvn').textContent = Math.round(v);
+    if (Date.now() - RCVT > 160) { RCVT = Date.now(); rcCmd('vol', v); }  // гучність лине на пристрій одразу під час тягнення
+  }
 });
 document.addEventListener('change', ev => {
-  if (ev.target.id === 'rcseek') { const d = (RC.st && RC.st.dur) || 0; rcCmd('seek', d * ev.target.value / 1000); setTimeout(() => { RC.drag = false; }, 1200); }
-  if (ev.target.id === 'rcvol') { rcCmd('vol', Number(ev.target.value)); setTimeout(() => { RC.vdrag = false; }, 1200); }
+  if (ev.target.id === 'rcseek') { const d = (RC.st && RC.st.dur) || 0, t = d * ev.target.value / 1000; RC.seekT = {t, until: Date.now() + 4500}; rcCmd('seek', t); setTimeout(() => { RC.drag = false; }, 400); setTimeout(rcPoll, 800); }
+  if (ev.target.id === 'rcvol') { const v = Number(ev.target.value); RC.volT = {v, until: Date.now() + 4000}; rcCmd('vol', v); setTimeout(() => { RC.vdrag = false; }, 400); }
 });
 window.addEventListener('resize', rcLayout);
 // ───────── жест: затиснути (верх екрана або правий край посередині) → екран тремтить → свайп угору ─────────
