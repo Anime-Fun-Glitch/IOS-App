@@ -8171,6 +8171,13 @@ def _sync_base(key, e, temp=False):
   return json.loads(json.dumps(b, ensure_ascii=False))
 
 
+def _known_max(e):
+  try:
+    return max([float(x) for x in (e.get('known') or [])] or [0.0])
+  except Exception:
+    return 0.0
+
+
 def _sync_snapshot(st):
   """Поточний локальний стан як {ключ: (хеш, значення, ключ_бібліотеки)}. Усе, що синхронізується, виражене такими ключами:
   i/<id> — аніме є в бібліотеці; w/<id>/<серія> — переглянута; p/<id>/<серія> — позиція (с); f/<id> — архів/назва/група; s/<назва> — налаштування."""
@@ -8181,6 +8188,9 @@ def _sync_snapshot(st):
         continue
       kid = _kid(key)
       out['i/' + kid] = ('P', None, key)
+      km = _known_max(e)
+      if km > 0:  # k/<id> — найбільша відома серія: підказка іншим пристроям, що вийшла нова (вони самі перевірять сайт)
+        out['k/' + kid] = (repr(km), km, None)
       for n in e.get('watched') or []:
         out[f'w/{kid}/{n}'] = ('1', 1, None)
       for n, t in (e.get('progress') or {}).items():
@@ -8214,7 +8224,7 @@ def _sync_snapshot(st):
 
 def _sync_purge_kid(st, kid):
   for d in (st['regs'], st['last']):
-    for k in [k for k in d if k.startswith((f'w/{kid}/', f'p/{kid}/', f'f/{kid}'))]:
+    for k in [k for k in d if k.startswith((f'w/{kid}/', f'p/{kid}/', f'f/{kid}', f'k/{kid}'))]:
       del d[k]
 
 
@@ -8284,6 +8294,30 @@ def _sync_fresh(kid):
       return
     except Exception:
       continue
+
+
+_SYNC_CHK = set()
+
+
+def _sync_pull_new(kid, want):
+  """Інший пристрій побачив нову серію — перевіряємо сайт тут, поки не з'явиться (мережа може бути недоступна в першу мить)."""
+  if kid in _SYNC_CHK:
+    return
+  _SYNC_CHK.add(kid)
+  try:
+    for d in (1.0, 15, 60, 240):
+      time.sleep(d)
+      try:
+        if net_state()['state'] == 'offline':
+          continue
+        api_check(kid, bg=True)
+        _k, e = _sync_find(kid)
+        if e is None or _known_max(e) >= want:
+          return
+      except Exception:
+        continue
+  finally:
+    _SYNC_CHK.discard(kid)
 
 
 def _sync_create(v):
@@ -8374,6 +8408,17 @@ def _sync_apply_one(st, k, r):
   key, e = _sync_find(kid)
   if e is None:
     return False
+  if kind == 'k':
+    try:
+      want = float(v)
+    except Exception:
+      return False
+    with LOCK:
+      loc = _known_max(e)
+    last[k] = repr(loc)  # наш стан не «перебиває» чужий запис, поки ми самі не дізнаємось більше
+    if want > loc and not e.get('temp'):
+      threading.Thread(target=_sync_pull_new, args=(kid, want), daemon=True).start()
+    return True
   with LOCK:
     if kind == 'w':
       n = _num_arg(parts[2])
@@ -8407,7 +8452,7 @@ def _sync_apply_one(st, k, r):
 def _sync_apply(st, incoming):
   """Зливає чужі регістри: по кожному ключу перемагає новіша мітка (при рівності — більший id пристрою)."""
   changed = False
-  order = 'ifgwps'
+  order = 'ifgkwps'
   for k in sorted(incoming, key=lambda x: order.index(x[0]) if x[:1] in order else 9):
     r = incoming[k]
     try:
@@ -8839,8 +8884,12 @@ def api_sync_state():
 def api_sync_cfg(d):
   st = _sync_state()
   with SYNC_LOCK:
+    kind_def = None
     if d.get('kind') in ('phone', 'tablet', 'pc'):
       st['kind'] = d['kind']
+      if not st.get('rc_def'):  # одноразово: iPhone — пульт для керування іншими, iPad/ПК — приймають керування
+        st['rc_def'] = True
+        kind_def = {'rc_out': True, 'rc_in': False} if d['kind'] == 'phone' else {'rc_out': False, 'rc_in': True}
       if not st.get('name_user') and d.get('auto_name'):
         st['name'] = str(d['auto_name'])[:30]
     if 'name' in d:
@@ -8853,6 +8902,8 @@ def api_sync_cfg(d):
     if 'sync' in d:
       st['sync'] = bool(d['sync'])
     _sync_save()
+  if kind_def:
+    api_settings(kind_def)
   _sync_run()
   SYNC['wake'].set()
   return api_sync_state()
@@ -10174,7 +10225,7 @@ body.rmpg #rcbar{display:none!important}
 @media (min-width:900px){.rmeps{grid-template-columns:repeat(4,minmax(0,1fr))}}
 .rmeps.in .rme{animation:rmUp .32s cubic-bezier(.2,.8,.2,1) backwards;animation-delay:calc(var(--i) * 28ms)}
 .rme{background:none;border:0;color:inherit;text-align:left;padding:0;min-width:0;content-visibility:auto;contain-intrinsic-size:auto 150px}
-.rme .th{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#1b1e2c center/cover;border:2px solid transparent;transition:border-color .18s,transform .14s}
+.rme .th{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#1b1e2c center/cover no-repeat;background-size:cover;background-position:center;border:2px solid transparent;transition:border-color .18s,transform .14s}
 .rme .th img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .rme .th::after{content:"";position:absolute;inset:0;background:linear-gradient(to top,#000b 0%,#0000 55%);pointer-events:none}
 .rme .num{position:absolute;left:8px;bottom:6px;z-index:1;font-weight:800;font-size:17px;text-shadow:0 1px 6px #000}
@@ -10184,6 +10235,7 @@ body.rmpg #rcbar{display:none!important}
 .rme .n{font-size:13px;font-weight:650;margin-top:6px}.rme .tt{font-size:12px;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rme.cur .th{border-color:var(--ac)}.rme.w .th{opacity:.55}.rme.cur .th,.rme.pend .th{opacity:1}.rme:active .th{transform:scale(.97)}.rme.pend .th{border-color:var(--ac2,var(--ac))}
 .rme .eq .spin{animation:spin .8s linear infinite}
+.rmh{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.rmhr{margin-left:auto;display:inline-flex;align-items:center;gap:5px;border:1px solid #ffffff22;background:#ffffff0d;color:inherit;border-radius:99px;padding:5px 11px;font-size:12px;font-weight:650;touch-action:manipulation;-webkit-tap-highlight-color:transparent}.rmhr .i{width:14px;height:14px}.rmhr.on{background:var(--ac);border-color:var(--ac);color:#fff}
 .rmmini{position:fixed;left:12px;right:12px;top:calc(var(--top,0px) + 62px);z-index:30;max-width:956px;margin:0 auto;display:flex;align-items:center;gap:8px;padding:7px 8px 7px 10px;border-radius:16px;background:#1b1e30;border:1px solid #ffffff18;box-shadow:0 8px 20px #000a;opacity:0;transform:translateY(-10px);pointer-events:none;transition:opacity .2s,transform .22s cubic-bezier(.2,.8,.2,1)}
 .rmmini.on{opacity:1;transform:none;pointer-events:auto}
 .rmmini .rmcv{width:34px;border-radius:7px}.rmmini b{flex:1;min-width:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -13155,7 +13207,10 @@ async function play(id, n, startT, _retry) {
       msg.classList.remove('hide'); msg.innerHTML = ico('error') + esc('Не вдалося відтворити відео.' + (s.type !== 'file' ? ' Спробуйте іншу якість або завантажте серію.' : '')); };
     const p = V.play(); if (p && p.catch) p.catch(() => {});
     if (IOS_APP && S.set.ios_player !== false && !S.mirror && !S.awp && Math.min(screen.width, screen.height) >= 700) {  // iPad не відкриває системний плеєр сам (відео йде вбудовано) — просимо його при старті
-      V.addEventListener('playing', () => { try { if (S.cur && S.cur.id === id && S.cur.n === n && !V.webkitDisplayingFullscreen && V.webkitEnterFullscreen) V.webkitEnterFullscreen(); } catch (er) {} }, {once: true});
+      let fsTries = 0;  // системний плеєр інколи не відкривається з першого разу (немає «жесту»/відео ще не готове) — пробуємо на кількох подіях і з інтервалом
+      const fsTry = () => { try { if (S.cur && S.cur.id === id && S.cur.n === n && !V.webkitDisplayingFullscreen && V.webkitEnterFullscreen && V.readyState >= 1) V.webkitEnterFullscreen(); } catch (er) {} };
+      ['loadedmetadata', 'canplay', 'playing'].forEach(ev => V.addEventListener(ev, fsTry, {once: true}));
+      const fsT = setInterval(() => { if (!S.cur || S.cur.id !== id || S.cur.n !== n || V.webkitDisplayingFullscreen || ++fsTries > 8) { clearInterval(fsT); return; } fsTry(); }, 500);
     }
   } catch (er) { msg.classList.remove('hide'); msg.innerHTML = ico('error') + esc(er.message); }
 }
@@ -13415,12 +13470,47 @@ $('#vfs').addEventListener('click', () => {
   const ok = (V.webkitSupportsPresentationMode && V.webkitSupportsPresentationMode('picture-in-picture')) || document.pictureInPictureEnabled;
   if (!ok) $('#vpip').style.display = 'none';
 })();
+let PIPB = 0;
 $('#vpip').addEventListener('click', async () => {
+  if (PIPB && Date.now() - PIPB < 1500) return;  // швидкі повторні натискання ламають перехід у PiP
+  PIPB = Date.now();
   try {
     if (V.webkitSetPresentationMode) V.webkitSetPresentationMode(V.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture');
     else if (document.pictureInPictureElement) await document.exitPictureInPicture();
     else await V.requestPictureInPicture();
   } catch (e) { toast('Картинка в картинці недоступна для цього відео', true); }
+});
+/* ---------- звук при перемотці / після згортання ---------- */
+let SMUT = 0, SMT = 0;  // на час перемотки глушимо звук: iOS ще секунду грає старий момент, хоча картинка вже нова
+function smuteOff() { clearTimeout(SMT); if (SMUT) { SMUT = 0; try { V.muted = false; } catch (e) {} } }
+V.addEventListener('seeking', () => {
+  if (!V.muted && !SMUT) { SMUT = 1; try { V.muted = true; } catch (e) {} }
+  clearTimeout(SMT); SMT = setTimeout(smuteOff, 3000);
+});
+['seeked', 'playing'].forEach(ev => V.addEventListener(ev, () => { if (SMUT && !V.seeking) { clearTimeout(SMT); SMT = setTimeout(smuteOff, 220); } }));
+V.addEventListener('pause', smuteOff);
+function audRescue() {  // після повернення з фону аудіосесія/AudioContext iOS буває «перервана» — піднімаємо звук без перезапуску програми
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
+  try { if (AUD && AUD.ctx.state !== 'running') AUD.ctx.resume().catch(() => {}); } catch (e) {}
+  if (!S.cur || V.paused) return;
+  setTimeout(() => {
+    if (!S.cur || V.paused || V.seeking || V.webkitDisplayingFullscreen) return;
+    try { P.prog = true; setTimeout(() => { P.prog = false; }, 800); V.currentTime = V.currentTime; } catch (e) {}  // «порожня» перемотка перезапускає аудіоконвеєр
+  }, 400);
+  setTimeout(() => { try { if (AUD && AUD.ctx.state !== 'running') AUD.ctx.resume().catch(() => {}); } catch (e) {} }, 900);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) audRescue(); });
+window.addEventListener('pageshow', audRescue);
+window.addEventListener('focus', () => { if (S.cur && !V.paused) audRescue(); });
+V.addEventListener('webkitpresentationmodechanged', () => {  // вихід з PiP не повинен лишати інтерфейс «мертвим»
+  PIPB = 0;
+  if (V.webkitPresentationMode === 'picture-in-picture') return;
+  [120, 600, 1500].forEach(d => setTimeout(() => {
+    if (!S.cur) return;
+    document.documentElement.style.pointerEvents = ''; document.body.style.pointerEvents = '';
+    try { VC.classList.remove('off'); vcShow(); vcIcon(); zmApply(false); } catch (e) {}
+    window.dispatchEvent(new Event('resize'));
+  }, d));
 });
 V.addEventListener('webkitendfullscreen', () => { vcShow(); setTimeout(() => { zmApply(false); uiStuck(); }, 120); });
 /* ---------- власні елементи керування ---------- */
@@ -13722,7 +13812,7 @@ setInterval(async () => {
       else if (c.c === 'seekby') V.currentTime = Math.max(0, (V.currentTime || 0) + (Number(c.v) || 0));
       else if (c.c === 'vol') { const v = Number(c.v) || 0; if (ownVol()) { volApply(v); volPaint(); } else { try { V.volume = Math.max(0, Math.min(1, v / 100)); } catch (e) {} } }
       else if (c.c === 'next') A.pnext(); else if (c.c === 'prev') A.pprev(); else if (c.c === 'close') closePlayer();
-      else if (c.c === 'ep') { const v = c.v || {}; if (v.id && item(v.id)) play(v.id, v.n, Number(v.t) || 0); }
+      else if (c.c === 'ep') { const v = c.v || {}; if (v.id && item(v.id)) { gpHaptic(); blurSwap(() => play(v.id, v.n, Number(v.t) || 0)); } }
     }
   } catch (e) {} finally { PST.busy = false; }
 }, 500);
@@ -13795,7 +13885,8 @@ function rcPaint(st, force) {
   rmSync(st);
 }
 // ───────── сторінка «Пульт»: розгорнутий пульт з вибором аніме та серії ─────────
-S.rm = {kid: null, manual: false, pend: null, tab: 'lib', sort: null, grp: null, ongoing: false};
+S.rm = {kid: null, manual: false, pend: null, tab: 'lib', sort: null, grp: null, ongoing: false, here: false};
+try { S.rm.here = localStorage.getItem('rmhere') === '1'; } catch (e) {}
 function rmScrollChk() { const n = $('#rmnow'), m = $('#rmmini'); if (n && m) { const on = window.scrollY > n.offsetTop + n.offsetHeight - 70; if (on !== m.classList.contains('on')) m.classList.toggle('on', on); } }
 window.addEventListener('scroll', rmScrollChk, {passive: true});
 function rmSwitch(on) {
@@ -13864,15 +13955,16 @@ function rmSub() {
   return `<div class="rmsubh">${esc(gname(m) || 'Група')}</div><div class="rmas sub">${m.map(x => `<button class="rma${x.id === kid ? ' on' : ''}${x.id === st.id ? ' pl' : ''}" data-act="rmanime" data-id="${esc(x.id)}"><i style="${rmPoster(x)}">${rmPoster(x) ? '' : esc((x.title || '?')[0])}</i><span>${esc(lname(x))}</span></button>`).join('')}</div>`;
 }
 function rmEpsHead() {
-  const it = item(rmKid()); return it ? `<h3>${esc(lname(it))}</h3><span>${epsW((it.episodes || []).length)}</span>` : '';
+  const it = item(rmKid());
+  return it ? `<h3>${esc(lname(it))}</h3><span>${epsW((it.episodes || []).length)}</span><button class="rmhr${S.rm.here ? ' on' : ''}" data-act="rmhere" aria-label="Де відкривати серію">${ico(S.rm.here ? 'phone' : 'cast')} ${S.rm.here ? 'Відкривати тут' : 'Відкривати на ' + esc(RC.name || 'пристрої')}</button>` : '';
 }
 function rmEps() {
   const st = RC.st || {}, it = item(rmKid()); if (!it) return '';
   const q = it.meta && it.meta.poster;
   return (it.episodes || []).map((e, i) => {
     const cur = st.id === it.id && String(st.ep) === String(e.n), pend = S.rm.pend && S.rm.pend.kid === it.id && String(S.rm.pend.n) === String(e.n);
-    const img = e.th ? `<img decoding="async" loading="lazy" alt="" src="/thumb/${it.id}/${encodeURIComponent(e.n)}?v=${e.downloaded ? 1 : 0}" onerror="this.remove()">` : '';
-    return `<button class="rme${cur ? ' cur' : ''}${e.watched ? ' w' : ''}${pend ? ' pend' : ''}" data-act="rmep" data-n="${esc(e.n)}" style="--i:${Math.min(i, 10)}"><div class="th"${q ? ` style="background-image:url('${esc(q)}')"` : ''}>${img}<span class="num">${esc(e.n)}</span>${cur ? `<span class="eq">${ico('play')} Грає</span>` : pend ? `<span class="eq">${ico('spinner')}</span>` : ''}${e.new ? '<span class="nw">нова</span>' : ''}${e.pos > 5 && !e.watched ? `<span class="rs">${ico('clock')}${fmtT(e.pos)}</span>` : ''}</div><div class="n">Серія ${esc(e.n)}</div>${e.title ? `<div class="tt">${esc(e.title)}</div>` : ''}</button>`;
+    const bgs = [e.th ? `url('/thumb/${it.id}/${encodeURIComponent(e.n)}?v=${e.downloaded ? 1 : 0}')` : '', q ? `url('${esc(q)}')` : ''].filter(Boolean).join(',');  // обкладинка серії, а під нею постер аніме — якщо серії немає або не завантажилась
+    return `<button class="rme${cur ? ' cur' : ''}${e.watched ? ' w' : ''}${pend ? ' pend' : ''}" data-act="rmep" data-n="${esc(e.n)}" style="--i:${Math.min(i, 10)}"><div class="th"${bgs ? ` style="background-image:${bgs}"` : ''}><span class="num">${esc(e.n)}</span>${cur ? `<span class="eq">${ico('play')} Грає</span>` : pend ? `<span class="eq">${ico('spinner')}</span>` : ''}${e.new ? '<span class="nw">нова</span>' : ''}${e.pos > 5 && !e.watched ? `<span class="rs">${ico('clock')}${fmtT(e.pos)}</span>` : ''}</div><div class="n">Серія ${esc(e.n)}</div>${e.title ? `<div class="tt">${esc(e.title)}</div>` : ''}</button>`;
   }).join('');
 }
 function rmBody() {
@@ -13899,7 +13991,7 @@ function rmBody() {
 }
 function rmPaintEps() {
   const h = $('#rmeh'), e = $('#rmeps'); if (!h || !e) return;
-  h.innerHTML = rmEpsHead(); e.classList.remove('in'); e.innerHTML = rmEps(); void e.offsetWidth; e.classList.add('in');
+  RC.eKid = rmKid(); h.innerHTML = rmEpsHead(); e.classList.remove('in'); e.innerHTML = rmEps(); void e.offsetWidth; e.classList.add('in');
 }
 function rmPaintStrip(keepScroll) {
   const s = $('#rmstrip'), sb = $('#rmsub'); if (!s) return;
@@ -13918,7 +14010,7 @@ function renderRm(full) {  // full — перемалювати все; інак
   const first = !b.querySelector('#rmlist') || !b.querySelector('#rmnow') !== !RC.pid;
   if (full || first) {
     const y = window.scrollY, sl = b.querySelector('#rmstrip'), x = sl ? sl.scrollLeft : 0;
-    b.innerHTML = rmBody();
+    b.innerHTML = rmBody(); RC.eKid = rmKid();
     const n = b.querySelector('#rmstrip'); if (n) { n.scrollLeft = x; const c = n.querySelector('.rma.on'); if (c && !x) n.scrollLeft = Math.max(0, c.offsetLeft - 16); }
     window.scrollTo(0, y); rmScrollChk();
   } else { rmMarkStrip(); rmPaintEps(); }
@@ -13930,7 +14022,34 @@ function rmSync(st) {
   const sid = (RC.rkey || '').split('|')[0];
   RC.rkey = key;
   if (S.rm.pend && String(S.rm.pend.n) === String(st.ep) && S.rm.pend.kid === st.id) S.rm.pend = null;
-  renderRm(sid !== (st.id || '') && !RC.drag && !RC.vdrag);
+  rmSoft();
+}
+function rmPaintNow() {  // оновлюємо картку «зараз грає» на місці, без перемальовування сторінки
+  const st = RC.st || {}, on = !!st.id, pit = on ? item(st.id) : null, pimg = pit && pit.meta && pit.meta.poster ? pit.meta.poster : '';
+  const nw = $('#rmnow'); if (!nw) return;
+  nw.classList.toggle('idle', !on);
+  document.querySelectorAll('#rmnow .rmcv, #rmmini .rmcv').forEach(c => { const bg = pimg ? `url('${pimg}')` : ''; if (c.style.backgroundImage !== bg) c.style.backgroundImage = bg; const ic = pimg || c.closest('#rmmini') ? '' : ico('cast'); if (c.innerHTML !== ic) c.innerHTML = ic; });
+  const set = (id, v) => { const e = $(id); if (e && e.textContent !== v) e.textContent = v; };
+  set('#rct', on ? (st.title || 'Грає') : 'Нічого не грає');
+  set('#rcs', on ? 'Серія ' + st.ep : (RC.lost ? 'Немає звʼязку з пристроєм' : 'Оберіть серію нижче — вона запуститься там'));
+  set('#rmmt', on ? (st.title || 'Грає') + ' · ' + st.ep : 'Нічого не грає');
+  rmScrollChk();
+}
+function rmMarkEps() {  // зміна «грає/запускається» без перемальовування списку (нічого не блимає)
+  const st = RC.st || {}, kid = rmKid();
+  document.querySelectorAll('#rmeps .rme').forEach(b => {
+    const cur = st.id === kid && String(st.ep) === b.dataset.n, pend = !!S.rm.pend && S.rm.pend.kid === kid && String(S.rm.pend.n) === b.dataset.n;
+    b.classList.toggle('cur', cur); b.classList.toggle('pend', pend);
+    const th = b.querySelector('.th'); if (!th) return;
+    let q = th.querySelector('.eq'); const html = cur ? `${ico('play')} Грає` : pend ? ico('spinner') : '';
+    if (html) { if (!q) { q = document.createElement('span'); q.className = 'eq'; th.appendChild(q); } if (q.innerHTML !== html) q.innerHTML = html; } else if (q) q.remove();
+  });
+}
+function rmSoft() {
+  const b = $('#rmbox'); if (!b || route().name !== 'remote') return;
+  if (!b.querySelector('#rmlist') || !b.querySelector('#rmnow') !== !RC.pid) { renderRm(true); return; }
+  rmPaintNow(); rmMarkStrip();
+  if (RC.eKid !== rmKid()) { rmPaintStrip(); rmPaintEps(); } else rmMarkEps();
 }
 document.addEventListener('change', ev => { if (ev.target.id === 'rmsort') { S.rm.sort = ev.target.value; rmPaintStrip(); } });
 Object.assign(A, {
@@ -13941,12 +14060,18 @@ Object.assign(A, {
   rmongoing() { S.rm.ongoing = !S.rm.ongoing; $('#rmflt').innerHTML = rmFilters(); rmPaintStrip(); },
   rmtab(el) { S.rm.tab = el.dataset.t; S.rm.grp = null; $('#rmflt').innerHTML = rmFilters(); rmPaintStrip(); },
   rmgrp(el) { S.rm.grp = S.rm.grp === el.dataset.g ? null : el.dataset.g; rmPaintStrip(); const m = groupMembers(el.dataset.g); if (S.rm.grp && m.length && !m.some(x => x.id === S.rm.kid)) { S.rm.kid = m[0].id; S.rm.manual = true; rmPaintStrip(); rmPaintEps(); } },
-  rmanime(el) { S.rm.kid = el.dataset.id; S.rm.manual = true; rmMarkStrip(); rmPaintEps(); },  // лише перегляд: відтворення на іншому пристрої не чіпаємо
+  rmanime(el) {
+    S.rm.kid = el.dataset.id; S.rm.manual = true;
+    if (S.rm.grp && !groupMembers(S.rm.grp).some(x => x.id === S.rm.kid)) { S.rm.grp = null; rmPaintStrip(); }  // вибрали аніме поза відкритою групою — групу закриваємо
+    rmMarkStrip(); rmPaintEps();
+  },
+  rmhere() { S.rm.here = !S.rm.here; try { localStorage.setItem('rmhere', S.rm.here ? '1' : ''); } catch (e) {} const h = $('#rmeh'); if (h) h.innerHTML = rmEpsHead(); gpHaptic(); },  // лише перегляд: відтворення на іншому пристрої не чіпаємо
   async rmep(el) {
     const kid = rmKid(), n = el.dataset.n, st = RC.st || {}, it = item(kid), e = it && it.episodes.find(x => String(x.n) === String(n));
     if (!kid || !RC.pid || !e) return;
-    if (st.id === kid && String(st.ep) === String(n)) return;  // ця серія вже грає
     const t = e.pos > 5 && !e.watched ? e.pos : 0;  // продовжуємо з того місця, де зупинились
+    if (S.rm.here) { gpHaptic(); play(kid, e.n, t); return; }  // швидко відкрити саме на цьому пристрої
+    if (st.id === kid && String(st.ep) === String(n)) return;  // ця серія вже грає
     document.querySelectorAll('#rmeps .rme.pend').forEach(x => { x.classList.remove('pend'); const q = x.querySelector('.eq'); if (q) q.remove(); });
     el.classList.add('pend'); const th = el.querySelector('.th'); if (th && !th.querySelector('.eq')) th.insertAdjacentHTML('beforeend', `<span class="eq">${ico('spinner')}</span>`);
     S.rm.pend = {kid, n}; RC.hold = Date.now() + 3000;
@@ -13954,7 +14079,7 @@ Object.assign(A, {
     gpHaptic();
     setTimeout(() => { if (S.rm.pend && S.rm.pend.kid === kid && S.rm.pend.n === n) { S.rm.pend = null; document.querySelectorAll('#rmeps .rme.pend').forEach(x => { x.classList.remove('pend'); const q = x.querySelector('.eq'); if (q) q.remove(); }); } }, 9000);
     try {
-      if (st.id === kid) await api('/api/sync_rc', {peer: RC.pid, c: 'ep', v: {id: kid, n, t}});
+      if (st.id === kid && !RC.miss && !RC.idle && !RC.lost) await api('/api/sync_rc', {peer: RC.pid, c: 'ep', v: {id: kid, n, t}});
       else await api('/api/sync_cast', {peer: RC.pid, mode: 'cast', id: kid, play: {n, t}});
       RC.t0 = Date.now(); RC.miss = 0; RC.idle = false; setTimeout(rcPoll, 900);
     } catch (er) { S.rm.pend = null; RC.hold = 0; el.classList.remove('pend'); const q = el.querySelector('.eq'); if (q) q.remove(); toast(er.message, true); }
@@ -13971,10 +14096,10 @@ async function rcPoll() {
       let st = {};
       try { st = (await api('/api/sync_pstate', {peer: RC.pid})).state || {}; } catch (e) { st = null; }
       if (!RC.pid) return;
-      if (st && st.on) { RC.seen = true; RC.miss = 0; RC.lost = false; if (RC.idle) { RC.idle = false; RC.rkey = ''; if (route().name === 'remote') { RC.st = st; renderRm(true); } } rcPaint(st); if (S.cur && RC.auto) rcStop(); return; }
+      if (st && st.on) { RC.seen = true; RC.miss = 0; RC.lost = false; if (RC.idle) { RC.idle = false; RC.rkey = ''; if (route().name === 'remote') { RC.st = st; rmSoft(); } } rcPaint(st); if (S.cur && RC.auto) rcStop(); return; }
       RC.miss++;
       if (route().name === 'remote') {  // на сторінці пульта не відключаємось, а показуємо «нічого не грає»
-        if (RC.miss >= 2 && (!RC.idle || (!st) !== !!RC.lost)) { RC.idle = true; RC.lost = !st; RC.st = null; RC.rkey = ''; renderRm(true); }
+        if (RC.miss >= 4 && Date.now() > (RC.hold || 0) && (!RC.idle || (!st) !== !!RC.lost)) { RC.idle = true; RC.lost = !st; RC.st = null; RC.rkey = ''; rmSoft(); }
         return;
       }
       const lim = RC.seen || RC.auto ? 3 : 25;  // після перекидання даємо час на запуск серії
