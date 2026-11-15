@@ -8568,6 +8568,8 @@ def _sync_note_found(pid, name, addr, port, kind='phone', pair=False):
   if p and (p.get('addr') != addr or p.get('port') != port or p.get('kind') != kind):
     p['addr'], p['port'], p['kind'] = addr, port, kind
     _sync_save()
+  if p and not (SYNC['status'].get(pid) or {}).get('ok'):
+    SYNC['wake'].set()  # знайомий пристрій «прокинувся» і кричить — одразу перевіряємо зв'язок, а не чекаємо цикл
   if not pair:
     SYNC['found'].pop(pid, None)  # пристрій вийшов із меню підключення — одразу прибираємо
     return
@@ -8824,12 +8826,13 @@ def _sync_scan_net():
 def _sync_loop():
   n = 0
   while True:
-    SYNC['wake'].wait(10)
+    lost0 = any(not (SYNC['status'].get(pid) or {}).get('ok') for pid in _sync_state()['peers'])
+    SYNC['wake'].wait(4 if lost0 else 10)  # якщо хтось не відповідає (iOS присипляє згорнуті програми) — перевіряємо частіше
     SYNC['wake'].clear()
     st = _sync_state()
     n += 1
     lost = any(not (SYNC['status'].get(pid) or {}).get('ok') for pid in st['peers'])
-    if lost and n % 2 == 0:  # пристрій зник (змінилась мережа/IP) — кричимо, щоб він нас знайшов за id
+    if lost:  # пристрій зник (змінилась мережа/IP або він спить) — кричимо, щоб він нас знайшов за id
       _sync_send_beacon()
     if st.get('sync'):
       try:
@@ -9026,6 +9029,7 @@ def api_sync_unpair(pid):
 def api_sync_now():
   st = _sync_state()
   SYNC['wake'].set()
+  threading.Thread(target=_sync_send_beacon, daemon=True).start()  # повідомляємо про себе одразу після розгортання програми
   return {'ok': True}
 
 
@@ -9667,8 +9671,8 @@ h3.sec{margin:14px 16px 6px;font-size:13px;letter-spacing:.8px;text-transform:up
 .dtabs button small{margin-left:6px;padding:1px 7px;border-radius:9px;background:var(--s2);font-size:11px;font-weight:700;transition:background .2s}
 .dtabs button.on{color:#fff}
 .dtabs button.on small{background:var(--ac);color:#fff}
-.dtabs button::after{content:'';position:absolute;left:50%;right:50%;bottom:-1px;height:3px;border-radius:3px 3px 0 0;background:linear-gradient(90deg,var(--ac),var(--ac2));box-shadow:0 0 10px var(--ac);transition:left .25s cubic-bezier(.2,.8,.2,1),right .25s cubic-bezier(.2,.8,.2,1)}
-.dtabs button.on::after{left:14px;right:14px}
+.dtabs button::after{content:'';position:absolute;left:50%;right:50%;bottom:-1px;height:3px;border-radius:3px 3px 0 0;background:linear-gradient(90deg,var(--ac),var(--ac2));opacity:0;transition:left .25s cubic-bezier(.2,.8,.2,1),right .25s cubic-bezier(.2,.8,.2,1),opacity .2s}
+.dtabs button.on::after{left:14px;right:14px;opacity:1;box-shadow:0 0 10px var(--ac)}
 .sortrow{display:flex;gap:10px;align-items:center;margin:2px 16px 10px}
 .sortrow .ssel{position:relative;flex:1 1 auto;min-width:0}
 .sortrow select{width:100%;appearance:none;-webkit-appearance:none;background:var(--s1);border:1px solid rgba(255,255,255,.08);color:inherit;border-radius:12px;padding:9px 34px 9px 12px;font:inherit;font-size:13.5px;font-weight:600}
@@ -9749,6 +9753,12 @@ body.pressing,body.pressing *{-webkit-user-select:none!important;user-select:non
 .rc .rt{margin-top:6px;font-size:12.5px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .rc .rm{margin-top:2px;font-size:11px;color:var(--mu);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .epgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 12px}
+/* серії — окремий блок із власною прокруткою: сторінка не росте на сотні екранів, верх списку «ховається» під верхній блок */
+.epscr,.rmeps{position:relative;max-height:calc(100dvh - var(--tabh,90px) - 150px);min-height:min(300px,55dvh);overflow-y:auto;overflow-x:hidden;overscroll-behavior-y:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 20px,#000 calc(100% - 26px),transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 20px,#000 calc(100% - 26px),transparent 100%);padding:18px 0 26px;margin-top:-10px}
+.epscr::-webkit-scrollbar,.rmeps::-webkit-scrollbar{display:none}
+.epscr .ec,.epscr .ep{content-visibility:auto;contain-intrinsic-size:auto 190px}
+.epscr .ep{contain-intrinsic-size:auto 76px}
 @media(min-width:720px){.epgrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .ec{background:var(--s1);border-radius:16px;overflow:hidden;position:relative;transition:transform .15s,box-shadow .2s}
 .ec:active{transform:scale(.98)}
@@ -10239,30 +10249,33 @@ body.rmpg #rcbar{display:none!important}
 .rmnow .rcb .cb.big .i[fill=currentColor]{fill:#fff}
 .rmh{display:flex;align-items:baseline;justify-content:space-between;margin:22px 4px 10px}.rmh h3{margin:0;font-size:17px}.rmh span{font-size:12.5px;color:var(--mu)}
 .rmwrap .dtabs{margin:0 0 8px}.rmwrap .sortrow{margin:2px 0 12px}
-.rmas{display:flex;gap:10px;overflow-x:auto;padding:2px 16px 8px;margin:0 -16px;scroll-snap-type:x proximity;scroll-padding-left:16px;-webkit-overflow-scrolling:touch;scrollbar-width:none}.rmas::-webkit-scrollbar{display:none}
+.rmas{display:flex;gap:10px;overflow-x:auto;padding:6px 16px 8px;margin:-4px -16px 0;scroll-snap-type:x proximity;scroll-padding-left:16px;-webkit-overflow-scrolling:touch;scrollbar-width:none}.rmas::-webkit-scrollbar{display:none}
 .rmas.sub{margin-top:2px}.rmsubh{font-size:12.5px;color:var(--mu);margin:8px 2px 4px;animation:rmUp .25s both}
 .rmnone{color:var(--mu);padding:20px 4px;font-size:14px}
-.rma{flex:none;width:92px;background:none;border:0;color:inherit;text-align:left;padding:0;scroll-snap-align:start;contain:layout paint}
-.rma i{position:relative;display:grid;place-items:center;aspect-ratio:2/3;border-radius:12px;background:transparent center/cover;font-style:normal;font-size:30px;font-weight:800;color:#ffffff30;border:2px solid transparent;transition:border-color .18s,transform .15s}
-.rma i em{position:absolute;right:5px;bottom:5px;font-style:normal;font-size:11px;font-weight:700;color:#fff;background:#000b;border-radius:9px;padding:1px 7px}
+.rma{flex:none;width:92px;background:none;border:0;color:inherit;text-align:left;padding:0;scroll-snap-align:start}
+.rma i{position:relative;display:grid;place-items:center;aspect-ratio:2/3;border-radius:12px;overflow:hidden;background-color:transparent;background-repeat:no-repeat;background-size:cover;background-position:center;background-origin:border-box;background-clip:border-box;font-style:normal;font-size:30px;font-weight:800;color:#ffffff30;border:0;transition:transform .15s}
+.rma i::before{content:"";position:absolute;inset:0;border-radius:inherit;border:2px solid transparent;pointer-events:none;z-index:2;transition:border-color .18s}
+.rma i em{position:absolute;z-index:1;right:5px;bottom:5px;max-width:calc(100% - 10px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-style:normal;font-size:11px;font-weight:700;color:#fff;background:#000b;border-radius:9px;padding:1px 7px}
 .rma span{display:block;margin-top:6px;font-size:12px;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--mu)}
-.rma.on i{border-color:var(--ac)}.rma.on span{color:#fff}.rma.pl i{box-shadow:0 0 0 2px #0d0e13,0 0 0 4px var(--ac2,var(--ac))}.rma:active i{transform:scale(.95)}
-.rma.grp.open i{border-style:dashed}
+.rma.on i::before{border-color:var(--ac)}.rma.on span{color:#fff}.rma.pl i{box-shadow:0 0 0 2px #0d0e13,0 0 0 4px var(--ac2,var(--ac))}.rma:active i{transform:scale(.95)}
+.rma.grp.open i::before{border-style:dashed}
 .rma.arch i{filter:grayscale(1) contrast(1.06) brightness(.86)}.rma.arch.on i,.rma.arch.pl i{filter:grayscale(1) contrast(1.06) brightness(.92)}
 .rmeps,.rmeps.in{background:none;box-shadow:none;border:0}.rmeps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 12px}
 @media (min-width:560px){.rmeps{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (min-width:900px){.rmeps{grid-template-columns:repeat(4,minmax(0,1fr))}}
 .rmeps.in .rme{animation:rmUp .32s cubic-bezier(.2,.8,.2,1) backwards;animation-delay:calc(var(--i) * 28ms)}
 .rme{background:none;border:0;color:inherit;text-align:left;padding:0;min-width:0;content-visibility:auto;contain-intrinsic-size:auto 150px}
-.rme .th{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:transparent center/cover no-repeat;background-size:cover;background-position:center;border:2px solid transparent;transition:border-color .18s,transform .14s}
-.rme .th img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.rme .th{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:transparent;border:0;transition:transform .14s}
+.rme .th::before{content:"";position:absolute;inset:0;border-radius:inherit;border:2px solid transparent;pointer-events:none;z-index:3;transition:border-color .18s}
+.rme .thi{position:absolute;inset:0;background-repeat:no-repeat;background-size:cover;background-position:center;transition:filter .3s}
+.rme:not(.w) .thi.bl{filter:blur(14px);transform:scale(1.2)}
 .rme .th::after{content:"";position:absolute;inset:0;background:linear-gradient(to top,#000b 0%,#0000 55%);pointer-events:none}
-.rme .num{position:absolute;left:8px;bottom:6px;z-index:1;font-weight:800;font-size:17px;text-shadow:0 1px 6px #000}
-.rme .eq{position:absolute;z-index:1;right:6px;top:6px;display:flex;align-items:center;gap:4px;background:var(--ac);color:#fff;border-radius:10px;padding:3px 8px;font-size:11.5px;font-weight:700}.rme .eq .i{width:12px;height:12px}
-.rme .nw{position:absolute;z-index:1;left:6px;top:6px;background:#0e9f84;color:#fff;border-radius:8px;padding:2px 7px;font-size:11px;font-weight:700}
-.rme .rs{position:absolute;z-index:1;right:8px;bottom:6px;display:flex;align-items:center;gap:3px;font-size:11px;color:#ffffffd0}.rme .rs .i{width:11px;height:11px}
+.rme .num{position:absolute;left:8px;bottom:6px;z-index:2;font-weight:800;font-size:17px;text-shadow:0 1px 6px #000}
+.rme .eq{position:absolute;z-index:2;right:6px;top:6px;max-width:calc(100% - 12px);white-space:nowrap;overflow:hidden;display:flex;align-items:center;gap:4px;background:var(--ac);color:#fff;border-radius:10px;padding:3px 8px;font-size:11.5px;font-weight:700}.rme .eq .i{width:12px;height:12px}
+.rme .nw{position:absolute;z-index:2;left:6px;top:6px;white-space:nowrap;background:#0e9f84;color:#fff;border-radius:8px;padding:2px 7px;font-size:11px;font-weight:700}
+.rme .rs{position:absolute;z-index:2;white-space:nowrap;right:8px;bottom:6px;display:flex;align-items:center;gap:3px;font-size:11px;color:#ffffffd0}.rme .rs .i{width:11px;height:11px}
 .rme .n{font-size:13px;font-weight:650;margin-top:6px}.rme .tt{font-size:12px;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rme.cur .th{border-color:var(--ac)}.rme.w .th{opacity:.55}.rme.cur .th,.rme.pend .th{opacity:1}.rme:active .th{transform:scale(.97)}.rme.pend .th{border-color:var(--ac2,var(--ac))}
+.rme.cur .th::before{border-color:var(--ac)}.rme.w .th{opacity:.55}.rme.cur .th,.rme.pend .th{opacity:1}.rme:active .th{transform:scale(.97)}.rme.pend .th::before{border-color:var(--ac2,var(--ac))}
 .rme .eq .spin{animation:spin .8s linear infinite}
 .rme .wk{display:inline-grid;place-items:center;vertical-align:-3px;margin-left:7px;width:17px;height:17px;border-radius:50%;background:#38d39f26;color:#38d39f}.rme .wk .i{width:11px;height:11px;stroke-width:3}
 .rcsw{position:relative;flex:1;min-width:0;display:flex;align-items:center}.rcsw input{width:100%;position:relative;z-index:1;background:none}
@@ -10492,6 +10505,7 @@ const ICONS = {
   tablet: '<rect x="3.5" y="4" width="17" height="16" rx="2.4"/><path d="M11 17h2"/>',
   pc: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
   devices: '<rect x="2.5" y="6" width="13" height="10" rx="1.8"/><path d="M6.5 19.5h5"/><rect x="16.5" y="9" width="5" height="9" rx="1.4"/>',
+  xfer: '<rect x="2.5" y="6" width="9" height="14" rx="2"/><path d="M15.5 12h6M19 9l2.8 3-2.8 3"/><path d="M15.5 5h4.5a2 2 0 0 1 2 2" opacity=".55"/>',
   cast: '<path d="M3 8V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-5"/><path d="M3 12a9 9 0 0 1 9 9M3 16a5 5 0 0 1 5 5M3 20h.01" stroke-width="2.4"/>',
   airplay: '<path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1"/><path d="m12 15 5 6H7z"/>',
   expand: '<path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="m21 3-7 7"/><path d="m3 21 7-7"/>',
@@ -10749,6 +10763,8 @@ function render() {
   root.classList.toggle('settings-pg', r.name === 'settings' || r.name === 'storage' || r.name === 'devices');
   root.classList.toggle('fill', r.name === 'home' || r.name === 'group');
   if (r.name === 'detail') maybeWarm(r.id);
+  if (dit) { const b = $('#epscr'); if (b) { if (S.scrollEp && S.scrollEp.kid === dit.id) b._k = dit.id; else epAutoScroll(b, dit.id); } }
+  if (r.name === 'remote') { const b = $('#rmeps'); if (b) epAutoScroll(b, 'k' + rmKid()); }
   if (S.scrollEp && r.name === 'detail' && r.id === S.scrollEp.kid) {  // з повідомлення: прокручуємо до нової серії, але не вмикаємо її
     const q = S.scrollEp; S.scrollEp = null;
     setTimeout(() => {
@@ -11527,7 +11543,7 @@ function detailHTML(id) {
   </div>
   <h3 class="sec">Серії</h3>
   ${sm ? `<p class="hint"${sel ? ' style="display:none"' : ''}>Торкайтесь серій, щоб вибрати кілька. Серію можна також утримати пальцем.</p>` : ''}
-  ${eps ? `<div class="${cardsMode ? 'epgrid' : 'eps'}">${eps}</div>` : '<div class="eps"><div style="padding:18px;color:var(--mu)">Серій поки немає.</div></div>'}` : S.dtab === 'cm' ? commentsHTML(it) : relHTML(it)}
+  ${eps ? `<div class="epscr" id="epscr"><div class="${cardsMode ? 'epgrid' : 'eps'}">${eps}</div></div>` : '<div class="eps"><div style="padding:18px;color:var(--mu)">Серій поки немає.</div></div>'}` : S.dtab === 'cm' ? commentsHTML(it) : relHTML(it)}
   ${tmp ? '' : `<p style="text-align:center;color:var(--mu);font-size:12px;margin-top:14px">Остання перевірка: ${esc(it.checked || '—')}</p>`}
   </div></div>
   ${sel && onEps ? `<div class="dlbar">${dlbarInner(it)}</div><div class="dlsp" style="height:150px"></div>` : ''}`;
@@ -11797,7 +11813,7 @@ function renderSheet() {
      <button data-act="rsshare">${ico('share')} Поділитись</button>
      <button data-act="rslib" data-lp="gpick" data-m="lib">${ico('plus')} Додати в Бібліотеку</button>
      <button data-act="rsseen" data-lp="gpick" data-m="seen">${ico('check')} Додати в Переглянуте</button>
-     ${castTargets().length ? `<button data-act="rscast">${ico('cast')} Відкрити на іншому пристрої</button>` : ''}</div>
+     ${castTargets().length ? `<button data-act="rscast">${ico('xfer')} Відкрити на іншому пристрої</button>` : ''}</div>
      <p class="hint" style="margin:8px 4px 0;font-size:12px">Затисніть «Бібліотеку» чи «Переглянуте», щоб додати до наявної групи.</p>`;
   else if (s.kind === 'dmenu') inner = dmenuHTML(s);
   else if (s.kind === 'cast') inner = `<h3>Перекинути на…</h3><div class="cm">${((S.sync && S.sync.peers) || []).map(p => `<button data-act="castgo" data-id="${esc(p.id)}" ${p.online ? '' : 'disabled'}>${dico(p.kind)} ${esc(p.name)} <span class="d" style="margin-left:auto">${p.online ? 'онлайн' : 'офлайн'}</span></button>`).join('')}</div>`;
@@ -11809,7 +11825,7 @@ function renderSheet() {
      <button class="dng" data-act="gmdel" data-g="${esc(s.gid)}">${ico('trash')} Видалити</button></div>`; }
   else if (s.kind === 'cmenu') { const it = item(s.id) || {}; inner = `<h3>${esc(lname(it))}</h3><div class="cm">
      <button data-act="cmshare" data-id="${s.id}">${ico('share')} Поділитись</button>
-     ${castTargets().length ? `<button data-act="cmcast">${ico('cast')} Відкрити на іншому пристрої</button>` : ''}
+     ${castTargets().length ? `<button data-act="cmcast">${ico('xfer')} Відкрити на іншому пристрої</button>` : ''}
      <button data-act="cmrename" data-id="${s.id}">${ico('edit')} Перейменувати</button>
      <button data-act="cmarc" data-lp="gpick" data-id="${s.id}">${ico(it.archived ? 'refresh' : 'check')} ${it.archived ? 'У бібліотеку' : 'У переглянуте'}</button>
      ${it.group ? '' : `<button data-act="cmgroup" data-id="${s.id}">${ico('plus')} Створити групу</button>`}
@@ -13160,7 +13176,7 @@ document.addEventListener('change', ev => {
   if (ev.target.dataset && ev.target.dataset.set) {
     setOpt(ev.target.dataset.set, ev.target.checked);
     if (ev.target.dataset.set === 'auto_check') { const sb = $('#acsub'); if (sb) sb.textContent = acSub(); setTimeout(pollAC, 600); }
-    if (ev.target.dataset.set === 'blur_thumbs') document.querySelectorAll('.ec .th img').forEach(i => i.classList.toggle('bl', ev.target.checked));
+    if (ev.target.dataset.set === 'blur_thumbs') document.querySelectorAll('.ec .th img, .rme .thi').forEach(i => i.classList.toggle('bl', ev.target.checked));
     if (ev.target.dataset.set === 'auto_next') { const c = $('#pauto'); if (c) c.checked = ev.target.checked; }
     if (ev.target.dataset.set === 'ios_player') applyPlayerMode();
   }
@@ -13653,7 +13669,7 @@ function devBody() {
   h += `<button class="btn pri dvadd" data-act="pairopen">${ico('plus')} Додати пристрій</button>`;
   if (nP) {
     h += '<div class="dvsec">Можливості</div>';
-    h += `<label class="dvcard dvsw"><div class="dvic ft">${ico('cast')}</div><div class="tx"><b>Передача між пристроями</b><span class="d">Перекидайте вкладку, серію з поточного моменту, пошук і прокрутку на інший пристрій. Увімкніть на обох.</span></div><span class="sw"><input type="checkbox" id="hosw" ${y.handoff_on ? 'checked' : ''}></span></label>`;
+    h += `<label class="dvcard dvsw"><div class="dvic ft">${ico('xfer')}</div><div class="tx"><b>Передача між пристроями</b><span class="d">Перекидайте вкладку, серію з поточного моменту, пошук і прокрутку на інший пристрій. Увімкніть на обох.</span></div><span class="sw"><input type="checkbox" id="hosw" ${y.handoff_on ? 'checked' : ''}></span></label>`;
     h += dvxHTML('sync', 'refresh', 'Синхронізація', 'Бібліотека, перегляд, позиція, архів і видалення. Увімкніть на обох.', 'sysw', y.sync, [
       ['sy_view', 'Вид бібліотеки', y.sync_view, 'Сортування, групи й вигляд карток'],
       ['sy_player', 'Налаштування плеєра', y.sync_player, 'Автопропуск, автоперехід, гучність'],
@@ -13789,7 +13805,9 @@ setInterval(() => {
   if (document.hidden) return;
   if (S.sync && ((S.sync.peers && S.sync.peers.length) || /^#\/devices/.test(location.hash))) syncFetch();
 }, 2500);
-document.addEventListener('visibilitychange', () => { if (!document.hidden && S.sync && S.sync.sync) api('/api/sync_now', {}).catch(() => {}); });
+const peersWake = () => { api('/api/sync_now', {}).catch(() => {}); [1500, 4500].forEach(t => setTimeout(() => { try { syncFetch(); } catch (e) {} }, t)); };
+document.addEventListener('visibilitychange', () => { if (!document.hidden) peersWake(); });
+window.addEventListener('pageshow', peersWake); window.addEventListener('focus', peersWake);
 
 // ───────── Перекидання сеансу й пульт ─────────
 function onlinePeers() { return ((S.sync && S.sync.peers) || []).filter(p => p.online); }
@@ -13822,7 +13840,9 @@ async function throwTo(pid, mode, extra) {
     await api('/api/sync_cast', b);
     gpHaptic();
     fxRun('out');
-    if (S.cur) { blurSwap(() => { closePlayer(); if (mode === 'cast' && S.sync && S.sync.rc_out_on) rcStart(pid); }); }
+    const toRemote = mode === 'cast' && S.sync && S.sync.rc_out_on && (S.cur || b.play);  // самі передали відтворення — відкриваємо вкладку пульта
+    if (S.cur) { blurSwap(() => { closePlayer(); if (toRemote) { rcStart(pid); S.rm.manual = false; S.rm.pend = null; location.hash = '#/remote'; } }); }
+    else if (toRemote) { rcStart(pid); S.rm.manual = false; location.hash = '#/remote'; }
   } catch (e) { toast(e.message, true); }
 }
 async function applyHandoff(h) {
@@ -14041,8 +14061,8 @@ function rmEps() {
   const q = it.meta && it.meta.poster;
   return (it.episodes || []).map((e, i) => {
     const cur = st.id === it.id && String(st.ep) === String(e.n), pend = S.rm.pend && S.rm.pend.kid === it.id && String(S.rm.pend.n) === String(e.n);
-    const bgs = e.th ? `url('/thumb/${it.id}/${encodeURIComponent(e.n)}?v=${e.downloaded ? 1 : 0}')` : '';  // немає обкладинки серії — порожній фон
-    return `<button class="rme${cur ? ' cur' : ''}${e.watched ? ' w' : ''}${pend ? ' pend' : ''}" data-act="rmep" data-n="${esc(e.n)}" style="--i:${Math.min(i, 10)}"><div class="th"${bgs ? ` style="background-image:${bgs}"` : ''}><span class="num">${esc(e.n)}</span>${cur ? `<span class="eq">${ico('play')} Грає</span>` : pend ? `<span class="eq">${ico('spinner')}</span>` : ''}${e.new ? '<span class="nw">нова</span>' : ''}${e.pos > 5 && !e.watched ? `<span class="rs">${ico('clock')}${fmtT(e.pos)}</span>` : ''}</div><div class="n">Серія ${esc(e.n)}${e.watched ? `<span class="wk" title="Переглянуто">${ico('check')}</span>` : ''}</div>${e.title ? `<div class="tt">${esc(e.title)}</div>` : ''}</button>`;
+    const thi = e.th ? `<div class="thi${S.set.blur_thumbs ? ' bl' : ''}" style="background-image:url('/thumb/${it.id}/${encodeURIComponent(e.n)}?v=${e.downloaded ? 1 : 0}')"></div>` : '';  // немає обкладинки серії — порожній фон
+    return `<button class="rme${cur ? ' cur' : ''}${e.watched ? ' w' : ''}${pend ? ' pend' : ''}" data-act="rmep" data-n="${esc(e.n)}" style="--i:${Math.min(i, 10)}"><div class="th">${thi}<span class="num">${esc(e.n)}</span>${cur ? `<span class="eq">${ico('play')} Грає</span>` : pend ? `<span class="eq">${ico('spinner')}</span>` : ''}${e.new ? '<span class="nw">нова</span>' : ''}${e.pos > 5 && !e.watched ? `<span class="rs">${ico('clock')}${fmtT(e.pos)}</span>` : ''}</div><div class="n">Серія ${esc(e.n)}${e.watched ? `<span class="wk" title="Переглянуто">${ico('check')}</span>` : ''}</div>${e.title ? `<div class="tt">${esc(e.title)}</div>` : ''}</button>`;
   }).join('');
 }
 function rmBody() {
@@ -14078,6 +14098,19 @@ function rmBody() {
 function rmPaintEps() {
   const h = $('#rmeh'), e = $('#rmeps'); if (!h || !e) return;
   RC.eKid = rmKid(); h.innerHTML = rmEpsHead(); e.classList.remove('in'); e.innerHTML = rmEps(); void e.offsetWidth; e.classList.add('in');
+  epAutoScroll(e, 'k' + rmKid() + '|' + Date.now(), true);
+}
+function epAutoScroll(box, key, force) {  // відкрили список — показуємо місце, де зупинились: наступна непереглянута біля центру; усе переглянуто — хвіст списку
+  if (!box || (!force && box._k === key)) return;
+  box._k = key;
+  const run = () => {
+    const els = [...box.querySelectorAll('[data-n]')]; if (!els.length || !box.clientHeight) return;
+    let lw = -1; els.forEach((x, i) => { if (x.classList.contains('w')) lw = i; });
+    if (lw >= els.length - 1) { box.scrollTop = box.scrollHeight; return; }
+    const t = els[lw + 1];
+    box.scrollTop = Math.max(0, t.offsetTop - (box.clientHeight - t.offsetHeight) / 2);
+  };
+  requestAnimationFrame(run); setTimeout(run, 250);
 }
 function rmPaintStrip(keepScroll) {
   const s = $('#rmstrip'), sb = $('#rmsub'); if (!s) return;
@@ -14095,8 +14128,9 @@ function renderRm(full) {  // full — перемалювати все; інак
   const b = $('#rmbox'); if (!b || route().name !== 'remote') return;
   const first = !b.querySelector('#rmlist') || !b.querySelector('#rmnow') !== !RC.pid;
   if (full || first) {
-    const y = window.scrollY, sl = b.querySelector('#rmstrip'), x = sl ? sl.scrollLeft : 0;
+    const y = window.scrollY, sl = b.querySelector('#rmstrip'), x = sl ? sl.scrollLeft : 0, oe = b.querySelector('#rmeps'), ost = oe ? oe.scrollTop : 0, ok = oe ? oe._k : null;
     b.innerHTML = rmBody(); RC.eKid = rmKid();
+    { const ne = b.querySelector('#rmeps'); if (ne) { if (ok != null) { ne._k = ok; ne.scrollTop = ost; } else epAutoScroll(ne, 'k' + rmKid()); } }
     const n = b.querySelector('#rmstrip'); if (n) { n.scrollLeft = x; const c = n.querySelector('.rma.on'); if (c && !x) n.scrollLeft = Math.max(0, c.offsetLeft - 16); }
     window.scrollTo(0, y); rmScrollChk();
   } else { rmMarkStrip(); rmPaintEps(); }
