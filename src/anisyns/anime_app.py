@@ -3008,10 +3008,7 @@ _ANIMRU_JUNK = re.compile(r'плейлист|плей-лист|playlist|обло
 def _animru_junk(raw):
   """Не-аніме записи Anim-RU (плейлисти, обкладинки, добірки): справжні мають рік у дужках або «[серії]» у назві."""
   raw = raw or ''
-  info = re.search(r'\[[^\]]*\]', raw) or re.search(r'\(\d{4}\)', raw)
-  if _ANIMRU_JUNK.search(raw) and not re.search(r'\[\s*\d', raw):
-    return True
-  return not info
+  return bool(_ANIMRU_JUNK.search(raw) and not re.search(r'\[\s*\d', raw))
 
 
 def _search_animru(q):
@@ -3604,45 +3601,73 @@ def _browse_vost(page, hosts=('animevost.org', 'v14.vost.pw', 'vost.pw'), uas=(M
   raise last or RuntimeError('AnimeVost не відповідає')
 
 
+_ANIMRU_NEXT = {}
+
+
+def _animru_poster(blk, base):
+  """Постер картки: перевага картинкам із /uploads/ (не іконки/значки), інакше перша придатна."""
+  best = None
+  for m in re.finditer(r'<img\b([^>]*)>', blk or '', re.I):
+    one = _best_img('<img ' + m.group(1) + '>', base)
+    if not one:
+      continue
+    if re.search(r'/uploads/|/posts/|/poster', one, re.I):
+      return one
+    best = best or one
+  return best
+
+
 def _browse_animru(page):
   last = None
   for host in ('anim-ru.net',):
-    try:
-      path = '/novinki-anime-sdg3j34b6jd/' + (f'page/{page}/' if page > 1 else '')
-      r = http_get(f'https://{host}{path}', headers=HEADERS, timeout=14, retries=0)
-      if r.status_code != 200:
-        last = RuntimeError(f'HTTP {r.status_code}')
-        continue
-      html = _utf(r)
-      out = []
-      blks = re.findall(r'<article class="dddewtwettwe">.*?</article>', html, re.S)
-      nblk = 0
-      for blk in blks:
-        a = re.search(r'<a href="(/[^"]+\.html)"', blk)
-        h = re.search(r'<h3[^>]*>(.*?)</h3>', blk, re.S)
-        if not a or not h:
+    base = f'https://{host}'
+    path = '/novinki-anime-sdg3j34b6jd/' + (f'page/{page}/' if page > 1 else '')
+    urls = [base + path]
+    nx = _ANIMRU_NEXT.get(page)
+    if nx and nx not in urls:
+      urls.insert(0, nx)
+    if page > 1:
+      urls.append(f'{base}/novinki-anime-sdg3j34b6jd/?cstart={page}')
+    for url in urls:
+      try:
+        r = http_get(url, headers={**HEADERS, 'Referer': base + '/'}, timeout=14, retries=1)
+        if r.status_code != 200:
+          last = RuntimeError(f'HTTP {r.status_code}')
           continue
-        raw = _text(h.group(1))
-        if _animru_junk(raw):
+        html = _utf(r)
+        blks = re.findall(r'<article class="dddewtwettwe">.*?</article>', html, re.S) or re.findall(r'<article\b[^>]*>.*?</article>', html, re.S)
+        out = []
+        nblk = 0
+        for blk in blks:
+          a = re.search(r'<a [^>]*?href="((?:https?://[^/"]*anim-ru[^/"]*)?/[^"]+\.html)"', blk)
+          h = re.search(r'<h[2-4][^>]*>(.*?)</h[2-4]>', blk, re.S)
+          if not a or not h:
+            continue
+          raw = _text(h.group(1))
           nblk += 1
+          if _animru_junk(raw):
+            continue
+          inf = re.search(r'\[([^\]]*)\]', raw)
+          yr = re.search(r'\((\d{4})\)', raw)
+          t = re.sub(r'\s*\[[^\]]*\]|\s*\(\d{4}\)', '', raw).strip()
+          out.append(_bi(t or raw, _abs(base + '/', a.group(1)), _animru_poster(blk, base + '/'), int(yr.group(1)) if yr else None, '', None, inf.group(1).strip() if inf else ''))
+        for m in re.finditer(r'href="([^"]*?/page/(\d+)/?[^"]*)"', html):  # справжні адреси наступних сторінок (пагінація може відрізнятись від типової)
+          _ANIMRU_NEXT[int(m.group(2))] = _abs(base + '/', m.group(1))
+        if not out:
+          if page > 1 and not blks:  # кінець каталогу, а не збій
+            last = RuntimeError('порожня сторінка')
+            continue
+          if nblk:  # на сторінці самі не-аніме записи — йдемо далі
+            return [], True
+          last = RuntimeError('сторінка без карток')
           continue
-        inf = re.search(r'\[([^\]]*)\]', raw)
-        yr = re.search(r'\((\d{4})\)', raw)
-        t = re.sub(r'\s*\[[^\]]*\]|\s*\(\d{4}\)', '', raw).strip()
-        out.append(_bi(t or raw, f'https://{host}' + a.group(1), _best_img(blk, f'https://{host}/'), int(yr.group(1)) if yr else None, '', None, inf.group(1).strip() if inf else ''))
-      if not out:
-        if page > 1 and not blks:  # кінець каталогу, а не збій
-          return [], False
-        if blks:  # на сторінці самі не-аніме записи — йдемо далі
-          return [], True
-        last = RuntimeError('сторінка без карток')
-        continue
-      # далі: є посилання на наступну сторінку, або сторінка повна (пагінація DLE буває нестандартною)
-      return out, bool(re.search(r'/page/%d/' % (page + 1), html)) or len(blks) >= 8
-    except Cancelled:
-      raise
-    except Exception as ex:
-      last = ex
+        return out, bool(_ANIMRU_NEXT.get(page + 1)) or len(blks) >= 6
+      except Cancelled:
+        raise
+      except Exception as ex:
+        last = ex
+    if page > 1 and isinstance(last, RuntimeError) and str(last) == 'порожня сторінка':
+      return [], False
   raise last or RuntimeError('Anim-RU не відповідає')
 
 
@@ -7099,6 +7124,7 @@ class Handler(BaseHTTPRequestHandler):
           '/api/sync_cast': lambda: api_sync_cast(b.get('peer'), b),
           '/api/sync_rc': lambda: api_sync_rc(b.get('peer'), b.get('c'), b.get('v')),
           '/api/sync_pstate': lambda: api_sync_pstate(b.get('peer')),
+          '/api/sync_pdl': lambda: api_sync_pdl(b.get('peer'), b.get('kid')),
           '/api/sync_ack': lambda: api_sync_ack(b.get('hid')),
           '/api/pstate': lambda: api_pstate(b),
           '/api/sync_dl': lambda: api_sync_dl(b.get('peer'), b.get('id'), b.get('episodes'), b.get('quality')),
@@ -8830,12 +8856,28 @@ def _sync_command(body, pid=None):
                        'scroll': body.get('scroll') or 0, 'search': body.get('search') or '', 'play': body.get('play'), 'open': body.get('open'), 'mode': body.get('mode'),
                        'ts': time.time()}
     return {'ok': True}
+  if body.get('type') == 'pdl':
+    try:
+      key, e = _find(str(body.get('kid') or ''))
+    except KeyError:
+      return {'ok': True, 'have': False, 'eps': {}}
+    v = entry_view(key, e)
+    return {'ok': True, 'have': True, 'eps': {str(x['n']): (x.get('q') or '') for x in (v.get('episodes') or []) if x.get('downloaded')}}
   if body.get('type') == 'pstate':
     stt = dict(PLAYER['state'])
     if not (SETTINGS.get('rc') and SETTINGS.get('rc_in')):
       stt = {'on': False}
-    if time.time() - PLAYER['ts'] > 6:
-      stt = {'on': False}
+    age = time.time() - PLAYER['ts']
+    if age > 6:
+      if stt.get('on') and age < 180:  # плеєр мовчить (додаток згорнуто/перезавантажується) — тримаємо останній стан, щоб пульт не «забував», що серія грала
+        stt['stale'] = True
+        if not stt.get('paused') and stt.get('t') is not None:
+          try:
+            stt['t'] = float(stt['t']) + age
+          except (TypeError, ValueError):
+            pass
+      else:
+        stt = {'on': False}
     return {'ok': True, 'state': stt}
   if body.get('type') == 'pcmd':
     if not (SETTINGS.get('rc') and SETTINGS.get('rc_in')):
@@ -9223,6 +9265,10 @@ def api_sync_rc(pid, c, v=None):
   return {'ok': True}
 
 
+def api_sync_pdl(pid, kid):
+  return _peer_cmd(pid, {'type': 'pdl', 'kid': str(kid or '')}, 6)
+
+
 def api_sync_pstate(pid):
   return _peer_cmd(pid, {'type': 'pstate'}, 6)
 
@@ -9465,7 +9511,7 @@ button{cursor:pointer}
 
 /* ---------- вкладки й мережа ---------- */
 body{padding-bottom:calc(84px + var(--bot))}
-#tabs{position:fixed;left:0;right:0;bottom:0;z-index:25;display:flex;padding:6px 6px calc(6px + var(--bot));
+#tabs{position:fixed;left:0;right:0;bottom:0;z-index:25;transform:translateZ(0);-webkit-backface-visibility:hidden;backface-visibility:hidden;display:flex;padding:6px 6px calc(6px + var(--bot));
   background:rgba(13,14,19,.9);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid #ffffff12}
 #tabs a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;font-size:11px;color:var(--mu);border-radius:12px}
 #tabs a .i{width:24px;height:24px}
@@ -9564,39 +9610,39 @@ body.thz,body.thz *,body.armed,body.armed *{-webkit-user-select:none!important;u
 #fx{position:fixed;inset:0;z-index:99990;pointer-events:none;overflow:hidden}
 #fx .fxg{position:absolute;left:-15%;right:-15%;top:-40px;height:260px;background:radial-gradient(ellipse at 50% 0,rgba(124,108,255,.9),rgba(76,150,255,.4) 42%,transparent 72%);opacity:0;filter:blur(4px)}
 #fx.arm .fxg{animation:fxPulse 1s ease-in-out infinite alternate}
-#fx.out .fxg,#fx.in .fxg{animation:fxFlash 1.5s ease-out forwards}
+#fx.k-out .fxg,#fx.k-in .fxg{animation:fxFlash 1.5s ease-out forwards}
 #fx .fxb{position:absolute;border-radius:12px;background:linear-gradient(145deg,#8b7bff,#4c96ff);box-shadow:0 10px 28px #5b4cff77;opacity:0}
-#fx.out .fxb{animation:fxUp .95s cubic-bezier(.4,0,.2,1) forwards}
-#fx.in .fxb{animation:fxDown 1.05s cubic-bezier(.2,.9,.25,1) forwards}
+#fx.k-out .fxb{animation:fxUp .95s cubic-bezier(.4,0,.2,1) forwards}
+#fx.k-in .fxb{animation:fxDown 1.05s cubic-bezier(.2,.9,.25,1) forwards}
 @keyframes fxPulse{from{opacity:.45}to{opacity:.95}}
 @keyframes fxFlash{0%{opacity:0}18%{opacity:1}100%{opacity:0}}
 @keyframes fxUp{0%{opacity:0;transform:translateY(20px) scale(.6)}15%{opacity:1}100%{opacity:0;transform:translateY(-95vh) scale(.9) rotate(var(--r))}}
 @keyframes fxDown{0%{opacity:0;transform:translateY(-70vh) scale(.5) rotate(var(--r))}30%{opacity:1}100%{opacity:0;transform:translateY(var(--ty)) scale(1) rotate(0)}}
+#fxs{position:fixed;inset:0;z-index:99984;overflow:hidden;pointer-events:none;background:var(--bg);opacity:1;transition:opacity .55s ease}
+#fxs.gone{opacity:0}
+#fxs .fxs-in{position:absolute;inset:0;filter:blur(0px) brightness(1);transition:filter .45s ease}
+#fxs.on .fxs-in{filter:blur(18px) brightness(.78) saturate(1.2)}
+#fxs .fxs-sc{position:absolute;inset:0;overflow:hidden;box-sizing:border-box}
+#fxs .fxs-in *{animation:none!important;transition:none!important}
+body.fxl #root,body.fxl #tabs{filter:blur(16px) brightness(.8);transition:none}
+body.fxo #root,body.fxo #tabs{transition:filter .75s ease}
 #fxv{position:fixed;inset:0;z-index:99985;pointer-events:none;opacity:0;background:rgba(14,15,30,.3);-webkit-backdrop-filter:blur(0px);backdrop-filter:blur(0px);transition:opacity .35s ease,-webkit-backdrop-filter .4s ease,backdrop-filter .4s ease}
 #fxv.on{opacity:1;-webkit-backdrop-filter:blur(20px) saturate(1.2);backdrop-filter:blur(20px) saturate(1.2)}
 #fxv.on.lite{background:rgba(14,15,30,.14);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
-#fx .vxc{position:absolute;left:50%;top:46%;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;background:radial-gradient(circle,#fff 0,#a99cff 35%,transparent 70%);box-shadow:0 0 50px 20px #7c6cffaa;opacity:0}
-#fx.s-vortex.out .vxc{animation:vxcA 1.9s ease both}#fx.s-vortex.in .vxc{animation:vxcB 1.9s ease both}
-@keyframes vxcA{0%{opacity:0;transform:scale(0)}25%{opacity:1;transform:scale(1.2)}80%{opacity:1;transform:scale(1.6)}100%{opacity:0;transform:scale(.2)}}
-@keyframes vxcB{0%{opacity:0;transform:scale(.2)}10%{opacity:1;transform:scale(1.8)}55%{opacity:.9;transform:scale(1)}100%{opacity:0;transform:scale(0)}}
 #fx .vxw{position:absolute;left:50%;top:46%;width:0;height:0;opacity:0}
 #fx .vxb{position:absolute;left:0;top:0;border-radius:12px;background:linear-gradient(145deg,#8b7bff,#4c96ff);box-shadow:0 8px 24px #5b4cff77;opacity:0}
-#fx.s-vortex.out .vxw{animation:vxSO 1.45s cubic-bezier(.5,0,.75,.45) var(--d) both}#fx.s-vortex.out .vxb{animation:vxRO 1.45s cubic-bezier(.5,0,.75,.45) var(--d) both}
-#fx.s-vortex.in .vxw{animation:vxSI 1.5s cubic-bezier(.2,.6,.3,1) var(--d) both}#fx.s-vortex.in .vxb{animation:vxRI 1.5s cubic-bezier(.2,.6,.3,1) var(--d) both}
+#fx.s-vortex.k-out .vxw{animation:vxSO 1.45s cubic-bezier(.5,0,.75,.45) var(--d) both}#fx.s-vortex.k-out .vxb{animation:vxRO 1.45s cubic-bezier(.5,0,.75,.45) var(--d) both}
+#fx.s-vortex.k-in .vxw{animation:vxSI 1.5s cubic-bezier(.2,.6,.3,1) var(--d) both}#fx.s-vortex.k-in .vxb{animation:vxRI 1.5s cubic-bezier(.2,.6,.3,1) var(--d) both}
 @keyframes vxSO{from{transform:rotate(var(--a));opacity:1}to{transform:rotate(calc(var(--a) + 600deg));opacity:1}}
 @keyframes vxRO{0%{transform:translate(calc(var(--rad)*1.6vmin),0) scale(1);opacity:0}12%{opacity:1}85%{opacity:1}100%{transform:translate(0,0) scale(.04);opacity:0}}
 @keyframes vxSI{from{transform:rotate(calc(var(--a) + 600deg));opacity:1}to{transform:rotate(var(--a));opacity:1}}
 @keyframes vxRI{0%{transform:translate(0,0) scale(.04);opacity:0}12%{opacity:1}70%{opacity:1}100%{transform:translate(calc(var(--rad)*1.6vmin),0) scale(1);opacity:0}}
-#fx .edf,#fx .edw{position:absolute;opacity:0}
-#fx .edf{inset:0;border-radius:46px;box-shadow:inset 0 0 0 3px rgba(165,150,255,.95),inset 0 0 26px 5px rgba(124,108,255,.9),inset 0 0 100px 12px rgba(76,150,255,.5)}
-#fx .edw{left:-10%;right:-10%;bottom:0;height:46%;background:linear-gradient(to top,transparent,rgba(124,108,255,.6) 40%,rgba(120,190,255,.45) 62%,transparent);filter:blur(14px)}
-#fx.s-edge.out .edf{animation:edfO 1.7s ease both}#fx.s-edge.out .edw{animation:edwO 1.5s cubic-bezier(.4,0,.6,1) .1s both}
-#fx.s-edge.in .edf{animation:edfI 1.7s ease both}#fx.s-edge.in .edw{animation:edwI 1.5s cubic-bezier(.4,0,.6,1) .1s both}
-@keyframes edfO{0%{opacity:0;clip-path:inset(0)}18%{opacity:1;clip-path:inset(0)}50%{opacity:1;clip-path:inset(0)}100%{opacity:0;clip-path:inset(0 0 100% 0)}}
-@keyframes edwO{0%{opacity:0;transform:translateY(40%)}20%{opacity:1}100%{opacity:0;transform:translateY(-230%)}}
-@keyframes edfI{0%{opacity:0;clip-path:inset(0 0 100% 0)}22%{opacity:1;clip-path:inset(0 0 55% 0)}55%{opacity:1;clip-path:inset(0)}100%{opacity:0;clip-path:inset(0)}}
-@keyframes edwI{0%{opacity:0;transform:translateY(-230%)}20%{opacity:1}100%{opacity:0;transform:translateY(40%)}}
-#fx.fail .edf{box-shadow:inset 0 0 0 3px rgba(255,92,108,.98),inset 0 0 28px 6px rgba(255,60,80,.95),inset 0 0 110px 16px rgba(255,40,70,.55);animation:edfF 1.2s ease both}#fx.fail .edw{display:none}
+#fx .edf{position:absolute;inset:0;border-radius:46px;opacity:0}
+#fx.s-edge.k-out .edf{animation:edfO 1.8s ease-in both}
+#fx.s-edge.k-in .edf{animation:edfI 1.8s ease-out both}
+@keyframes edfO{0%{opacity:0;box-shadow:inset 0 0 0 2px rgba(190,178,255,0.55),inset 0 0 8px 1px rgba(124,108,255,0.45),inset 0 0 30px 6px rgba(76,150,255,0.15)}62%{opacity:1;box-shadow:inset 0 0 0 4px rgba(190,178,255,1),inset 0 0 44px 12px rgba(124,108,255,1),inset 0 0 190px 38px rgba(76,150,255,0.8)}100%{opacity:0;box-shadow:inset 0 0 0 4px rgba(190,178,255,1),inset 0 0 44px 12px rgba(124,108,255,1),inset 0 0 190px 38px rgba(76,150,255,0.8)}}
+@keyframes edfI{0%{opacity:0;box-shadow:inset 0 0 0 4px rgba(190,178,255,1),inset 0 0 44px 12px rgba(124,108,255,1),inset 0 0 190px 38px rgba(76,150,255,0.8)}22%{opacity:1;box-shadow:inset 0 0 0 4px rgba(190,178,255,1),inset 0 0 44px 12px rgba(124,108,255,1),inset 0 0 190px 38px rgba(76,150,255,0.8)}100%{opacity:0;box-shadow:inset 0 0 0 2px rgba(190,178,255,0.55),inset 0 0 8px 1px rgba(124,108,255,0.45),inset 0 0 30px 6px rgba(76,150,255,0.15)}}
+#fx.k-fail .edf{opacity:0;box-shadow:inset 0 0 0 3px rgba(255,92,108,.98),inset 0 0 28px 6px rgba(255,60,80,.95),inset 0 0 110px 16px rgba(255,40,70,.55);animation:edfF 1.2s ease both}
 @keyframes edfF{0%{opacity:0}15%{opacity:1}35%{opacity:.3}55%{opacity:1}100%{opacity:0}}
 .fxtiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:6px 0 4px}
 .fxt{border:2px solid transparent;background:var(--s1);border-radius:18px;padding:8px 8px 10px;color:var(--mu);font-weight:650;font-size:13px;display:flex;flex-direction:column;gap:8px;align-items:stretch;text-align:center}
@@ -9605,16 +9651,12 @@ body.thz,body.thz *,body.armed,body.armed *{-webkit-user-select:none!important;u
 .fxm .mb{position:absolute;bottom:-40%;width:26%;height:34%;border-radius:6px;background:linear-gradient(145deg,#8b7bff,#4c96ff);animation:mbUp 2s ease-in infinite;opacity:0}
 .fxm .m1{left:10%}.fxm .m2{left:38%;animation-delay:.35s}.fxm .m3{left:66%;animation-delay:.7s}
 @keyframes mbUp{0%{transform:translateY(0);opacity:0}15%{opacity:1}100%{transform:translateY(-340%);opacity:0}}
-.fxm .mc{position:absolute;left:50%;top:48%;width:14px;height:14px;margin:-7px;border-radius:50%;background:radial-gradient(circle,#fff,#8b7bff 50%,transparent 72%);box-shadow:0 0 16px 6px #7c6cffaa;animation:mcP 2.2s ease-in-out infinite}
-@keyframes mcP{0%,100%{transform:scale(.6);opacity:.6}60%{transform:scale(1.3);opacity:1}}
 .fxm .mw{position:absolute;left:50%;top:48%;width:0;height:0;animation:mwS 2.2s cubic-bezier(.5,0,.75,.45) infinite}
 .fxm .mv{position:absolute;left:0;top:0;width:16px;height:22px;margin:-11px 0 0 -8px;border-radius:5px;background:linear-gradient(145deg,#8b7bff,#4c96ff);animation:mvR 2.2s cubic-bezier(.5,0,.75,.45) infinite;opacity:0}
 @keyframes mwS{from{transform:rotate(var(--a))}to{transform:rotate(calc(var(--a) + 480deg))}}
 @keyframes mvR{0%{transform:translate(32px,0) scale(1);opacity:0}15%{opacity:1}85%{opacity:1}100%{transform:translate(0,0) scale(.1);opacity:0}}
 .fxm .mf{position:absolute;inset:0;border-radius:12px;box-shadow:inset 0 0 0 2px #a596ff,inset 0 0 14px 3px #7c6cffcc;animation:mfP 2.2s ease-in-out infinite}
-@keyframes mfP{0%,100%{opacity:.35}50%{opacity:1}}
-.fxm .mx{position:absolute;left:-10%;right:-10%;bottom:0;height:42%;background:linear-gradient(to top,transparent,#7c6cff99 45%,#78beff66 65%,transparent);filter:blur(6px);animation:mxU 2.2s ease-in-out infinite}
-@keyframes mxU{0%{transform:translateY(40%);opacity:0}25%{opacity:1}100%{transform:translateY(-240%);opacity:0}}
+@keyframes mfP{0%{opacity:.2;box-shadow:inset 0 0 0 1px #a596ff88,inset 0 0 4px 0 #7c6cff66}70%{opacity:1;box-shadow:inset 0 0 0 3px #c4baff,inset 0 0 20px 6px #7c6cff,inset 0 0 40px 10px #4c96ffaa}100%{opacity:.2;box-shadow:inset 0 0 0 1px #a596ff88,inset 0 0 4px 0 #7c6cff66}}
 #fxh{position:fixed;left:50%;top:calc(var(--top,0px) + 70px);transform:translate(-50%,-10px);z-index:99991;pointer-events:none;background:#1c1f2bee;border:1px solid #7c6cff88;color:#fff;font-weight:600;font-size:14px;line-height:1;padding:11px 16px;border-radius:999px;opacity:0;transition:all .2s;white-space:nowrap;box-shadow:0 8px 24px #000a}
 #fxh.on{opacity:1;transform:translate(-50%,0)}
 body.armed #root{animation:armW .16s linear infinite}
@@ -9691,7 +9733,7 @@ body.pl{overflow:hidden!important}
 .grp .row .sw input::after{width:24px;height:24px}
 .grp .row .sw input:checked::after{left:20px}
 /* ---------- верхня панель ---------- */
-.bar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:8px;
+.bar{position:sticky;top:0;z-index:20;transform:translateZ(0);-webkit-backface-visibility:hidden;backface-visibility:hidden;display:flex;align-items:center;gap:8px;
   padding:calc(10px + var(--top)) 14px 10px;background:rgba(13,14,19,.82);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d}
 html,body,#root{overflow-anchor:none}/* перемальовування списку (морфінг) не має зсувати прокрутку «якорем» браузера */
@@ -9896,11 +9938,10 @@ body.pressing,body.pressing *{-webkit-user-select:none!important;user-select:non
 .rc .rt{margin-top:6px;font-size:12.5px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .rc .rm{margin-top:2px;font-size:11px;color:var(--mu);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .epgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 12px}
-/* серії — окремий блок із власною прокруткою: сторінка не росте на сотні екранів, верх списку «ховається» під верхній блок */
-.epscr,.rmeps{position:relative;max-height:calc(100dvh - var(--tabh,90px) - 150px);min-height:min(300px,55dvh);overflow-y:auto;overflow-x:hidden;overscroll-behavior-y:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
-  -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 20px,#000 calc(100% - 26px),transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 20px,#000 calc(100% - 26px),transparent 100%);padding:18px 0 26px;margin-top:-10px}
-.epscr::-webkit-scrollbar,.rmeps::-webkit-scrollbar{display:none}
+/* серії — звичайна частина сторінки (одна прокрутка на весь екран, без вкладеного скролу) */
+.epscr,.rmeps{position:relative;padding:8px 0 24px}
 .epscr .ec,.epscr .ep,.epscr .erm{content-visibility:auto;contain-intrinsic-size:auto 190px}
+.epscr .pre,.rme.pre{content-visibility:visible!important}
 .epscr .ep{contain-intrinsic-size:auto 76px}
 @media(min-width:720px){.epgrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .ec{background:var(--s1);border-radius:16px;overflow:hidden;position:relative;transition:transform .15s,box-shadow .2s}
@@ -10217,7 +10258,8 @@ button:active,.card:active,.btn:active,.ib:active,#tabs a:active,.dchip:active{t
   .grid.c3 .card .t{font-size:13px}
   .set,.grp{margin-left:auto;margin-right:auto;max-width:760px}
   #root.settings-pg>*:not(.bar){max-width:760px;margin-left:auto;margin-right:auto}
-  .epgrid{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+  .epgrid{grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:14px}
+  .ec .nm{font-size:14px}
   .desc{font-size:15px}
 }
 @media (min-width:900px){
@@ -10285,6 +10327,7 @@ button:active,.card:active,.btn:active,.ib:active,#tabs a:active,.dchip:active{t
 .job .h .btn.jx{min-height:34px;min-width:34px;padding:0 9px;background:transparent;color:var(--mu)}.job .h .btn.jx.conf{background:#ff6b6b1f;color:var(--err);font-size:12.5px;font-weight:700}
 .toast{overflow-wrap:anywhere}
 html{-webkit-text-size-adjust:100%;overflow-x:hidden}
+html.lk{overflow:hidden!important}
 body{min-height:100vh;min-height:100dvh;-webkit-touch-callout:none}
 button,a,.card,.ep,.dchip,#tabs a{touch-action:manipulation;-webkit-user-select:none;user-select:none}
 input,select,textarea{font-size:16px}
@@ -10420,8 +10463,8 @@ body.rmpg #rcbar{display:none!important}
 .rme{background:none;border:0;color:inherit;text-align:left;padding:0;min-width:0;content-visibility:auto;contain-intrinsic-size:auto 150px}
 .rme .th{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:transparent;border:0;transition:transform .14s}
 .rme .th::before{content:"";position:absolute;inset:0;border-radius:inherit;border:2px solid transparent;pointer-events:none;z-index:3;transition:border-color .18s}
-.rme .thi{position:absolute;inset:0;background-repeat:no-repeat;background-size:cover;background-position:center;transition:filter .3s}
-.rme:not(.w) .thi.bl{filter:blur(5px);transform:scale(1.08)}
+.rme .thi{position:absolute;inset:0;background-repeat:no-repeat;background-size:cover;background-position:center}
+.rme:not(.w) .thi.bl{inset:-14px;filter:blur(5px)}
 .rme .th::after{content:"";position:absolute;inset:0;background:linear-gradient(to top,#000b 0%,#0000 55%);pointer-events:none}
 .rme .num{position:absolute;left:8px;bottom:6px;z-index:2;font-weight:800;font-size:17px;text-shadow:0 1px 6px #000}
 .rme .eq{position:absolute;z-index:2;right:6px;top:6px;max-width:calc(100% - 12px);white-space:nowrap;overflow:hidden;display:flex;align-items:center;gap:4px;background:var(--ac);color:#fff;border-radius:10px;padding:3px 8px;font-size:11.5px;font-weight:700}.rme .eq .i{width:12px;height:12px}
@@ -10433,12 +10476,12 @@ body.rmpg #rcbar{display:none!important}
 .erm .ck{position:absolute;z-index:4;left:8px;top:8px;width:24px;height:24px;border-radius:50%;border:2px solid #fff;background:#0008;display:grid;place-items:center;color:#fff}.erm.sel .ck{background:var(--ac);border-color:var(--ac)}.erm .ck .i{width:14px;height:14px;stroke-width:3}
 .erm .ers{display:flex;align-items:center;gap:6px;margin-top:5px;min-width:0}
 .erm .ei{flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;padding:0;border:0;background:#ffffff12;color:var(--mu)}.erm .ei .i{width:15px;height:15px}
-.erm .ei.on{background:#6d7dff26;color:#9aa8ff}.erm .ei.dl.on{background:#38d39f26;color:#38d39f}
+.erm .ei.on{background:#6d7dff26;color:#9aa8ff}.erm .ei.edl.on{background:#38d39f26;color:#38d39f}
 .erm .eqs{flex:1;min-width:0;font-size:11.5px;font-weight:600;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rme .n{font-size:13px;font-weight:650;margin-top:6px}.rme .tt{font-size:12px;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rme.cur .th::before{border-color:var(--ac)}.rme.w .th{opacity:.55}.rme.cur .th,.rme.pend .th{opacity:1}.rme:active .th{transform:scale(.97)}.rme.pend .th::before{border-color:var(--ac2,var(--ac))}
 .rme .eq .spin{animation:spin .8s linear infinite}
-.rme .wk{display:inline-grid;place-items:center;vertical-align:-3px;margin-left:7px;width:17px;height:17px;border-radius:50%;background:#6d7dff2e;color:#9aa8ff}.rme .wk .i{width:11px;height:11px;stroke-width:3}
+.rme .wk{display:inline-grid;place-items:center;vertical-align:-3px;margin-left:7px;width:17px;height:17px;border-radius:50%;background:#6d7dff2e;color:#9aa8ff}.rme .wk .i{width:11px;height:11px;stroke-width:2.4}
 .rcsw{position:relative;flex:1;min-width:0;display:flex;align-items:center}.rcsw input{width:100%;position:relative;z-index:1}
 .rcsk input[type=range],.rcvl input[type=range]{-webkit-appearance:none;appearance:none;height:30px;margin:0;background:transparent;touch-action:none;--p:0%;--b:0%;--os:0%;--oe:0%;--es:0%;--ee:0%}
 .rcsk input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(90deg,transparent var(--os),#ffb020 var(--os) var(--oe),transparent var(--oe)),linear-gradient(90deg,transparent var(--es),#38c6ff var(--es) var(--ee),transparent var(--ee)),linear-gradient(90deg,var(--ac) var(--p),#ffffff2e var(--p))}
@@ -10825,9 +10868,12 @@ document.addEventListener('pointerdown', ev => {  // перетягування 
 });
 /* кожна вкладка нижнього меню пам'ятає, де ви були (відкрите аніме в бібліотеці тощо) */
 const TABMEM = {};
-const tabOf = () => { const n = route().name; return n === 'detail' || n === 'group' ? 'home' : n === 'storage' ? 'settings' : n === 'remote' ? 'devices' : n; };
-TABMEM[tabOf()] = location.hash || '#/';
-window.addEventListener('hashchange', () => { TABMEM[tabOf()] = route().name === 'remote' ? '#/devices' : (location.hash || '#/'); });
+// аніме/група належить вкладці, з якої його відкрили (пошук, новинки…), а не завжди «Бібліотеці»
+const tabName = n => n === 'storage' ? 'settings' : n === 'remote' ? 'devices' : n;
+let CURTAB = (() => { const n = route().name; return n === 'detail' || n === 'group' ? 'home' : tabName(n); })();
+const tabOf = () => CURTAB;
+TABMEM[CURTAB] = location.hash || '#/';
+window.addEventListener('hashchange', () => { const n = route().name; if (n !== 'detail' && n !== 'group') CURTAB = tabName(n); TABMEM[CURTAB] = n === 'remote' ? '#/devices' : (location.hash || '#/'); });
 document.addEventListener('click', ev => {
   const a = ev.target.closest && ev.target.closest('#tabs a'); if (!a) return;
   const t = TABS.find(x => x[1] === a.getAttribute('href')); if (!t || t[0] === tabOf()) return;
@@ -11059,7 +11105,7 @@ function resHTML() {
     return `<div class="card sr" data-act="openres" data-g="${i}">
       <div class="poster">
         <span>${esc((title || '?')[0])}</span>
-        ${p ? `<img class="pi" decoding="async" alt="" data-o="${esc(p)}" data-s="/img?u=${encodeURIComponent(p)}" onload="this.classList.add('ld')" onerror="imgErr(this)">` : ''}
+        ${p ? `<img class="pi${pSeen(p)}" decoding="async" alt="" data-o="${esc(p)}" data-s="/img?u=${encodeURIComponent(p)}" onload="pLd(this)" onerror="imgErr(this)">` : ''}
         <div class="sicons">${its.map(x => siteIcon(x.site)).join('')}</div>
         ${inLib(its) ? `<span class="inlib">${ico('check')}У бібліотеці</span>` : ''}
         <div class="grad"></div>
@@ -11067,6 +11113,9 @@ function resHTML() {
       </div></div>`;
   }).join('') + `</div>` + (vis.length > lim ? `<div style="padding:4px 16px 24px"><button class="btn" style="width:100%" data-act="smore">Показати ще (${vis.length - lim})</button></div>` : '');
 }
+const P_OK = new Set();  // обкладинки, що вже показували: після перемикання вкладок вони з'являються одразу, без повторного «вигоряння» (блимання)
+const pSeen = u => P_OK.has(u) ? ' ld' : '';
+function pLd(el) { el.classList.add('ld'); if (el.dataset.o) { if (P_OK.size > 4000) P_OK.clear(); P_OK.add(el.dataset.o); } }
 function imgErr(el) {  // обкладинка не завантажилась (сервер ще качає з повільного сайту): повторюємо з паузами, потім напряму з сайту
   const st = Number(el.dataset.r || 0), o = el.dataset.o;
   el.dataset.r = st + 1;
@@ -11083,7 +11132,7 @@ const IMG_SET = new Set();
 setInterval(() => { for (const im of [...IMG_SET]) if (!im.isConnected) { if (IMG_IO) IMG_IO.unobserve(im); IMG_SET.delete(im); im.removeAttribute('src'); } }, 8000);  // чистимо картинки зі сторінок, яких уже немає
 const IMG_Q = [];
 function pumpImg() {  // не більше 4 картинок одночасно: з'єднань до локального сервера мало, і вони потрібні пошуку
-  while (IMG_ACT < 4 && IMG_Q.length) {
+  while (IMG_ACT < 6 && IMG_Q.length) {
     const im = IMG_Q.pop();  // найсвіжіші (ті, що зараз на екрані) — першими
     if (!im.isConnected || im.getAttribute('src') || !im.dataset.s || im.dataset.vis === '0') continue;
     IMG_ACT++;
@@ -11103,7 +11152,7 @@ function observeImgs() {  // картинки без src: вантажимо, к
     im.dataset.vis = en.isIntersecting ? '1' : '0';
     if (en.isIntersecting) { if (!im.getAttribute('src') && im.dataset.s) { IMG_Q.push(im); pumpImg(); } }
     else if (im.getAttribute('src') && im.classList.contains('ld')) { im.dataset.s = im.getAttribute('src'); im.classList.remove('ld'); im.removeAttribute('src'); }
-  }), {rootMargin: '600px 0px'});
+  }), {rootMargin: '1600px 0px'});
   imgs.forEach(im => { if (!im.dataset.io) { im.dataset.io = 1; IMG_IO.observe(im); IMG_SET.add(im); } });
 }
 function paintSearch(force) {
@@ -11129,12 +11178,25 @@ function nwHydrate(s) {  // показуємо останній відомий �
   const D = nwSD(s); if (D.hyd) return; D.hyd = true;
   try { const c = JSON.parse(localStorage.getItem('nwc_' + s) || 'null'); if (c && c.items && c.items.length) { D.items = c.items; D.page = 1; D.more = true; D.t = c.t || 0; D.stale = true; } } catch (e) {}
 }
-function nwKeys(x) {  // ключі для злиття однакових аніме з різних сайтів: усі назви/частини без дужок, років і службових слів
+const NW_ORD = {второй: 2, вторая: 2, второе: 2, третий: 3, третья: 3, третье: 3, четвертый: 4, четвертая: 4, пятый: 5, шестой: 6, седьмой: 7};
+function nwNorm(t) {  // назва → основа без сезону/частини/року + номер сезону («Голубая шкатулка (второй сезон)» = «Голубая шкатулка 2»)
+  const W = '(^|[^а-яa-z0-9])';  // \b у JS не працює з кирилицею
+  let b = String(t || '').toLowerCase().replace(/ё/g, 'е').replace(/\[[^\]]*\]/g, ' '), s = 0;
+  b = b.replace(new RegExp(W + '\\(?(второй|вторая|второе|третий|третья|третье|четвертый|четвертая|пятый|шестой|седьмой)\\s+сезон\\)?', 'g'), (m, p, w) => { s = NW_ORD[w]; return p + ' '; });
+  b = b.replace(new RegExp(W + '\\(?(\\d{1,2})\\s*-?\\s*(?:й|ый|ой|ий)?\\s*сезон\\)?', 'g'), (m, p, n) => { s = +n; return p + ' '; });
+  b = b.replace(new RegExp(W + '\\(?(?:сезон|season)\\s*(\\d{1,2})\\)?', 'g'), (m, p, n) => { s = +n; return p + ' '; });
+  b = b.replace(new RegExp(W + '\\(?(\\d{1,2})(?:nd|rd|th|st)?\\s*season\\)?', 'g'), (m, p, n) => { s = +n; return p + ' '; });
+  b = b.replace(new RegExp(W + '(?:часть|part|cour|ч\\.)\\s*\\d+', 'g'), '$1 ').replace(new RegExp(W + '\\d+\\s*часть', 'g'), '$1 ')
+       .replace(/\([^)]*\)/g, ' ').replace(new RegExp(W + '(tv|тв|ova|ona|ова|она)(?![а-яa-z0-9])', 'g'), '$1 ');
+  if (!s) { const m = b.match(/^(.*[^\d\s])\s*[.:!]?\s*(\d{1,2})\s*[.:!]?\s*$/); if (m) { b = m[1]; s = +m[2]; } }
+  return nwKey(b) + '#' + (s || 1);
+}
+function nwKeys(x) {  // ключі для злиття однакових аніме з різних сайтів
   const ks = new Set();
   [x.title, x.orig].forEach(t => {
     if (!t) return;
-    const base = String(t).replace(/\[[^\]]*\]|\([^)]*\)/g, ' ');
-    [t, base].concat(base.split(/\s*[\/|]\s*|\s[—–-]\s/)).forEach(p => { const k = nwKey(String(p).replace(/\b(tv|тв|ova|ona)\b/gi, ' ')); if (k.length >= 3) ks.add(k); });
+    const base = String(t).replace(/\[[^\]]*\]/g, ' ');
+    [base].concat(base.split(/\s*[\/|]\s*|\s[—–-]\s/)).forEach(p => { const k = nwNorm(p); if (k.split('#')[0].length >= 3) ks.add(k); });
   });
   return [...ks];
 }
@@ -11224,7 +11286,7 @@ function nwResHTML() {
     return `<div class="card sr" id="nc${nwHash(x.srcs ? x.srcs[0].url : x.url)}" data-act="bopen" data-i="${i}">
       <div class="poster">
         <span>${esc((x.title || '?')[0])}</span>
-        ${x.poster ? `<img class="pi" decoding="async" alt="" data-o="${esc(x.poster)}" data-s="/img?u=${encodeURIComponent(x.poster)}" onload="this.classList.add('ld')" onerror="imgErr(this)">` : ''}
+        ${x.poster ? `<img class="pi${pSeen(x.poster)}" decoding="async" alt="" data-o="${esc(x.poster)}" data-s="/img?u=${encodeURIComponent(x.poster)}" onload="pLd(this)" onerror="imgErr(this)">` : ''}
         <div class="sicons">${(x.sites || [x.site]).map(id => siteIcon({id, name: (SITE_LIST.find(y => y[0] === id) || [id, id])[1]})).join('')}</div>
         ${lib ? `<span class="inlib">${ico('check')}У бібліотеці</span>` : ''}
         <div class="grad"></div>
@@ -11982,7 +12044,7 @@ function epRmHTML(it, e, i) {  // «блоки як у пульті» + знач
       ${sm ? `<span class="ck">${sel ? ico('check') : ''}</span>` : e.new ? '<span class="nw">нова</span>' : ''}
       ${e.pos > 5 && !e.watched ? `<span class="rs">${ico('clock')}${fmtT(e.pos)}</span>` : ''}</div>
     <div class="n">Серія ${esc(e.n)}</div><div class="tt">${e.title ? esc(e.title) : '&nbsp;'}</div>
-    <div class="ers">${sm ? `<span class="ei${e.watched ? ' on' : ''}">${ico('eye')}</span>` : `<button class="ei${e.watched ? ' on' : ''}" data-act="watch" aria-label="Переглянуто">${ico('eye')}</button>`}<span class="ei dl${dl ? ' on' : ''}" title="${dl ? 'Скачано' : 'Не скачано'}">${ico(dl ? 'download' : 'cloud')}</span><span class="eqs">${esc(qt)}</span></div>
+    <div class="ers">${sm ? `<span class="ei${e.watched ? ' on' : ''}">${ico('eye')}</span>` : `<button class="ei${e.watched ? ' on' : ''}" data-act="watch" aria-label="Переглянуто">${ico('eye')}</button>`}<span class="ei edl${dl ? ' on' : ''}" title="${dl ? 'Скачано' : 'Не скачано'}">${ico(dl ? 'download' : 'cloud')}</span><span class="eqs">${esc(qt)}</span></div>
   </div>`;
 }
 function epHTML(it, e, i) {
@@ -12003,6 +12065,8 @@ function epHTML(it, e, i) {
 }
 
 /* ---------- шторки та діалоги ---------- */
+// блокуємо прокрутку через <html>, а не <body>: overflow на body робить його власним скрол-контейнером — липка верхня панель (.bar) тоді «зникала» при відкритті меню
+function lockScroll(on) { document.documentElement.classList.toggle('lk', !!on); }
 function openSheet(kind, extra) { S.sheet = {kind, ...extra}; renderSheet(); }
 function cancelFind(silent) {
   const F = S.find; if (!F) return;
@@ -12014,7 +12078,7 @@ function closeSheet() {
   if (S.find) cancelFind(true);
   if (S.opening) { const o = S.opening; S.opening = null; o.off = true; if (o.task) api('/api/lookup_cancel', {task: o.task}).catch(() => {}); }
   S.sheet = null;
-  if (!S.cur) document.body.style.overflow = '';
+  if (!S.cur) lockScroll(false);
   const bd = $('#layer .back-d'); if (!bd) return;
   if (S.skipOut) { S.skipOut = false; $('#layer').innerHTML = ''; return; }
   bd.classList.add('out');
@@ -12110,7 +12174,7 @@ function renderSheet() {
   const sh = $('#layer .sheet');
   if (!sh || sh.dataset.kind !== s.kind || $('#layer .back-d.out')) {
     $('#layer').innerHTML = `<div class="back-d${s.kind === 'cmenu' || s.kind === 'dmenu' ? ' pop' : ''}" data-act="backdrop"><div class="sheet" data-sheet data-kind="${s.kind}"><div class="grab"></div><div id="sb">${inner}</div></div></div>`;
-    document.body.style.overflow = 'hidden';
+    lockScroll(true);
     if (s.kind === 'cmenu' || s.kind === 'dmenu') placePop(s.rect, s.kind === 'dmenu' ? 268 : 0);
   } else {
     $('#sb').innerHTML = inner;  // тільки вміст — шторка не «перезапускається»
@@ -12469,9 +12533,9 @@ function showOpening(title) {  // повноцінна сторінка зава
     <div style="padding:0 16px"><div style="display:flex;gap:8px;margin-bottom:16px"><div class="sk" style="height:44px;flex:1;border-radius:14px"></div><div class="sk" style="height:44px;width:60px;border-radius:14px"></div></div>
     ${[0, 1, 2, 3, 4, 5].map(() => `<div style="display:flex;gap:12px;align-items:center;margin-bottom:12px"><div class="sk" style="width:104px;height:60px;border-radius:10px;flex:none"></div><div style="flex:1"><div class="sk" style="height:13px;width:60%"></div><div class="sk" style="height:11px;width:35%;margin-top:8px"></div></div></div>`).join('')}</div>`;
   document.body.appendChild(d);
-  document.body.style.overflow = 'hidden';
+  lockScroll(true);
 }
-function hideOpening() { const d = $('#oppage'); if (d) d.remove(); if (!S.cur && !S.sheet) document.body.style.overflow = ''; }
+function hideOpening() { const d = $('#oppage'); if (d) d.remove(); if (!S.cur && !S.sheet) lockScroll(false); }
 async function openAnime(url, title, explicit, sources) {
   const O = S.opening = {off: false, task: null};
   showOpening(title);
@@ -13512,7 +13576,8 @@ $('#vvp').addEventListener('click', ev => ev.stopPropagation());
 V.addEventListener('playing', () => { if (AUD && AUD.ctx.state !== 'running') AUD.ctx.resume().catch(() => {}); });
 function volRestore() { if (!ownVol()) return; const p = volGet(); if (p !== 100 || AUD) volApply(p); }
 
-let clrT = 0, PLAYS = 0, RELOADING = false;
+let clrT = 0, PLAYS = 0, RELOADING = false, RELOAD_PEND = false;
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && RELOAD_PEND && !S.cur && !RELOADING) { RELOAD_PEND = false; PLAYS = 0; softReload(0); } });
 let PRET = 0;
 async function play(id, n, startT, _retry) {
   if (!_retry) PRET = 0;
@@ -13522,7 +13587,7 @@ async function play(id, n, startT, _retry) {
   const e = it.episodes.find(x => x.n === n);
   $('#player').classList.remove('hide'); vcIcon(); VC.classList.remove('off');
   { const vb = $('#vvol'); if (vb) vb.classList.toggle('hide', !ownVol()); if (!ownVol()) $('#vvp').classList.add('hide'); }
-  document.body.style.overflow = 'hidden'; document.body.classList.add('pl');
+  lockScroll(true); document.body.classList.add('pl');
   try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (er) {}  // Web Audio (власна гучність) інакше глухне при вимкненому звуку/на iPad
   if (IOS_APP && !_retry) { try { const r = await api('/api/net'); setMirror(!!r.captured); } catch (er) {} }  // свіжа перевірка трансляції перед стартом, щоб не відкрити системний плеєр
   applyPlayerMode(); setNowPlaying(it, e, n);
@@ -13932,10 +13997,10 @@ function closePlayer() {
   clearTimeout(clrT);
   // джерело знімаємо не одразу, а коли системний повноекранний плеєр вже закрився: зняття src під час його анімації могло вбивати програму
   if (wasFs) clrT = setTimeout(() => { if (!S.cur) { V.removeAttribute('src'); V.load(); } }, 600); else { V.removeAttribute('src'); V.load(); }
-  $('#player').classList.add('hide'); document.body.style.overflow = ''; document.body.classList.remove('pl');
+  $('#player').classList.add('hide'); lockScroll(false); document.body.classList.remove('pl');
   S.cur = null; beat(true); loadLib('vis').catch(() => {});
   // кожні 2 переглянуті серії WebView чиститься перезавантаженням: WebContent накопичує пам'ять, і iOS рано чи пізно вбиває його разом із застосунком
-  if (S.set.wv_reload && PLAYS >= 2 && !RELOADING) { PLAYS = 0; setTimeout(() => { if (!S.cur && !RELOADING) softReload(0); }, 900); }
+  if (S.set.wv_reload && PLAYS >= 2 && !RELOADING) { if (PLAYS >= 5) { PLAYS = 0; setTimeout(() => { if (!S.cur && !RELOADING) softReload(0); }, 900); } else RELOAD_PEND = true; }  // перезавантаження WebView видно як «блимання» — відкладаємо, доки додаток не згорнуть
 }
 /* діагностика: стан сторінки в alive.json і відстеження перезавантажень WebView */
 function softReload(delay) {
@@ -14079,7 +14144,7 @@ function openPair() {
   if (PR.open) return;
   PR.open = true; PR.done = false; PR.sig = ''; PR.n0 = ((S.sync && S.sync.peers) || []).length;
   const el = document.createElement('div'); el.id = 'pairlay'; el.innerHTML = pairHTML(); document.body.appendChild(el);
-  document.body.style.overflow = 'hidden';
+  lockScroll(true);
   const tick = () => api('/api/sync_pairmode', {on: true}).then(j => { S.sync = j; paintPair(); }).catch(e => { if (PR.open) toast(e.message, true); });
   tick(); PR.t1 = setInterval(tick, 5000); PR.t2 = setInterval(() => { syncFetch(); }, 1200);
 }
@@ -14087,12 +14152,12 @@ function closePair() {
   if (!PR.open) return;
   PR.open = false; clearInterval(PR.t1); clearInterval(PR.t2);
   const el = $('#pairlay'); if (el) { el.classList.add('out'); setTimeout(() => el.remove(), 220); }
-  if (!S.cur) document.body.style.overflow = '';
+  if (!S.cur) lockScroll(false);
   api('/api/sync_pairmode', {on: false}).then(j => { S.sync = j; paintSync(); }).catch(() => {});
 }
 function fxMini(k) {
-  if (k === 'vortex') return '<i class="mc"></i>' + [0, 90, 180, 270, 45].map((a, n) => `<i class="mw" style="--a:${a}deg;animation-delay:${n * 90}ms"><i class="mv" style="animation-delay:${n * 90}ms"></i></i>`).join('');
-  if (k === 'edge') return '<i class="mf"></i><i class="mx"></i>';
+  if (k === 'vortex') return [0, 90, 180, 270, 45].map((a, n) => `<i class="mw" style="--a:${a}deg;animation-delay:${n * 90}ms"><i class="mv" style="animation-delay:${n * 90}ms"></i></i>`).join('');
+  if (k === 'edge') return '<i class="mf"></i>';
   return '<i class="mb m1"></i><i class="mb m2"></i><i class="mb m3"></i>';
 }
 function paintSync() {
@@ -14397,13 +14462,28 @@ function rmEpsHead() {
   const it = item(rmKid());
   return it ? `<h3>${esc(lname(it))}</h3><span>${epsW((it.episodes || []).length)}</span>` : '';
 }
+let RMDL = {kid: null, pid: null, j: '', eps: null, have: false, ts: 0, busy: false};
+// «скачано» у пульті — це стан на КЕРОВАНОМУ пристрої, а не на цьому
+async function rmDlSync(force) {
+  const kid = rmKid(), pid = RC.pid; if (!kid || !pid || RMDL.busy) return;
+  if (!force && RMDL.kid === kid && RMDL.pid === pid && Date.now() - RMDL.ts < 9000) return;
+  RMDL.busy = true;
+  try {
+    const r = await api('/api/sync_pdl', {peer: pid, kid}), j = JSON.stringify(r.eps || {}) + (r.have ? 1 : 0);
+    const ch = RMDL.kid !== kid || RMDL.pid !== pid || RMDL.j !== j;
+    Object.assign(RMDL, {kid, pid, j, eps: r.eps || {}, have: !!r.have, ts: Date.now()});
+    const e = $('#rmeps'); if (ch && e && route().name === 'remote' && rmKid() === kid && RC.pid === pid) e.innerHTML = rmEps();
+  } catch (e) { RMDL.ts = Date.now(); }
+  RMDL.busy = false;
+}
 function rmEps() {
   const st = RC.st || {}, it = item(rmKid()); if (!it) return '';
+  const dd = RMDL.kid === it.id && RMDL.pid === RC.pid && RMDL.eps ? RMDL.eps : null;
   const q = it.meta && it.meta.poster;
   return (it.episodes || []).map((e, i) => {
     const cur = st.id === it.id && String(st.ep) === String(e.n), pend = S.rm.pend && S.rm.pend.kid === it.id && String(S.rm.pend.n) === String(e.n);
     const thi = e.th ? `<div class="thi${S.set.blur_thumbs ? ' bl' : ''}" style="background-image:url('/thumb/${it.id}/${encodeURIComponent(e.n)}?v=${e.downloaded ? 1 : 0}')"></div>` : '';  // немає обкладинки серії — порожній фон
-    return `<button class="rme${cur ? ' cur' : ''}${e.watched ? ' w' : ''}${pend ? ' pend' : ''}" data-act="rmep" data-n="${esc(e.n)}" style="--i:${Math.min(i, 10)}"><div class="th">${thi}<span class="num">${esc(e.n)}</span>${cur ? `<span class="eq">${ico('play')} Грає</span>` : pend ? `<span class="eq">${ico('spinner')}</span>` : ''}${e.new ? '<span class="nw">нова</span>' : ''}${e.pos > 5 && !e.watched ? `<span class="rs">${ico('clock')}${fmtT(e.pos)}</span>` : ''}</div><div class="n">Серія ${esc(e.n)}${e.watched ? `<span class="wk" title="Переглянуто">${ico('check')}</span>` : ''}</div>${e.title ? `<div class="tt">${esc(e.title)}</div>` : ''}${e.downloaded ? `<div class="rdl">${ico('download')}${esc(e.q || 'скачано')}</div>` : ''}</button>`;
+    return `<button class="rme${cur ? ' cur' : ''}${e.watched ? ' w' : ''}${pend ? ' pend' : ''}" data-act="rmep" data-n="${esc(e.n)}" style="--i:${Math.min(i, 10)}"><div class="th">${thi}<span class="num">${esc(e.n)}</span>${cur ? `<span class="eq">${ico('play')} Грає</span>` : pend ? `<span class="eq">${ico('spinner')}</span>` : ''}${e.new ? '<span class="nw">нова</span>' : ''}${e.pos > 5 && !e.watched ? `<span class="rs">${ico('clock')}${fmtT(e.pos)}</span>` : ''}</div><div class="n">Серія ${esc(e.n)}${e.watched ? `<span class="wk" title="Переглянуто">${ico('eye')}</span>` : ''}</div>${e.title ? `<div class="tt">${esc(e.title)}</div>` : ''}${dd && String(e.n) in dd ? `<div class="rdl" title="Скачано на «${esc(RC.name || '')}»">${ico('download')}${esc(dd[String(e.n)] || 'скачано')}</div>` : ''}</button>`;
   }).join('');
 }
 function rmBody() {
@@ -14433,17 +14513,18 @@ function rmBody() {
     <div class="rcb"><button class="cb sm" data-act="rmc" data-rc="prev">${ico('prev')}</button><button class="cb" data-act="rmc" data-rc="back">${ico('back10')}</button><button class="cb big" id="rcpp" data-act="rmc" data-rc="pp">${ico(st.paused ? 'play' : 'pause')}</button><button class="cb" data-act="rmc" data-rc="fwd">${ico('fwd10')}</button><button class="cb sm" data-act="rmc" data-rc="next">${ico('next')}</button></div>
     <div class="rcvl"><span class="rcvi">${ico('vol')}</span><div class="rcvw"><input type="range" id="rcvol" min="0" max="${st.vmax || 100}" value="${st.vol == null ? 100 : st.vol}"${st.own === false ? ' disabled' : ''}><i class="rcv100"></i></div><span id="rcvn">${st.own === false ? 'сист.' : Math.round(st.vol == null ? 100 : st.vol)}</span></div></div></div>`;
   const mini = `<div class="rmmini" id="rmmini"><div class="rmcv"${pimg ? ` style="background-image:url('${pimg}')"` : ''}></div><b id="rmmt">${on ? esc(st.title || 'Грає') + ' · ' + esc(st.ep) : 'Нічого не грає'}</b><button class="cb sm" data-act="rmc" data-rc="back">${ico('back10')}</button><button class="cb big" id="rcpp2" data-act="rmc" data-rc="pp">${ico(st.paused ? 'play' : 'pause')}</button><button class="cb sm" data-act="rmc" data-rc="fwd">${ico('fwd10')}</button></div>`;
-  RC.eKid = rmKid();
+  RC.eKid = rmKid(); setTimeout(rmDlSync, 0);
   return now + mini + `<div id="rmlist"><div class="rmh"><h3>Аніме</h3></div><div id="rmflt">${rmFilters()}</div><div class="rmas" id="rmstrip">${rmStrip()}</div><div id="rmsub">${rmSub()}</div><div class="rmh" id="rmeh">${rmEpsHead()}</div><div class="rmeps" id="rmeps">${rmEps()}</div></div>`;
 }
 function rmPaintEps() {
   const h = $('#rmeh'), e = $('#rmeps'); if (!h || !e) return;
-  RC.eKid = rmKid(); h.innerHTML = rmEpsHead(); e.classList.remove('in'); e.innerHTML = rmEps(); void e.offsetWidth; e.classList.add('in');
+  RC.eKid = rmKid(); rmDlSync(); h.innerHTML = rmEpsHead(); e.classList.remove('in'); e.innerHTML = rmEps(); void e.offsetWidth; e.classList.add('in');
   epAutoScroll(e, 'k' + rmKid() + '|' + Date.now(), true);
 }
 function epAutoScroll(box, key, force) {  // відкрили список — показуємо місце, де зупинились: наступна непереглянута біля центру; усе переглянуто — хвіст списку
   if (!box || (!force && box._k === key)) return;
   box._k = key;
+  if (!box.clientHeight || getComputedStyle(box).overflowY === 'visible') return;  // серії тепер на загальній прокрутці сторінки
   const run = () => {
     const els = [...box.querySelectorAll('[data-n]')]; if (!els.length || !box.clientHeight) return;
     let lw = -1; els.forEach((x, i) => { if (x.classList.contains('w')) lw = i; });
@@ -14486,8 +14567,9 @@ function rmSync(st) {
   rmSoft();
 }
 function rmSubText(st) {  // «Серія 8 · скачана 720p» — стан серії на цьому пристрої (яким керуємо)
-  const it = item(st.id), e = it && (it.episodes || []).find(x => String(x.n) === String(st.ep));
-  return 'Серія ' + st.ep + (e && e.downloaded ? ' · скачана' + (e.q ? ' ' + e.q : '') : (e ? ' · не скачана' : ''));
+  const dd = RMDL.kid === st.id && RMDL.pid === RC.pid && RMDL.eps ? RMDL.eps : null;  // скачано саме на керованому пристрої
+  const has = dd ? (String(st.ep) in dd) : null, q = has ? dd[String(st.ep)] : '';
+  return 'Серія ' + st.ep + (has ? ' · скачана' + (q ? ' ' + q : '') : (has === false ? ' · не скачана' : '')) + (st.stale ? ' · очікую відповіді пристрою…' : '');
 }
 function rmPaintNow() {  // оновлюємо картку «зараз грає» на місці, без перемальовування сторінки
   const st = RC.st || {}, on = !!st.id, pit = on ? item(st.id) : null, pimg = pit && pit.meta && pit.meta.poster ? pit.meta.poster : '';
@@ -14563,6 +14645,7 @@ async function rcPoll() {
       let st = {};
       try { st = (await api('/api/sync_pstate', {peer: RC.pid})).state || {}; } catch (e) { st = null; }
       if (!RC.pid) return;
+      if (route().name === 'remote') rmDlSync();
       if (st && st.on) { rcSavePos(st); RC.seen = true; RC.miss = 0; RC.lost = false; if (RC.idle) { RC.idle = false; RC.rkey = ''; if (route().name === 'remote') { RC.st = st; rmSoft(); } } rcPaint(st); if (S.cur && RC.auto) rcStop(); return; }
       RC.miss++;
       if (route().name === 'remote') {  // на сторінці пульта не відключаємось, а показуємо «нічого не грає»
@@ -14609,8 +14692,42 @@ function fxBlocks(kind) {
 let FXT = [], FXBUSY = false, FXDEMO = 0;
 const FXDUR = {blocks: 1750, vortex: 2000, edge: 1800};
 function fxStyle() { const v = S.set && S.set.fx_style; return FXDUR[v] ? v : 'blocks'; }
+function fxSnap() {
+  try {
+    const root = $('#root'); if (!root) return false;
+    const old = $('#fxs'); if (old) old.remove();
+    const c = document.createElement('div'); c.id = 'fxs';
+    const inn = document.createElement('div'), sc = document.createElement('div'); inn.className = 'fxs-in'; sc.className = 'fxs-sc';
+    const cs = getComputedStyle(document.body);
+    sc.style.padding = cs.paddingTop + ' ' + cs.paddingRight + ' ' + cs.paddingBottom + ' ' + cs.paddingLeft;
+    const src = [root, $('#tabs'), $('#layer'), $('#player') && !$('#player').classList.contains('hide') ? $('#player') : null].filter(Boolean);
+    const sy = window.scrollY, pairs = [];
+    src.forEach(e => {
+      const k = e.cloneNode(true); k.removeAttribute('id');
+      k.querySelectorAll('video,audio,iframe,canvas').forEach(x => x.remove());
+      k.querySelectorAll('[id]').forEach(x => x.removeAttribute('id'));
+      sc.appendChild(k); pairs.push([e, k]);
+    });
+    inn.appendChild(sc); c.appendChild(inn); document.body.appendChild(c);
+    pairs.forEach(([e, k]) => {
+      const a = [e, ...e.querySelectorAll('*')], b = [k, ...k.querySelectorAll('*')];
+      if (a.length !== b.length) return;
+      for (let i = 0; i < a.length; i++) if (a[i].scrollTop || a[i].scrollLeft) { b[i].scrollTop = a[i].scrollTop; b[i].scrollLeft = a[i].scrollLeft; }
+    });
+    sc.scrollTop = sy; void c.offsetWidth; c.classList.add('on');
+    return true;
+  } catch (e) { const o = $('#fxs'); if (o) o.remove(); return false; }
+}
+function fxLift() {
+  const s = $('#fxs'), b = document.body;
+  b.classList.add('fxl'); void b.offsetWidth;
+  if (s) s.classList.add('gone');
+  requestAnimationFrame(() => { b.classList.remove('fxl'); b.classList.add('fxo'); });
+  FXT.push(setTimeout(() => { b.classList.remove('fxo'); const o = $('#fxs'); if (o) o.remove(); }, 950));
+}
 function fxClear() {
   FXT.forEach(clearTimeout); FXT = []; FXBUSY = false;
+  const o = $('#fxs'); if (o) o.remove(); document.body.classList.remove('fxl', 'fxo');
   const el = $('#fx'), v = $('#fxv');
   if (el) { el.className = ''; el.innerHTML = ''; }
   if (v) v.classList.remove('on', 'lite');
@@ -14618,11 +14735,11 @@ function fxClear() {
 }
 function fxMarkup(kind, st) {
   if (st === 'vortex') {
-    let h = '<i class="vxc"></i>';
+    let h = '';
     for (let k = 0; k < 16; k++) { const a = (k * 137) % 360, rad = 16 + (k * 7) % 30, w = 34 + (k * 11) % 30, d = (k % 8) * 60; h += `<i class="vxw" style="--a:${a}deg;--rad:${rad};--d:${d}ms"><i class="vxb" style="width:${w}px;height:${Math.round(w * 1.38)}px;margin:${-Math.round(w * .69)}px 0 0 ${-Math.round(w / 2)}px"></i></i>`; }
     return h;
   }
-  if (st === 'edge') return '<i class="edf"></i><i class="edw"></i>';
+  if (st === 'edge') return '<i class="edf"></i>';
   return fxBlocks(kind);
 }
 // kind: 'out' — відправник, 'in' — отримувач, 'fail' — червоний спалах «немає куди»; swap() виконується під розмиттям (зміна вкладки)
@@ -14631,15 +14748,17 @@ function fxPlay(kind, swap, styleOv) {
   if (!el) { try { swap && swap(); } catch (e) {} return; }
   fxClear(); FXBUSY = true;
   const st = kind === 'fail' ? 'edge' : (styleOv || fxStyle());
-  el.innerHTML = fxMarkup(kind, st); void el.offsetWidth; el.className = kind + ' s-' + st;
+  el.innerHTML = fxMarkup(kind, st); void el.offsetWidth; el.className = 'k-' + kind + ' s-' + st;
   const t = (f, ms) => FXT.push(setTimeout(f, ms));
   if (kind === 'fail') { document.body.classList.add('shk'); t(() => document.body.classList.remove('shk'), 600); t(fxClear, 1300); return; }
-  if (v) { v.classList.toggle('lite', kind === 'out'); v.classList.add('on'); }
+  const snap = fxSnap();
+  if (!snap && v) { v.classList.toggle('lite', kind === 'out'); v.classList.add('on'); }
   const T = FXDUR[st], t0 = Date.now(), at = kind === 'in' ? 750 : 560;
   t(async () => {
     try { if (swap) await Promise.race([Promise.resolve(swap()), new Promise(r => setTimeout(r, 4500))]); } catch (e) {}
     const left = Math.max(300, T - (Date.now() - t0));
-    t(() => { if (v) v.classList.remove('on'); t(fxClear, 650); }, left);
+    await new Promise(r => setTimeout(r, 140));
+    t(() => { if (v) v.classList.remove('on'); if (snap) { fxLift(); t(fxClear, 1000); } else t(fxClear, 650); }, left);
   }, at);
   t(fxClear, 14000);
 }
