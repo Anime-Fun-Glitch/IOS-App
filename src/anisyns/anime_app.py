@@ -3002,6 +3002,18 @@ def _dle_results(html, base, link_re, strict=False):
   return out
 
 
+_ANIMRU_JUNK = re.compile(r'плейлист|плей-лист|playlist|обложк|постер|обои|обзор|новост|подборк|список|рейтинг|топ[\s-]*\d|заставк|опенинг\w*\s+сборник|как\s+скачать|правила|реклама', re.I)
+
+
+def _animru_junk(raw):
+  """Не-аніме записи Anim-RU (плейлисти, обкладинки, добірки): справжні мають рік у дужках або «[серії]» у назві."""
+  raw = raw or ''
+  info = re.search(r'\[[^\]]*\]', raw) or re.search(r'\(\d{4}\)', raw)
+  if _ANIMRU_JUNK.search(raw) and not re.search(r'\[\s*\d', raw):
+    return True
+  return not info
+
+
 def _search_animru(q):
   last = None
   for host in ('anim-ru.net',):
@@ -3012,6 +3024,10 @@ def _search_animru(q):
         last = RuntimeError(f'HTTP {r.status_code}')
         continue
       res = _dle_results(_utf(r), f'https://{host}/', r'^https?://[^/]*anim-ru[^/]*/(?:page-\d+-)?\d+-[^/]+\.html$')
+      res = [it for it in res if not (_ANIMRU_JUNK.search(it['title']) and not re.search(r'\[\s*\d', it['title']))]
+      hasinf = [it for it in res if re.search(r'\[[^\]]*\]|\(\d{4}\)', it['title'])]
+      if res and len(hasinf) * 2 >= len(res):  # більшість результатів — справжні аніме з «[серіями]»/роком: решту (плейлисти, обкладинки) прибираємо
+        res = hasinf
       for it in res:
         it['title'] = re.split(r'\s*\[', it['title'])[0].strip() or it['title']
       return res
@@ -3599,20 +3615,30 @@ def _browse_animru(page):
         continue
       html = _utf(r)
       out = []
-      for blk in re.findall(r'<article class="dddewtwettwe">.*?</article>', html, re.S):
+      blks = re.findall(r'<article class="dddewtwettwe">.*?</article>', html, re.S)
+      nblk = 0
+      for blk in blks:
         a = re.search(r'<a href="(/[^"]+\.html)"', blk)
         h = re.search(r'<h3[^>]*>(.*?)</h3>', blk, re.S)
         if not a or not h:
           continue
         raw = _text(h.group(1))
+        if _animru_junk(raw):
+          nblk += 1
+          continue
         inf = re.search(r'\[([^\]]*)\]', raw)
         yr = re.search(r'\((\d{4})\)', raw)
         t = re.sub(r'\s*\[[^\]]*\]|\s*\(\d{4}\)', '', raw).strip()
         out.append(_bi(t or raw, f'https://{host}' + a.group(1), _best_img(blk, f'https://{host}/'), int(yr.group(1)) if yr else None, '', None, inf.group(1).strip() if inf else ''))
       if not out:
+        if page > 1 and not blks:  # кінець каталогу, а не збій
+          return [], False
+        if blks:  # на сторінці самі не-аніме записи — йдемо далі
+          return [], True
         last = RuntimeError('сторінка без карток')
         continue
-      return out, bool(re.search(r'/page/%d/' % (page + 1), html))
+      # далі: є посилання на наступну сторінку, або сторінка повна (пагінація DLE буває нестандартною)
+      return out, bool(re.search(r'/page/%d/' % (page + 1), html)) or len(blks) >= 8
     except Cancelled:
       raise
     except Exception as ex:
@@ -4018,6 +4044,7 @@ def _fetch_info(url):
   if not eps:
     raise ValueError('Серій не знайдено. Перевірте посилання.')
   dubs = list(dict.fromkeys(e['dubbing'] for e in eps if e.get('dubbing')))
+  _dub_note(dubs)
   return {'title': name or 'Аніме', 'eps': eps, 'only_one': only_one, 'meta': meta or {}, 'dubbings': dubs}
 
 
@@ -4231,7 +4258,7 @@ def entry_view(key, e):
   names = list(e.get('all_dubs') or ([cur] if cur else []))
   if cur and cur not in names:
     names.insert(0, cur)
-  dubs = [{'name': d, 'active': d == cur, 'downloaded': len(_downloaded_set(e, d)), 'count': (e.get('dub_counts') or {}).get(d)} for d in names]
+  dubs = [{'name': d, 'active': d == cur, 'fav': _is_fav(d), 'downloaded': len(_downloaded_set(e, d)), 'count': (e.get('dub_counts') or {}).get(d)} for d in _dub_order(names)]
   return {
       'id': kid,
       'title': e['title'],
@@ -4813,7 +4840,7 @@ def api_lookup(url):
       'title': info['title'],
       'meta': info['meta'],
       'site': site_info(url),
-      'dubbings': info['dubbings'],
+      'dubbings': _dub_order(info['dubbings']), 'dub_pick': _dub_pick(info['dubbings']),
       'count': len(info['eps']) if not info['dubbings'] else max(
           sum(1 for e in info['eps'] if e.get('dubbing') == d) for d in info['dubbings']),
       'only_one': info['only_one'],
@@ -4898,6 +4925,72 @@ def _switch_dub(e, dub, info=None):
     e['known'], e['new'] = known, newl
 
 
+def _dnorm(x):
+  return re.sub(r'\s+', ' ', str(x or '')).strip().lower()
+
+
+def _dub_find(lst, names):
+  """Перша озвучка зі списку lst, що є серед names (порівняння без урахування регістру)."""
+  m = {_dnorm(n): n for n in names}
+  for d in lst:
+    if _dnorm(d) in m:
+      return m[_dnorm(d)]
+  return None
+
+
+def _dub_note(names):
+  """Запам'ятовує назви озвучок з відкритих аніме — їх можна вибрати в налаштуваннях, навіть коли аніме вже немає в бібліотеці."""
+  try:
+    seen = SETTINGS.setdefault('dub_seen', [])
+    known = {_dnorm(x) for x in seen}
+    new = [d for d in names or [] if d and _dnorm(d) not in known]
+    if not new:
+      return
+    with LOCK:
+      for d in new:
+        if _dnorm(d) not in {_dnorm(x) for x in seen}:
+          seen.append(str(d)[:80])
+      del seen[:-300]
+      with open(_settings_path(), 'w', encoding='utf8') as f:
+        json.dump(SETTINGS, f)
+  except Exception:
+    pass
+
+
+def _dub_pick(names):
+  """Автовибір озвучки за пріоритетом із налаштувань; None — пріоритету немає, діє звичайний вибір."""
+  return _dub_find(SETTINGS.get('dub_prio') or [], names or [])
+
+
+def _dub_order(names):
+  """Улюблені озвучки — першими, у порядку з налаштувань; решта як була."""
+  names = list(names or [])
+  m = {_dnorm(n): n for n in names}
+  favs = [m[_dnorm(d)] for d in (SETTINGS.get('dub_fav') or []) if _dnorm(d) in m]
+  favs = list(dict.fromkeys(favs))
+  return favs + [n for n in names if n not in favs]
+
+
+def _is_fav(d):
+  return _dnorm(d) in {_dnorm(x) for x in (SETTINGS.get('dub_fav') or [])}
+
+
+def api_dubs():
+  """Усі відомі озвучки (з бібліотеки) з кількістю аніме + поточні улюблені й пріоритет."""
+  cnt = {}
+  with LOCK:
+    for e in library.values():
+      for d in set((e.get('all_dubs') or []) + list((e.get('dubs') or {}).keys()) + [e.get('dubbing')]):
+        if d:
+          cnt[d] = cnt.get(d, 0) + 1
+  low = {_dnorm(x) for x in cnt}
+  for d in (SETTINGS.get('dub_fav') or []) + (SETTINGS.get('dub_prio') or []) + (SETTINGS.get('dub_seen') or []):
+    if _dnorm(d) not in low:
+      low.add(_dnorm(d)); cnt[d] = 0
+  return {'dubs': [{'name': d, 'count': c} for d, c in sorted(cnt.items(), key=lambda x: (-x[1], x[0].lower()))],
+          'fav': SETTINGS.get('dub_fav') or [], 'prio': SETTINGS.get('dub_prio') or []}
+
+
 def api_add(token, dub, temp=False, sources=None, preview_of=None):
   L = LOOKUPS.get(token)
   if not L:
@@ -4912,7 +5005,7 @@ def api_add(token, dub, temp=False, sources=None, preview_of=None):
       raise ValueError('Не вдалося знайти повний список серій за цим посиланням.')
   dubs = info['dubbings']
   if dubs and dub not in dubs:
-    dub = max(dubs, key=lambda d: sum(1 for e in info['eps'] if e.get('dubbing') == d))
+    dub = _dub_pick(dubs) or max(dubs, key=lambda d: sum(1 for e in info['eps'] if e.get('dubbing') == d))
   if not dubs:
     dub = None
   eps = _eps_for(info, dub)
@@ -6392,7 +6485,7 @@ def net_state():
 SETTINGS = {'mobile_download': False, 'auto_skip': False, 'auto_skip_opening': True, 'auto_skip_ending': True, 'auto_next': True,
             'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': True, 'ios_player': True, 'np_ep_cover': True,
             'bg_keep': True, 'bg_check': False, 'island': True, 'island_dl': True, 'island_check': False,
-            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'recent_min': 3, 'handoff': True, 'rc': True, 'rc_in': True, 'rc_out': True, 'dv2': False, 'xgest': 'both', 'client': {},
+            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'old_cards': False, 'dub_fav': [], 'dub_prio': [], 'dub_seen': [], 'fx_style': 'blocks', 'recent_min': 3, 'handoff': True, 'rc': True, 'rc_in': True, 'rc_out': True, 'dv2': False, 'xgest': 'both', 'client': {},
             'site_order': ['aniliberty', 'yummyani', 'animevost', 'animru'], 'view': {}}
 
 
@@ -6439,6 +6532,8 @@ def api_settings(data=None):
           elif isinstance(SETTINGS[k], dict):
             if isinstance(data[k], dict) and len(json.dumps(data[k])) < 4000:
               SETTINGS[k] = data[k]
+          elif k == 'fx_style':
+            SETTINGS[k] = data[k] if data[k] in ('blocks', 'vortex', 'edge') else 'blocks'
           elif k == 'xgest':
             SETTINGS[k] = data[k] if data[k] in ('both', 'top', 'edge') else 'both'
           elif k == 'skip_mode':
@@ -6447,6 +6542,9 @@ def api_settings(data=None):
             SETTINGS[k] = max(0, min(120, int(float(data[k] or 0))))
           elif k == 'vol_max':
             SETTINGS[k] = 200 if int(float(data[k] or 0)) >= 200 else 100
+          elif k in ('dub_fav', 'dub_prio'):
+            v = [str(x).strip()[:80] for x in (data[k] or []) if str(x).strip()][:200]
+            SETTINGS[k] = list(dict.fromkeys(v))
           elif isinstance(SETTINGS[k], list):
             v = [x for x in (data[k] or []) if x in SITE_IDS]
             v = list(dict.fromkeys(v))
@@ -6921,6 +7019,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._json(api_stream(q.get('id'), q.get('n'), q.get('q') or '720p'))
       if p == '/api/autocheck':
         return self._json(api_autocheck(bool(q.get('kick'))))
+      if p == '/api/dubs':
+        return self._json(api_dubs())
       if p.startswith('/thumb/'):
         return self._thumb(p[len('/thumb/'):])
       if p.startswith('/poster/'):
@@ -8094,7 +8194,7 @@ SYNC_LOCK = threading.RLock()
 SYNC = {'st': None, 'srv': None, 'srv_err': '', 'started': False, 'found': {}, 'pending': None, 'pair_out': None, 'gen': 0,
         'status': {}, 'wake': threading.Event(), 'scanning': 0.0, 'last_rescan': 0.0, 'pair_until': 0.0, 'last_scan': 0.0}
 SYNC_SETTINGS_KEYS = ['view', 'auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'auto_check', 'auto_check_hours', 'blur_thumbs',
-                      'np_ep_cover', 'skip_mode', 'vol_max', 'own_vol', 'recent_min', 'site_order']
+                      'np_ep_cover', 'skip_mode', 'vol_max', 'own_vol', 'recent_min', 'site_order', 'dub_fav', 'dub_prio']
 SYNC_GROUPS = {'view': ['view'], 'player': ['auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'skip_mode', 'vol_max', 'own_vol', 'np_ep_cover']}
 SYNC_SCOPES = ('all', 'view', 'player', 'other')
 
@@ -9472,6 +9572,49 @@ body.thz,body.thz *,body.armed,body.armed *{-webkit-user-select:none!important;u
 @keyframes fxFlash{0%{opacity:0}18%{opacity:1}100%{opacity:0}}
 @keyframes fxUp{0%{opacity:0;transform:translateY(20px) scale(.6)}15%{opacity:1}100%{opacity:0;transform:translateY(-95vh) scale(.9) rotate(var(--r))}}
 @keyframes fxDown{0%{opacity:0;transform:translateY(-70vh) scale(.5) rotate(var(--r))}30%{opacity:1}100%{opacity:0;transform:translateY(var(--ty)) scale(1) rotate(0)}}
+#fxv{position:fixed;inset:0;z-index:99985;pointer-events:none;opacity:0;background:rgba(14,15,30,.3);-webkit-backdrop-filter:blur(0px);backdrop-filter:blur(0px);transition:opacity .35s ease,-webkit-backdrop-filter .4s ease,backdrop-filter .4s ease}
+#fxv.on{opacity:1;-webkit-backdrop-filter:blur(20px) saturate(1.2);backdrop-filter:blur(20px) saturate(1.2)}
+#fxv.on.lite{background:rgba(14,15,30,.14);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+#fx .vxc{position:absolute;left:50%;top:46%;width:34px;height:34px;margin:-17px 0 0 -17px;border-radius:50%;background:radial-gradient(circle,#fff 0,#a99cff 35%,transparent 70%);box-shadow:0 0 50px 20px #7c6cffaa;opacity:0}
+#fx.s-vortex.out .vxc{animation:vxcA 1.9s ease both}#fx.s-vortex.in .vxc{animation:vxcB 1.9s ease both}
+@keyframes vxcA{0%{opacity:0;transform:scale(0)}25%{opacity:1;transform:scale(1.2)}80%{opacity:1;transform:scale(1.6)}100%{opacity:0;transform:scale(.2)}}
+@keyframes vxcB{0%{opacity:0;transform:scale(.2)}10%{opacity:1;transform:scale(1.8)}55%{opacity:.9;transform:scale(1)}100%{opacity:0;transform:scale(0)}}
+#fx .vxw{position:absolute;left:50%;top:46%;width:0;height:0;opacity:0}
+#fx .vxb{position:absolute;left:0;top:0;border-radius:12px;background:linear-gradient(145deg,#8b7bff,#4c96ff);box-shadow:0 8px 24px #5b4cff77;opacity:0}
+#fx.s-vortex.out .vxw{animation:vxSO 1.45s cubic-bezier(.5,0,.75,.45) var(--d) both}#fx.s-vortex.out .vxb{animation:vxRO 1.45s cubic-bezier(.5,0,.75,.45) var(--d) both}
+#fx.s-vortex.in .vxw{animation:vxSI 1.5s cubic-bezier(.2,.6,.3,1) var(--d) both}#fx.s-vortex.in .vxb{animation:vxRI 1.5s cubic-bezier(.2,.6,.3,1) var(--d) both}
+@keyframes vxSO{from{transform:rotate(var(--a));opacity:1}to{transform:rotate(calc(var(--a) + 600deg));opacity:1}}
+@keyframes vxRO{0%{transform:translate(calc(var(--rad)*1.6vmin),0) scale(1);opacity:0}12%{opacity:1}85%{opacity:1}100%{transform:translate(0,0) scale(.04);opacity:0}}
+@keyframes vxSI{from{transform:rotate(calc(var(--a) + 600deg));opacity:1}to{transform:rotate(var(--a));opacity:1}}
+@keyframes vxRI{0%{transform:translate(0,0) scale(.04);opacity:0}12%{opacity:1}70%{opacity:1}100%{transform:translate(calc(var(--rad)*1.6vmin),0) scale(1);opacity:0}}
+#fx .edf,#fx .edw{position:absolute;opacity:0}
+#fx .edf{inset:0;border-radius:46px;box-shadow:inset 0 0 0 3px rgba(165,150,255,.95),inset 0 0 26px 5px rgba(124,108,255,.9),inset 0 0 100px 12px rgba(76,150,255,.5)}
+#fx .edw{left:-10%;right:-10%;bottom:0;height:46%;background:linear-gradient(to top,transparent,rgba(124,108,255,.6) 40%,rgba(120,190,255,.45) 62%,transparent);filter:blur(14px)}
+#fx.s-edge.out .edf{animation:edfO 1.7s ease both}#fx.s-edge.out .edw{animation:edwO 1.5s cubic-bezier(.4,0,.6,1) .1s both}
+#fx.s-edge.in .edf{animation:edfI 1.7s ease both}#fx.s-edge.in .edw{animation:edwI 1.5s cubic-bezier(.4,0,.6,1) .1s both}
+@keyframes edfO{0%{opacity:0;clip-path:inset(0)}18%{opacity:1;clip-path:inset(0)}50%{opacity:1;clip-path:inset(0)}100%{opacity:0;clip-path:inset(0 0 100% 0)}}
+@keyframes edwO{0%{opacity:0;transform:translateY(40%)}20%{opacity:1}100%{opacity:0;transform:translateY(-230%)}}
+@keyframes edfI{0%{opacity:0;clip-path:inset(0 0 100% 0)}22%{opacity:1;clip-path:inset(0 0 55% 0)}55%{opacity:1;clip-path:inset(0)}100%{opacity:0;clip-path:inset(0)}}
+@keyframes edwI{0%{opacity:0;transform:translateY(-230%)}20%{opacity:1}100%{opacity:0;transform:translateY(40%)}}
+#fx.fail .edf{box-shadow:inset 0 0 0 3px rgba(255,92,108,.98),inset 0 0 28px 6px rgba(255,60,80,.95),inset 0 0 110px 16px rgba(255,40,70,.55);animation:edfF 1.2s ease both}#fx.fail .edw{display:none}
+@keyframes edfF{0%{opacity:0}15%{opacity:1}35%{opacity:.3}55%{opacity:1}100%{opacity:0}}
+.fxtiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:6px 0 4px}
+.fxt{border:2px solid transparent;background:var(--s1);border-radius:18px;padding:8px 8px 10px;color:var(--mu);font-weight:650;font-size:13px;display:flex;flex-direction:column;gap:8px;align-items:stretch;text-align:center}
+.fxt.on{border-color:var(--ac);color:#fff;box-shadow:0 6px 20px #6a5cff44}
+.fxm{position:relative;width:100%;aspect-ratio:3/4;border-radius:12px;background:#0e0f18;border:1px solid #ffffff12;overflow:hidden}
+.fxm .mb{position:absolute;bottom:-40%;width:26%;height:34%;border-radius:6px;background:linear-gradient(145deg,#8b7bff,#4c96ff);animation:mbUp 2s ease-in infinite;opacity:0}
+.fxm .m1{left:10%}.fxm .m2{left:38%;animation-delay:.35s}.fxm .m3{left:66%;animation-delay:.7s}
+@keyframes mbUp{0%{transform:translateY(0);opacity:0}15%{opacity:1}100%{transform:translateY(-340%);opacity:0}}
+.fxm .mc{position:absolute;left:50%;top:48%;width:14px;height:14px;margin:-7px;border-radius:50%;background:radial-gradient(circle,#fff,#8b7bff 50%,transparent 72%);box-shadow:0 0 16px 6px #7c6cffaa;animation:mcP 2.2s ease-in-out infinite}
+@keyframes mcP{0%,100%{transform:scale(.6);opacity:.6}60%{transform:scale(1.3);opacity:1}}
+.fxm .mw{position:absolute;left:50%;top:48%;width:0;height:0;animation:mwS 2.2s cubic-bezier(.5,0,.75,.45) infinite}
+.fxm .mv{position:absolute;left:0;top:0;width:16px;height:22px;margin:-11px 0 0 -8px;border-radius:5px;background:linear-gradient(145deg,#8b7bff,#4c96ff);animation:mvR 2.2s cubic-bezier(.5,0,.75,.45) infinite;opacity:0}
+@keyframes mwS{from{transform:rotate(var(--a))}to{transform:rotate(calc(var(--a) + 480deg))}}
+@keyframes mvR{0%{transform:translate(32px,0) scale(1);opacity:0}15%{opacity:1}85%{opacity:1}100%{transform:translate(0,0) scale(.1);opacity:0}}
+.fxm .mf{position:absolute;inset:0;border-radius:12px;box-shadow:inset 0 0 0 2px #a596ff,inset 0 0 14px 3px #7c6cffcc;animation:mfP 2.2s ease-in-out infinite}
+@keyframes mfP{0%,100%{opacity:.35}50%{opacity:1}}
+.fxm .mx{position:absolute;left:-10%;right:-10%;bottom:0;height:42%;background:linear-gradient(to top,transparent,#7c6cff99 45%,#78beff66 65%,transparent);filter:blur(6px);animation:mxU 2.2s ease-in-out infinite}
+@keyframes mxU{0%{transform:translateY(40%);opacity:0}25%{opacity:1}100%{transform:translateY(-240%);opacity:0}}
 #fxh{position:fixed;left:50%;top:calc(var(--top,0px) + 70px);transform:translate(-50%,-10px);z-index:99991;pointer-events:none;background:#1c1f2bee;border:1px solid #7c6cff88;color:#fff;font-weight:600;font-size:14px;line-height:1;padding:11px 16px;border-radius:999px;opacity:0;transition:all .2s;white-space:nowrap;box-shadow:0 8px 24px #000a}
 #fxh.on{opacity:1;transform:translate(-50%,0)}
 body.armed #root{animation:armW .16s linear infinite}
@@ -9757,7 +9900,7 @@ body.pressing,body.pressing *{-webkit-user-select:none!important;user-select:non
 .epscr,.rmeps{position:relative;max-height:calc(100dvh - var(--tabh,90px) - 150px);min-height:min(300px,55dvh);overflow-y:auto;overflow-x:hidden;overscroll-behavior-y:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;
   -webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 20px,#000 calc(100% - 26px),transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 20px,#000 calc(100% - 26px),transparent 100%);padding:18px 0 26px;margin-top:-10px}
 .epscr::-webkit-scrollbar,.rmeps::-webkit-scrollbar{display:none}
-.epscr .ec,.epscr .ep{content-visibility:auto;contain-intrinsic-size:auto 190px}
+.epscr .ec,.epscr .ep,.epscr .erm{content-visibility:auto;contain-intrinsic-size:auto 190px}
 .epscr .ep{contain-intrinsic-size:auto 76px}
 @media(min-width:720px){.epgrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .ec{background:var(--s1);border-radius:16px;overflow:hidden;position:relative;transition:transform .15s,box-shadow .2s}
@@ -9765,7 +9908,7 @@ body.pressing,body.pressing *{-webkit-user-select:none!important;user-select:non
 .ec.sel{box-shadow:0 0 0 2px var(--ac)}
 .ec .th{position:relative;display:block;aspect-ratio:16/9;background:linear-gradient(135deg,#2c2757,#171a2a);overflow:hidden}
 .ec .th img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .35s}
-.ec .th img.ld{opacity:1}.ec:not(.w) .th img.bl{filter:blur(14px);transform:scale(1.2)}
+.ec .th img.ld{opacity:1}.ec:not(.w) .th img.bl{filter:blur(5px);transform:scale(1.08)}
 .ec .th::after{content:'';position:absolute;inset:0;background:linear-gradient(transparent 40%,#000b);z-index:1;pointer-events:none}
 .ec .th .num{position:absolute;left:10px;bottom:5px;z-index:2;font-size:28px;font-weight:800;line-height:1;text-shadow:0 2px 10px #000b;font-variant-numeric:tabular-nums}
 .ec .th .stt{position:absolute;right:8px;top:8px;z-index:3;font-size:11px;padding:2px 8px;border-radius:99px;background:#000a;display:flex;align-items:center;gap:3px;backdrop-filter:blur(4px)}
@@ -9863,7 +10006,7 @@ body.dragging{-webkit-user-select:none;user-select:none;-webkit-touch-callout:no
 .tmpbar .i{width:18px;height:18px;flex:none}
 .hint{margin:0 16px 8px;font-size:12.5px;color:var(--mu)}
 .btn.on{background:var(--ac);color:#fff}
-.ep,.ec{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.ep,.ec,.erm{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 .ep .ck{width:28px;height:28px;border-radius:9px}
 .ep .ck .i{width:17px;height:17px}
 .ec .th .ck{width:28px;height:28px}
@@ -9963,6 +10106,8 @@ body.dragging{-webkit-user-select:none;user-select:none;-webkit-touch-callout:no
 #player .top{padding-top:calc(6px + min(var(--top),8px));padding-bottom:6px}  /* у горизонтальному режимі верхній відступ портретного екрана не потрібен */
 .vc .sk{bottom:calc(0px + min(var(--bot),6px));padding:6px 12px}}
 #player .top .ib{color:#fff}
+#player .top{background:none!important;border-bottom:0!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+#player .top::before{content:"";position:absolute;left:0;right:0;top:0;bottom:-26px;z-index:-1;pointer-events:none;background:rgba(10,11,16,.62);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);-webkit-mask-image:linear-gradient(#000 0,#000 58%,transparent);mask-image:linear-gradient(#000 0,#000 58%,transparent)}
 .selmenu{z-index:120}
 .selmenu .sheet{padding-bottom:calc(10px + var(--bot))}
 .selmenu .sbody{overflow-y:auto;padding:2px 12px 8px;-webkit-overflow-scrolling:touch}
@@ -9987,6 +10132,7 @@ body{padding-left:var(--lft);padding-right:var(--rgt)}
 #toast{position:fixed;left:50%;top:calc(66px + var(--top));transform:translateX(-50%);z-index:100;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;width:92%}
 .toast{background:#2b2f44;color:#fff;border-radius:13px;padding:10px 14px;font-size:14px;box-shadow:0 8px 30px #000a;max-width:100%;animation:dn .2s}
 .toast.e{background:#4a1f28}
+@media (orientation:landscape) and (max-height:520px){#toast{top:calc(10px + var(--top));width:min(56%,540px)}}  /* у ландшафті сповіщення вище — у смузі верхньої панелі, між кнопками */
 
 /* ---------- анімації ---------- */
 @keyframes fadein{from{opacity:0}}
@@ -10050,6 +10196,13 @@ button:active,.card:active,.btn:active,.ib:active,#tabs a:active,.dchip:active{t
 .dchip small{font-weight:700;font-size:11px;background:#173a2b;color:var(--ok);border-radius:99px;padding:1px 6px}
 .dchip.on{background:linear-gradient(135deg,var(--ac),#6a5cff);color:#fff;border-color:transparent;box-shadow:0 4px 14px #6a5cff55}
 .dchip.on small{background:#ffffff30;color:#fff}
+.adddubs{flex-wrap:wrap;overflow:visible!important;padding:2px 0 10px!important;margin:8px 0}
+.dstar{display:inline-grid;color:#ffc94d}.dstar .i{width:13px;height:13px;fill:currentColor}.dchip.on .dstar{color:#ffe08a}
+.dubtabs{display:flex;gap:6px;margin-top:6px}.dubtabs button{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:11px;background:var(--s2);color:var(--mu);padding:10px;font-weight:650}.dubtabs button.on{background:linear-gradient(135deg,var(--ac),#6a5cff);color:#fff}.dubtabs .i{width:15px;height:15px}
+.dublist{max-height:46vh;overflow:auto;margin:0 -4px;padding:0 4px}.dubr{display:flex!important;flex-direction:row!important;align-items:center;gap:10px;padding:6px 0;background:none!important;border:0!important}.dubr .tx{flex:1;min-width:0}.dubr .tx b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dubr .d{display:block;font-size:12px;color:var(--mu)}
+.dstb,.dnum{flex:none;width:38px;height:36px;border:0;border-radius:10px;background:var(--s2);color:var(--mu);display:grid;place-items:center;font-weight:800}
+.dstb .i{width:19px;height:19px}.dstb.on{color:#ffc94d}.dstb.on .i{fill:currentColor}.dnum.on{background:linear-gradient(135deg,var(--ac),#6a5cff);color:#fff}
+#sitegrp .row .tx b .i{width:13px;height:13px;color:#ffc94d;vertical-align:-1px}
 .findbox{display:flex;align-items:center;gap:12px;margin:14px 0 4px;padding:13px 14px;border-radius:14px;background:var(--s2);animation:rowin .25s both}
 .findbox .i{width:22px;height:22px;color:var(--ac)}
 .findbox .tx{flex:1;min-width:0;font-size:14px}
@@ -10179,7 +10332,7 @@ input,select,textarea{font-size:16px}
 .sth.flash{animation:stfl 1.2s}@keyframes stfl{0%,60%{color:var(--ac)}100%{color:var(--mu)}}
 
 /* ---------- заставка при першому запуску (лише в iPhone-застосунку) ---------- */
-#splash{position:fixed;inset:0;z-index:99999;background:#0d0e13;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .55s ease,transform .55s ease;overflow:hidden}
+#splash{touch-action:none;overscroll-behavior:none;position:fixed;inset:0;z-index:99999;background:#0d0e13;display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .55s ease,transform .55s ease;overflow:hidden}
 #splash:not(.go) *{animation-play-state:paused!important}
 #splash:not(.go) svg{animation-play-state:paused!important}
 #splash.out{opacity:0;transform:scale(1.06);pointer-events:none}
@@ -10252,11 +10405,11 @@ body.rmpg #rcbar{display:none!important}
 .rmas{display:flex;gap:10px;overflow-x:auto;padding:6px 16px 8px;margin:-4px -16px 0;scroll-snap-type:x proximity;scroll-padding-left:16px;-webkit-overflow-scrolling:touch;scrollbar-width:none}.rmas::-webkit-scrollbar{display:none}
 .rmas.sub{margin-top:2px}.rmsubh{font-size:12.5px;color:var(--mu);margin:8px 2px 4px;animation:rmUp .25s both}
 .rmnone{color:var(--mu);padding:20px 4px;font-size:14px}
-.rma{flex:none;width:92px;background:none;border:0;color:inherit;text-align:left;padding:0;scroll-snap-align:start}
+.rma{flex:none;width:92px;display:block;background:none;border:0;color:inherit;text-align:left;padding:0;scroll-snap-align:start}
 .rma i{position:relative;display:grid;place-items:center;aspect-ratio:2/3;border-radius:12px;overflow:hidden;background-color:transparent;background-repeat:no-repeat;background-size:cover;background-position:center;background-origin:border-box;background-clip:border-box;font-style:normal;font-size:30px;font-weight:800;color:#ffffff30;border:0;transition:transform .15s}
 .rma i::before{content:"";position:absolute;inset:0;border-radius:inherit;border:2px solid transparent;pointer-events:none;z-index:2;transition:border-color .18s}
 .rma i em{position:absolute;z-index:1;right:5px;bottom:5px;max-width:calc(100% - 10px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-style:normal;font-size:11px;font-weight:700;color:#fff;background:#000b;border-radius:9px;padding:1px 7px}
-.rma span{display:block;margin-top:6px;font-size:12px;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--mu)}
+.rma span{width:100%;box-sizing:border-box;text-align:left;overflow-wrap:anywhere;word-break:break-word;display:block;margin-top:6px;font-size:12px;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--mu)}
 .rma.on i::before{border-color:var(--ac)}.rma.on span{color:#fff}.rma.pl i{box-shadow:0 0 0 2px #0d0e13,0 0 0 4px var(--ac2,var(--ac))}.rma:active i{transform:scale(.95)}
 .rma.grp.open i::before{border-style:dashed}
 .rma.arch i{filter:grayscale(1) contrast(1.06) brightness(.86)}.rma.arch.on i,.rma.arch.pl i{filter:grayscale(1) contrast(1.06) brightness(.92)}
@@ -10268,18 +10421,33 @@ body.rmpg #rcbar{display:none!important}
 .rme .th{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:transparent;border:0;transition:transform .14s}
 .rme .th::before{content:"";position:absolute;inset:0;border-radius:inherit;border:2px solid transparent;pointer-events:none;z-index:3;transition:border-color .18s}
 .rme .thi{position:absolute;inset:0;background-repeat:no-repeat;background-size:cover;background-position:center;transition:filter .3s}
-.rme:not(.w) .thi.bl{filter:blur(14px);transform:scale(1.2)}
+.rme:not(.w) .thi.bl{filter:blur(5px);transform:scale(1.08)}
 .rme .th::after{content:"";position:absolute;inset:0;background:linear-gradient(to top,#000b 0%,#0000 55%);pointer-events:none}
 .rme .num{position:absolute;left:8px;bottom:6px;z-index:2;font-weight:800;font-size:17px;text-shadow:0 1px 6px #000}
 .rme .eq{position:absolute;z-index:2;right:6px;top:6px;max-width:calc(100% - 12px);white-space:nowrap;overflow:hidden;display:flex;align-items:center;gap:4px;background:var(--ac);color:#fff;border-radius:10px;padding:3px 8px;font-size:11.5px;font-weight:700}.rme .eq .i{width:12px;height:12px}
 .rme .nw{position:absolute;z-index:2;left:6px;top:6px;white-space:nowrap;background:#0e9f84;color:#fff;border-radius:8px;padding:2px 7px;font-size:11px;font-weight:700}
 .rme .rs{position:absolute;z-index:2;white-space:nowrap;right:8px;bottom:6px;display:flex;align-items:center;gap:3px;font-size:11px;color:#ffffffd0}.rme .rs .i{width:11px;height:11px}
+.rdl{display:flex;align-items:center;gap:4px;margin-top:2px;font-size:11.5px;font-weight:600;color:#6fe0a0}.rdl .i{width:12px;height:12px}
+.epr{gap:14px 12px}
+.erm .th{cursor:pointer}.erm.sel .th::before{border-color:var(--ac)}.erm.sel .th{opacity:1}
+.erm .ck{position:absolute;z-index:4;left:8px;top:8px;width:24px;height:24px;border-radius:50%;border:2px solid #fff;background:#0008;display:grid;place-items:center;color:#fff}.erm.sel .ck{background:var(--ac);border-color:var(--ac)}.erm .ck .i{width:14px;height:14px;stroke-width:3}
+.erm .ers{display:flex;align-items:center;gap:6px;margin-top:5px;min-width:0}
+.erm .ei{flex:none;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;padding:0;border:0;background:#ffffff12;color:var(--mu)}.erm .ei .i{width:15px;height:15px}
+.erm .ei.on{background:#6d7dff26;color:#9aa8ff}.erm .ei.dl.on{background:#38d39f26;color:#38d39f}
+.erm .eqs{flex:1;min-width:0;font-size:11.5px;font-weight:600;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rme .n{font-size:13px;font-weight:650;margin-top:6px}.rme .tt{font-size:12px;color:var(--mu);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rme.cur .th::before{border-color:var(--ac)}.rme.w .th{opacity:.55}.rme.cur .th,.rme.pend .th{opacity:1}.rme:active .th{transform:scale(.97)}.rme.pend .th::before{border-color:var(--ac2,var(--ac))}
 .rme .eq .spin{animation:spin .8s linear infinite}
-.rme .wk{display:inline-grid;place-items:center;vertical-align:-3px;margin-left:7px;width:17px;height:17px;border-radius:50%;background:#38d39f26;color:#38d39f}.rme .wk .i{width:11px;height:11px;stroke-width:3}
-.rcsw{position:relative;flex:1;min-width:0;display:flex;align-items:center}.rcsw input{width:100%;position:relative;z-index:1;background:none}
-.rcmks{position:absolute;left:0;right:0;top:50%;height:6px;margin-top:-3px;pointer-events:none;z-index:2}.rcmks i{position:absolute;top:0;bottom:0;border-radius:3px;opacity:.8;box-shadow:0 0 8px currentColor}.rcmks i.op{background:#ffb020;color:#ffb02080}.rcmks i.ed{background:#38c6ff;color:#38c6ff80}
+.rme .wk{display:inline-grid;place-items:center;vertical-align:-3px;margin-left:7px;width:17px;height:17px;border-radius:50%;background:#6d7dff2e;color:#9aa8ff}.rme .wk .i{width:11px;height:11px;stroke-width:3}
+.rcsw{position:relative;flex:1;min-width:0;display:flex;align-items:center}.rcsw input{width:100%;position:relative;z-index:1}
+.rcsk input[type=range],.rcvl input[type=range]{-webkit-appearance:none;appearance:none;height:30px;margin:0;background:transparent;touch-action:none;--p:0%;--b:0%;--os:0%;--oe:0%;--es:0%;--ee:0%}
+.rcsk input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(90deg,transparent var(--os),#ffb020 var(--os) var(--oe),transparent var(--oe)),linear-gradient(90deg,transparent var(--es),#38c6ff var(--es) var(--ee),transparent var(--ee)),linear-gradient(90deg,var(--ac) var(--p),#ffffff2e var(--p))}
+.rcvl input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(90deg,var(--ac) var(--b),#ffb020 var(--b) var(--p),#ffffff2e var(--p))}
+.rcsk input[type=range]::-webkit-slider-thumb,.rcvl input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;margin-top:-8px;border-radius:50%;background:#fff;box-shadow:0 2px 8px #0008}
+.rcsk input[type=range]::-moz-range-track,.rcvl input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:#ffffff2e}.rcsk input[type=range]::-moz-range-thumb,.rcvl input[type=range]::-moz-range-thumb{width:22px;height:22px;border:0;border-radius:50%;background:#fff}
+.rcvw{position:relative;flex:1;min-width:0;display:flex;align-items:center}.rcvw input{width:100%;position:relative;z-index:1}
+.rcv100{position:absolute;top:50%;margin-top:-9px;width:2px;height:18px;border-radius:1px;background:#ffffffaa;pointer-events:none;display:none;z-index:0}
+.rcmks{position:absolute;left:0;right:0;top:50%;height:6px;margin-top:-3px;pointer-events:none;z-index:0;display:none}.rcmks i{position:absolute;top:0;bottom:0;border-radius:3px;opacity:.8;box-shadow:0 0 8px currentColor}.rcmks i.op{background:#ffb020;color:#ffb02080}.rcmks i.ed{background:#38c6ff;color:#38c6ff80}
 .rcleg{display:flex;gap:14px;justify-content:center;font-size:11.5px;color:var(--mu);max-height:0;opacity:0;overflow:hidden;transition:max-height .25s ease,opacity .25s ease,margin .25s ease}.rcleg.on{max-height:24px;opacity:1;margin:2px 0 0}
 .rcleg span{display:inline-flex;align-items:center;gap:5px}.rcleg i{width:14px;height:6px;border-radius:3px;display:inline-block}.rcleg .op i{background:#ffb020}.rcleg .ed i{background:#38c6ff}
 .rcact{display:flex;flex-direction:column;gap:0}
@@ -10329,10 +10497,20 @@ body.rmpg #rcbar{display:none!important}
     root.style.setProperty('--top', t + 'px'); root.style.setProperty('--bot', b + 'px');
     root.style.setProperty('--lft', l + 'px'); root.style.setProperty('--rgt', r + 'px');
   }
+  var INSM = {}, lastRs = 0;
+  function ori() { return window.innerHeight > window.innerWidth ? 'p' : 'l'; }
+  function insMem(o) { if (INSM[o]) return INSM[o]; try { var j = JSON.parse(localStorage.getItem('ins_' + o) || 'null'); if (j && j.length === 4) return (INSM[o] = j); } catch (e) {} return null; }
   window.__insets = function (t, l, b, r) {  // нативні безпечні зони з iOS (надійніше, ніж env())
-    window.__nat = 1; window.__lastIns = [t, l, b, r]; setIns(t, l, b, r);
+    window.__nat = 1; window.__lastIns = [t, l, b, r];
+    if (Date.now() - lastRs > 600) { var o = ori(); INSM[o] = [t, l, b, r]; try { localStorage.setItem('ins_' + o, JSON.stringify(INSM[o])); } catch (e) {} }  // пам'ятаємо зони окремо для портрета й ландшафта
+    setIns(t, l, b, r);
   };
-  window.addEventListener('resize', function () { if (window.__lastIns) { var a = window.__lastIns; setTimeout(function () { setIns(a[0], a[1], a[2], a[3]); }, 60); } });
+  function onRot() {  // при повороті одразу ставимо запам'ятані зони нової орієнтації — без очікування нативного оновлення
+    lastRs = Date.now(); var m = insMem(ori());
+    if (m) { setIns(m[0], m[1], m[2], m[3]); setTimeout(function () { setIns(m[0], m[1], m[2], m[3]); }, 80); }
+    else if (window.__lastIns) { var a = window.__lastIns; setTimeout(function () { setIns(a[0], a[1], a[2], a[3]); }, 60); }
+  }
+  window.addEventListener('resize', onRot); window.addEventListener('orientationchange', onRot);
   function apply() {
     if (window.__nat) return;
     var landscape = window.innerWidth > window.innerHeight;
@@ -10402,7 +10580,7 @@ body.rmpg #rcbar{display:none!important}
   <div class="msg hide" id="pmsg"></div>
 </div>
 <div id="rcbar" class="hide"></div>
-<div id="bswl"></div><div id="fx"></div><div id="fxh"></div>
+<div id="bswl"></div><div id="fxv"></div><div id="fx"></div><div id="fxh"></div>
 <div id="toast"></div>
 
 <script>
@@ -10479,8 +10657,10 @@ const ICONS = {
   globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.8 3 2.8 15 0 18M12 3c-2.8 3-2.8 15 0 18"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
   chev: '<path d="m6 9 6 6 6-6"/>',
+  star: '<path d="m12 3.5 2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 16.9 6.8 19.7l1-5.9L3.5 9.7l5.9-.8z"/>',
   sort: '<path d="M7 4v16M7 4 4 7M7 4l3 3M17 20V4M17 20l-3-3M17 20l3-3"/>',
   vlist: '<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" stroke-width="2.4"/>',
+  vblk: '<rect x="3.5" y="4" width="17" height="10" rx="2"/><path d="M4 18h9M4 21h5"/>',
   vgrid: '<rect x="3.5" y="4" width="7" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="7" height="6.5" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="6.5" rx="1.5"/>',
   fs: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
   vol: '<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5H4z"/><path d="M15.5 9a4 4 0 0 1 0 6M17.8 6.5a7.5 7.5 0 0 1 0 11"/>',
@@ -10578,9 +10758,9 @@ function uiRecover() {  // після трансляції/системного 
   const pl = $('#player'), open = !!(pl && !pl.classList.contains('hide'));
   const b = document.body;
   if (!open && V.webkitDisplayingFullscreen) { try { V.pause(); V.removeAttribute('src'); V.load(); } catch (e) {} }  // «осиротілий» системний плеєр на весь екран
-  b.classList.remove('bsw', 'shk', 'armed', 'thz');
+  b.classList.remove('bsw', 'armed', 'thz'); if (!FXBUSY) b.classList.remove('shk');
   if (!open) { b.classList.remove('pl'); if (!S.sheet && !PR.open) b.style.overflow = ''; }
-  try { const fx = $('#fx'); if (fx) { fx.className = ''; fx.innerHTML = ''; } const h = $('#fxh'); if (h) h.classList.remove('on'); } catch (e) {}
+  try { const fx = $('#fx'); if (fx && !FXBUSY) { fx.className = ''; fx.innerHTML = ''; } const h = $('#fxh'); if (h) h.classList.remove('on'); } catch (e) {}
   document.documentElement.style.pointerEvents = ''; b.style.pointerEvents = '';
   try { zmApply(false); } catch (e) {}
   window.dispatchEvent(new Event('resize'));
@@ -10647,7 +10827,7 @@ document.addEventListener('pointerdown', ev => {  // перетягування 
 const TABMEM = {};
 const tabOf = () => { const n = route().name; return n === 'detail' || n === 'group' ? 'home' : n === 'storage' ? 'settings' : n === 'remote' ? 'devices' : n; };
 TABMEM[tabOf()] = location.hash || '#/';
-window.addEventListener('hashchange', () => { TABMEM[tabOf()] = location.hash || '#/'; });
+window.addEventListener('hashchange', () => { TABMEM[tabOf()] = route().name === 'remote' ? '#/devices' : (location.hash || '#/'); });
 document.addEventListener('click', ev => {
   const a = ev.target.closest && ev.target.closest('#tabs a'); if (!a) return;
   const t = TABS.find(x => x[1] === a.getAttribute('href')); if (!t || t[0] === tabOf()) return;
@@ -10733,8 +10913,12 @@ function render() {
   if (ENTER) { if (ENTERED.has(ekey)) ENTER = false; else ENTERED.add(ekey); }  // анімація появи — раз за сесію для кожної сторінки/вкладки
   const rkey = r.name + ':' + (r.id || '');
   if (!ENTER && r.name === 'remote' && S.lastRender === rkey && $('#rmbox') && $('#rmlist')) {  // дані оновились — пульт не перемальовуємо, лише тихо підправляємо змінене
+    const swS = (sel, html) => {  // смуга аніме: без «морфінгу» (він міг лишати дубль картки) — міняємо лише коли розмітка справді інша, зі збереженням прокрутки
+      const el = $(sel); if (!el || el._h === html) return; el._h = html;
+      const x = el.scrollLeft; el.innerHTML = html; el.scrollLeft = x;
+    };
     const sw = (sel, html) => { const el = $(sel); if (el) { try { morphInto(el, html); } catch (e) { el.innerHTML = html; } } };
-    rmSoft(); sw('#rmstrip', rmStrip()); sw('#rmsub', rmSub()); sw('#rmeps', rmEps()); sw('#rmeh', rmEpsHead());
+    rmSoft(); swS('#rmstrip', rmStrip()); swS('#rmsub', rmSub()); sw('#rmeps', rmEps()); sw('#rmeh', rmEpsHead());
     return;
   }
   const html = (pages[r.name] || homeHTML)();
@@ -10824,7 +11008,16 @@ function tickCd() {
   });
 }
 setInterval(tickCd, 1000);
-function pageHead(t) { return `<div class="bar"><h1>${t}</h1>${netHTML()}</div>`; }
+function dlActiveN() { return S.jobs.filter(j => j.status === 'running' || j.status === 'queued').length; }
+function dlHdrBtn() { const n = dlActiveN(); return n ? `<button class="ib" data-act="jobs" aria-label="Завантаження">${ico('download')}<span class="dot">${n}</span></button>` : ''; }
+function dlHdrSync() {  // кнопка черги в шапці вкладок «Пошук/Новинки/Пристрої/Налаштування», поки щось качається
+  const bar = $('#root .bar'); if (!bar || route().name === 'home' || route().name === 'detail') return;
+  const n = dlActiveN(); let b = bar.querySelector('.ib[data-act=jobs]');
+  if (!n) { if (b) b.remove(); return; }
+  if (!b) { bar.insertAdjacentHTML('beforeend', dlHdrBtn()); return; }
+  const d = b.querySelector('.dot'); if (d && d.textContent !== String(n)) d.textContent = n;
+}
+function pageHead(t) { return `<div class="bar"><h1>${t}</h1>${netHTML()}${dlHdrBtn()}</div>`; }
 const SITE_LIST = [['aniliberty', 'AniLiberty'], ['yummyani', 'YummyAnime'], ['animevost', 'AnimeVost'], ['animru', 'Anim-RU']];
 function siteRank(id) { const o = S.set.site_order || []; const i = o.indexOf(id); return i < 0 ? 99 : i; }
 function siteList() { return SITE_LIST.slice().sort((a, b) => siteRank(a[0]) - siteRank(b[0])); }  // порядок — як у налаштуваннях
@@ -10921,7 +11114,7 @@ function paintSearch(force) {
 function searchHTML() {
   const Q = S.search;
   return pageHead('Пошук') + `<div class="hdr2"><form class="sform" data-form="search"><div class="sbox">${ico('search')}
-      <input id="sq" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Назва аніме" value="${esc(Q.q)}">
+      <input id="sq" type="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" autocorrect="off" placeholder="Назва аніме або посилання" value="${esc(Q.q)}">
       <button type="button" class="sx" data-act="sclear" aria-label="Очистити">${ico('close')}</button></div>
     <button class="btn pri" type="submit">Знайти</button></form>
   <div class="sfil" id="sfil">${filHTML()}</div></div><div id="sres">${resHTML()}</div>`;
@@ -10936,25 +11129,48 @@ function nwHydrate(s) {  // показуємо останній відомий �
   const D = nwSD(s); if (D.hyd) return; D.hyd = true;
   try { const c = JSON.parse(localStorage.getItem('nwc_' + s) || 'null'); if (c && c.items && c.items.length) { D.items = c.items; D.page = 1; D.more = true; D.t = c.t || 0; D.stale = true; } } catch (e) {}
 }
+function nwKeys(x) {  // ключі для злиття однакових аніме з різних сайтів: усі назви/частини без дужок, років і службових слів
+  const ks = new Set();
+  [x.title, x.orig].forEach(t => {
+    if (!t) return;
+    const base = String(t).replace(/\[[^\]]*\]|\([^)]*\)/g, ' ');
+    [t, base].concat(base.split(/\s*[\/|]\s*|\s[—–-]\s/)).forEach(p => { const k = nwKey(String(p).replace(/\b(tv|тв|ova|ona)\b/gi, ' ')); if (k.length >= 3) ks.add(k); });
+  });
+  return [...ks];
+}
+function nwMix(ss, Ds) {  // Mix: стабільний список — нові сторінки лише дописуються, а повтори тихо зливаються з уже показаним (нагорі), нічого не переставляється
+  const M = S.nw.mix || (S.nw.mix = {});
+  const sig = ss.join(',');
+  if (M.sig !== sig || ss.some((id, i) => M.refs[id] !== Ds[i].items)) {  // список змінено (оновлення/інший набір сайтів) — збираємо наново
+    M.sig = sig; M.refs = {}; M.n = {}; M.out = []; M.idx = {};
+    ss.forEach(id => { M.n[id] = 0; });
+    const max = Math.max(0, ...Ds.map(D => D.items.length));
+    for (let i = 0; i < max; i++) ss.forEach((id, j) => { const x = Ds[j].items[i]; if (x) nwPut(M, x); });
+    ss.forEach((id, j) => { M.refs[id] = Ds[j].items; M.n[id] = Ds[j].items.length; });
+    return M.out;
+  }
+  ss.forEach((id, j) => { const L = Ds[j].items; for (let i = M.n[id]; i < L.length; i++) nwPut(M, L[i]); M.n[id] = L.length; });
+  return M.out;
+}
+function nwPut(M, x) {
+  const ks = nwKeys(x); let o = null;
+  for (const k of ks) { const c = M.idx[k]; if (c && !(c.year && x.year && String(c.year) !== String(x.year))) { o = c; break; } }
+  if (o) {
+    if (!o.sites.includes(x.site)) { o.sites.push(x.site); o.srcs.push({url: x.url, title: x.title}); }
+    if (!o.poster && x.poster) o.poster = x.poster;
+    if (!o.year && x.year) o.year = x.year;
+    if (!o.type && x.type) o.type = x.type;
+    if (!(o.genres || []).length && (x.genres || []).length) o.genres = x.genres;
+    if (!o.rating && x.rating) o.rating = x.rating;
+    if (x.lib) o.lib = true;
+  } else { o = {...x, sites: [x.site], srcs: [{url: x.url, title: x.title}]}; M.out.push(o); }
+  ks.forEach(k => { if (!M.idx[k]) M.idx[k] = o; });
+}
 function nwD() {  // зведений стан поточного вигляду (для Mix — злитий список з усіх сайтів, однакові аніме об'єднані)
   const ss = nwSites(); ss.forEach(nwHydrate);
   const Ds = ss.map(nwSD);
   if (ss.length === 1) return Ds[0];
-  const out = [], idx = {}, max = Math.max(0, ...Ds.map(D => D.items.length));
-  for (let i = 0; i < max; i++) Ds.forEach(D => {
-    const x = D.items[i]; if (!x) return;
-    const k = nwKey(x.title);
-    if (k && idx[k] !== undefined) {
-      const o = out[idx[k]];
-      if (!o.sites.includes(x.site)) { o.sites.push(x.site); o.srcs.push({url: x.url, title: x.title}); }
-      if (!o.poster && x.poster) o.poster = x.poster;
-      if (!o.year && x.year) o.year = x.year;
-      if (!o.type && x.type) o.type = x.type;
-      if (!(o.genres || []).length && (x.genres || []).length) o.genres = x.genres;
-      if (!o.rating && x.rating) o.rating = x.rating;
-      if (x.lib) o.lib = true;
-    } else { if (k) idx[k] = out.length; out.push({...x, sites: [x.site], srcs: [{url: x.url, title: x.title}]}); }
-  });
+  const out = nwMix(ss, Ds);
   const ts = Ds.map(D => D.t).filter(Boolean);
   return {items: out, more: Ds.some(D => D.more && !D.err), loading: Ds.some(D => D.loading), t: ts.length ? Math.min(...ts) : 0, tries: 0,
           err: Ds.some(D => D.items.length) ? '' : (Ds.map(D => D.err).find(Boolean) || ''),
@@ -11105,7 +11321,7 @@ function siteGroupHTML() {
     <button class="gh" data-act="sitetog"><div class="tx"><b>Основний сайт</b><span>${esc(nm(ord[0]))} · порядок сайтів</span></div>${ico('chev')}</button>
     <div class="fold"><div>
       <div class="row col"><span class="d">Нове аніме відкривається на першому сайті зі списку, де воно є; якщо там його немає — на наступному. Автоперевірка нових серій дивиться лише на той сайт, який вибрано для аніме, інші не навантажує.</span></div>
-      ${ord.map((id, i) => `<div class="row"><span class="site ${id}">${SITE_MARK[id]}</span><div class="tx"><b>${nm(id)}</b><span class="d">${i === 0 ? 'Основний' : 'Запасний ' + i}</span></div>
+      ${ord.map((id, i) => `<div class="row"><span class="site ${id}">${SITE_MARK[id]}</span><div class="tx"${id === 'yummyani' ? ' data-act="dubset" style="cursor:pointer"' : ''}><b>${nm(id)}${id === 'yummyani' ? ' ' + ico('star') : ''}</b><span class="d">${i === 0 ? 'Основний' : 'Запасний ' + i}${id === 'yummyani' ? ' · озвучки ›' : ''}</span></div>
         <button class="rb2 up" data-act="sitemv" data-s="${id}" data-d="-1" ${i === 0 ? 'disabled' : ''} aria-label="Вище">${ico('chev')}</button>
         <button class="rb2" data-act="sitemv" data-s="${id}" data-d="1" ${i === ord.length - 1 ? 'disabled' : ''} aria-label="Нижче">${ico('chev')}</button></div>`).join('')}
     </div></div></div>`;
@@ -11258,6 +11474,7 @@ function settingsHTML() {
       <label class="row sub"><input type="checkbox" data-set="logging" ${S.set.logging ? 'checked' : ''}><div class="tx"><b>Вести логи</b><span class="d">Журнали збоїв у папці crash_reports (її видно в «Файлах»).</span></div></label>
       <label class="row sub"><input type="checkbox" data-set="multitask" ${S.set.multitask ? 'checked' : ''}><div class="tx"><b>Багатозадачність</b><span class="d">До 3 серій одночасно й більше паралельних запитів. Швидше, але більше пам'яті й батареї.</span></div></label>
       <label class="row sub"><input type="checkbox" data-set="wv_reload" ${S.set.wv_reload ? 'checked' : ''}><div class="tx"><b>Очищати WebView перезавантаженням</b><span class="d">Після кількох переглянутих серій чи відкритих аніме сторінка перезавантажується, щоб звільнити пам'ять. Помітно (бібліотека на мить оновлюється), тому вимкнено.</span></div></label>
+      <label class="row sub"><input type="checkbox" data-set="old_cards" ${S.set.old_cards ? 'checked' : ''}><div class="tx"><b>Старий блоковий стиль</b><span class="d">Повертає у вкладці аніме другий варіант відображення серій (картки). Вимкнено — доступні лише список і блоки як у пульті.</span></div></label>
       ${IOS_APP ? `<label class="row sub"><input type="checkbox" data-set="plain_wv" ${S.set.plain_wv ? 'checked' : ''}><div class="tx"><b>Штатний WebView</b><span class="d">Замість власної оболонки — стандартний WebView Toga, без фонових циклів. Діє після перезапуску застосунку.</span></div></label>` : ''}
     </div></div>
   </div>`;
@@ -11372,13 +11589,12 @@ function homeHTML() {
     <button class="ib" data-act="notifs" data-lp="bellall" aria-label="Повідомлення">${ico('bell')}${S.notifs.unread ? `<span class="dot">${S.notifs.unread > 99 ? '99+' : S.notifs.unread}</span>` : ''}</button>
     <button class="ib" data-act="checkall" aria-label="Перевірити нові серії">${ico(S.checking ? 'spinner' : 'refresh')}</button>
     <button class="ib" data-act="jobs" aria-label="Завантаження">${ico('download')}${dlBadge ? `<span class="dot">${dlBadge}</span>` : ''}</button>
-    <button class="ib pri" data-act="add" aria-label="Додати">${ico('plus')}</button>
   </div>`}
   ${hdr2(homeTabsHTML())}
   ${tiles.length ? `<div class="grid${S.view.cols === 3 ? ' c3' : ''}">${cards}</div>` : S.items.length ? `<div class="empty"><h2>${S.libTab === 'arc' ? 'Тут поки порожньо' : 'Нічого не знайдено'}</h2><p>${S.libTab === 'arc' ? 'Додавайте сюди переглянуте аніме кнопкою «Переглянуто» в його картці.' : 'Змініть фільтр «Виходять зараз».'}</p></div>` : `
   <div class="empty"><div class="big">${ico('book')}</div><h2>Бібліотека порожня</h2>
-    <p>Додайте аніме за посиланням на його сторінку — і воно з'явиться тут з обкладинкою та описом.</p>
-    <p><button class="btn pri" data-act="add">${ico('plus')} Додати аніме</button></p></div>`}
+    <p>Знайдіть аніме у вкладці «Пошук» — за назвою або вставивши посилання на його сторінку.</p>
+    <p><button class="btn pri" data-act="gosearch">${ico('search')} Знайти аніме</button></p></div>`}
   ${S.reorder && S.libSel.size ? libBarHTML() : ''}
   ${!S.ffmpeg && S.items.length ? '<p class="err" style="padding:0 16px">' + ico('alert') + 'ffmpeg не знайдено — завантаження не працюватимуть.</p>' : ''}`;
 }
@@ -11485,8 +11701,8 @@ function detailHTML(id) {
     .map(c => `<span class="chip">${esc(c)}</span>`).join('');
   const sel = S.sel.size, sm = S.selMode;
   const dlN = S.jobs.filter(j => j.status === 'running' || j.status === 'queued').length;
-  const cardsMode = S.epView === 'cards';
-  const eps = it.episodes.map((e, i) => cardsMode ? epCardHTML(it, e, i) : epHTML(it, e, i)).join('');
+  const cardsMode = epMode() === 'cards', rmMode = epMode() === 'rm';
+  const eps = it.episodes.map((e, i) => rmMode ? epRmHTML(it, e, i) : cardsMode ? epCardHTML(it, e, i) : epHTML(it, e, i)).join('');
   const rc = relCounts(it), hasRel = rc.ord + rc.sim > 0;
   const canCm = !!(it.site && ['yummyani', 'aniliberty', 'animru', 'animevost'].includes(it.site.id));
   if (S.dtab === 'cm' ? !canCm : (!(hasRel || canCm) || (S.dtab === 'sim' && !rc.sim) || (S.dtab === 'ord' && !rc.ord))) S.dtab = 'eps';
@@ -11517,7 +11733,7 @@ function detailHTML(id) {
   ${tmp && it.preview_of && item(it.preview_of) ? `<div class="tmpbar">${ico('eye')}<span>Перегляд на сайті ${esc((it.site || {}).name || '')}. У бібліотеці це аніме лишається на ${esc((item(it.preview_of).site || {}).name || 'іншому сайті')} — запис не змінено.</span></div>` : tmp ? `<div class="tmpbar">${ico('eye')}<span>Перегляд без додавання в бібліотеку. Запис зникне сам, якщо його не додати (а завантаження додає аніме автоматично).</span></div>` : ''}
   <div class="srcs${S.busy.has('sw') ? ' dis' : ''}">${srcs.length > 1 ? srcs.map(x => `<button class="dchip${x.active ? ' on' : ''}" data-act="setsite" data-url="${esc(x.url)}">${siteIcon(x.site)}${esc(x.site.name)}</button>`).join('') : ''}
     <button class="dchip" data-act="findalts" ${S.busy.has('alts') ? 'disabled' : ''} aria-label="Знайти на інших сайтах">${ico(S.busy.has('alts') ? 'spinner' : 'search')}${srcs.length > 1 ? '' : ' Знайти на інших сайтах'}</button></div>
-  ${(it.dubs || []).length > 1 ? `<div class="dubs${S.busy.has('sw') ? ' dis' : ''}">${it.dubs.map(d => `<button class="dchip${d.active ? ' on' : ''}" data-act="setdub" data-dub="${esc(d.name)}">${esc(d.name)}${d.count ? `<em class="dcnt">${d.count} сер.</em>` : ''}${d.downloaded ? `<small>${ico('download')}${d.downloaded}</small>` : ''}</button>`).join('')}</div>` : ''}
+  ${(it.dubs || []).length > 1 ? `<div class="dubs${S.busy.has('sw') ? ' dis' : ''}">${it.dubs.map(d => `<button class="dchip${d.active ? ' on' : ''}" data-act="setdub" data-dub="${esc(d.name)}">${d.fav ? `<span class="dstar">${ico('star')}</span>` : ''}${esc(d.name)}${d.count ? `<em class="dcnt">${d.count} сер.</em>` : ''}${d.downloaded ? `<small>${ico('download')}${d.downloaded}</small>` : ''}</button>`).join('')}</div>` : ''}
   <div class="acts">
     <button class="btn pri" data-act="playnext" ${nx || it.episodes.length ? '' : 'disabled'}>${ico('play')} ${nx ? (nx.pos > 5 ? 'Продовжити · серія ' + esc(nx.n) : 'Дивитись · серія ' + esc(nx.n)) : 'Дивитись спочатку'}</button>
     ${tmp && it.preview_of && item(it.preview_of) ? `<button class="btn ok" data-act="openlib" data-id="${esc(it.preview_of)}">${ico('book')} Відкрити в бібліотеці</button>` : tmp ? `<button class="btn ok" data-act="keep" data-lp="gpick" data-cx="tmp" data-m="lib" ${S.busy.has('keep') ? 'disabled' : ''}>${ico('plus')} В бібліотеку</button><button class="btn" data-act="keepseen" data-lp="gpick" data-cx="tmp" data-m="seen" ${S.busy.has('keep') ? 'disabled' : ''}>${ico('check')} Переглянуте</button>`
@@ -11536,14 +11752,15 @@ function detailHTML(id) {
       <button class="btn sm" data-act="upto">${ico('eye')} Подивився до…</button>`}
     <div class="row2x">
     <div class="seg" role="group" aria-label="Вигляд серій">
-      <button class="${cardsMode ? '' : 'on'}" data-act="epview" data-v="list" aria-label="Список">${ico('vlist')}</button>
-      <button class="${cardsMode ? 'on' : ''}" data-act="epview" data-v="cards" aria-label="Картки">${ico('vgrid')}</button></div>
+      <button class="${cardsMode || rmMode ? '' : 'on'}" data-act="epview" data-v="list" aria-label="Список">${ico('vlist')}</button>
+      ${S.set.old_cards ? `<button class="${cardsMode ? 'on' : ''}" data-act="epview" data-v="cards" aria-label="Картки">${ico('vgrid')}</button>` : ''}
+      <button class="${rmMode ? 'on' : ''}" data-act="epview" data-v="rm" aria-label="Блоки">${ico('vblk')}</button></div>
     <select class="q" id="qsel" aria-label="Якість">${qSelHTML(it)}</select>
     </div>
   </div>
   <h3 class="sec">Серії</h3>
   ${sm ? `<p class="hint"${sel ? ' style="display:none"' : ''}>Торкайтесь серій, щоб вибрати кілька. Серію можна також утримати пальцем.</p>` : ''}
-  ${eps ? `<div class="epscr" id="epscr"><div class="${cardsMode ? 'epgrid' : 'eps'}">${eps}</div></div>` : '<div class="eps"><div style="padding:18px;color:var(--mu)">Серій поки немає.</div></div>'}` : S.dtab === 'cm' ? commentsHTML(it) : relHTML(it)}
+  ${eps ? `<div class="epscr" id="epscr"><div class="${rmMode ? 'epgrid epr' : cardsMode ? 'epgrid' : 'eps'}">${eps}</div></div>` : '<div class="eps"><div style="padding:18px;color:var(--mu)">Серій поки немає.</div></div>'}` : S.dtab === 'cm' ? commentsHTML(it) : relHTML(it)}
   ${tmp ? '' : `<p style="text-align:center;color:var(--mu);font-size:12px;margin-top:14px">Остання перевірка: ${esc(it.checked || '—')}</p>`}
   </div></div>
   ${sel && onEps ? `<div class="dlbar">${dlbarInner(it)}</div><div class="dlsp" style="height:150px"></div>` : ''}`;
@@ -11684,12 +11901,12 @@ function applySelMode() {  // вхід/вихід з режиму вибору �
   if (S.dtab !== 'eps') { render(); return; }
   const r = route(), it = r.name === 'detail' ? item(r.id) : null;
   if (!it) { render(); return; }
-  const cards = S.epView === 'cards', sm = S.selMode, sel = S.sel.size;
+  const cards = epMode() === 'cards', rmv = epMode() === 'rm', sm = S.selMode, sel = S.sel.size;
   const saved = ENTER; ENTER = false;
   it.episodes.forEach((e, i) => {
-    const row = document.querySelector(`#root ${cards ? '.ec' : '.ep'}[data-n="${CSS.escape(String(e.n))}"]`);
+    const row = document.querySelector(`#root ${rmv ? '.erm' : cards ? '.ec' : '.ep'}[data-n="${CSS.escape(String(e.n))}"]`);
     if (!row) return;
-    const t = document.createElement('div'); t.innerHTML = cards ? epCardHTML(it, e, i) : epHTML(it, e, i);
+    const t = document.createElement('div'); t.innerHTML = rmv ? epRmHTML(it, e, i) : cards ? epCardHTML(it, e, i) : epHTML(it, e, i);
     const nr = t.firstElementChild; nr.classList.remove('enter'); nr.style.animation = 'none';
     const oi = row.querySelector('img'), ni = nr.querySelector('img');
     if (oi && ni) ni.replaceWith(oi);
@@ -11720,7 +11937,7 @@ function paintSel() {  // зміна вибору без перемальову�
   const r = route(), it = r.name === 'detail' ? item(r.id) : null;
   if (!it) { render(); return; }
   const sel = S.sel.size;
-  document.querySelectorAll('#root .ep[data-n], #root .ec[data-n]').forEach(row => {
+  document.querySelectorAll('#root .ep[data-n], #root .ec[data-n], #root .erm[data-n]').forEach(row => {
     const on = S.sel.has(row.dataset.n); row.classList.toggle('sel', on);
     const ck = row.querySelector('.ck'); if (ck) { const h = on ? ico('check') : ''; if (ck.innerHTML !== h) ck.innerHTML = h; }
   });
@@ -11755,6 +11972,19 @@ function epCardHTML(it, e, i) {
   </div>`;
 }
 
+function epMode() { return S.epView === 'cards' && !S.set.old_cards ? 'list' : S.epView; }  // старий блоковий стиль доступний лише з опцією розробника
+function epRmHTML(it, e, i) {  // «блоки як у пульті» + значки: переглянуто / скачано, якість і розмір текстом
+  const sel = S.sel.has(String(e.n)), sm = S.selMode, dl = !!e.downloaded;
+  const thi = e.th ? `<div class="thi${S.set.blur_thumbs ? ' bl' : ''}" style="background-image:url('/thumb/${it.id}/${encodeURIComponent(e.n)}?v=${dl ? 1 : 0}')"></div>` : '';
+  const qt = dl ? [e.q, e.size ? fmtSize(e.size) : ''].filter(Boolean).join(' · ') : ('онлайн' + (e.qs && e.qs.length ? ' · до ' + e.qs[0] : ''));
+  return `<div class="rme erm${ENTER ? ' enter' : ''}${sel ? ' sel' : ''}${e.watched ? ' w' : ''}" data-n="${esc(e.n)}" style="--i:${Math.min(i || 0, 12)}">
+    <div class="th" data-act="${sm ? 'sel' : 'play'}">${thi}<span class="num">${esc(e.n)}</span>
+      ${sm ? `<span class="ck">${sel ? ico('check') : ''}</span>` : e.new ? '<span class="nw">нова</span>' : ''}
+      ${e.pos > 5 && !e.watched ? `<span class="rs">${ico('clock')}${fmtT(e.pos)}</span>` : ''}</div>
+    <div class="n">Серія ${esc(e.n)}</div><div class="tt">${e.title ? esc(e.title) : '&nbsp;'}</div>
+    <div class="ers">${sm ? `<span class="ei${e.watched ? ' on' : ''}">${ico('eye')}</span>` : `<button class="ei${e.watched ? ' on' : ''}" data-act="watch" aria-label="Переглянуто">${ico('eye')}</button>`}<span class="ei dl${dl ? ' on' : ''}" title="${dl ? 'Скачано' : 'Не скачано'}">${ico(dl ? 'download' : 'cloud')}</span><span class="eqs">${esc(qt)}</span></div>
+  </div>`;
+}
 function epHTML(it, e, i) {
   const sel = S.sel.has(String(e.n)), sm = S.selMode;
   const tags = [
@@ -11802,6 +12032,31 @@ function placePop(r, ww) {  // меню збоку від картки: ліва
   y = Math.max(10, Math.min(vh - h - 10, y));
   sh.style.width = w + 'px'; sh.style.left = x + 'px'; sh.style.top = y + 'px'; sh.style.setProperty('--po', ox + ' top');
 }
+function dubsHTML() {  // озвучки: улюблені (зірочка, порядок) і пріоритет автовибору
+  const D = S.dubset, tab = S.sheet.tab || 'fav', isF = tab === 'fav';
+  if (!D) return `<h3>Озвучки</h3><p class="hint">Завантаження…</p>`;
+  const sel = (isF ? S.set.dub_fav : S.set.dub_prio) || [], low = x => String(x).toLowerCase();
+  const inSel = n => sel.findIndex(x => low(x) === low(n));
+  const names = D.dubs.map(d => d.name), cnt = Object.fromEntries(D.dubs.map(d => [d.name, d.count]));
+  const rows = sel.concat(names.filter(n => inSel(n) < 0));
+  const hint = isF ? 'Улюблені озвучки стоять першими в списку озвучок аніме й мають зірочку. Порядок можна змінювати стрілками.'
+    : 'Коли відкриваєш аніме, вибирається перша озвучка з цього списку, яка в ньому є. Якщо її немає — наступна; якщо жодної немає — вибір як раніше (з найбільшою кількістю серій).';
+  return `<h3>Озвучки · YummyAnime</h3>
+    <div class="seg dubtabs"><button class="${isF ? 'on' : ''}" data-act="dubtab" data-t="fav">${ico('star')} Улюблені</button><button class="${isF ? '' : 'on'}" data-act="dubtab" data-t="prio">Пріоритет</button></div>
+    <p class="hint" style="margin:8px 4px">${hint}</p>
+    <div class="dublist">${rows.map(n => {
+      const i = inSel(n), on = i >= 0, c = cnt[n];
+      const lead = isF ? `<button class="dstb${on ? ' on' : ''}" data-act="dubtog" data-d="${esc(n)}" aria-label="Улюблена">${ico('star')}</button>`
+        : `<button class="dnum${on ? ' on' : ''}" data-act="dubtog" data-d="${esc(n)}" aria-label="Пріоритет">${on ? i + 1 : '+'}</button>`;
+      return `<div class="row dubr${on ? ' on' : ''}">${lead}<div class="tx"><b>${esc(n)}</b><span class="d">${c ? c + ' аніме' : 'бачив на сайті'}</span></div>
+        ${on ? `<button class="rb2 up" data-act="dubmv" data-d="${esc(n)}" data-v="-1" ${i === 0 ? 'disabled' : ''} aria-label="Вище">${ico('chev')}</button><button class="rb2" data-act="dubmv" data-d="${esc(n)}" data-v="1" ${i === sel.length - 1 ? 'disabled' : ''} aria-label="Нижче">${ico('chev')}</button>` : ''}</div>`;
+    }).join('') || '<p class="hint">Озвучок ще немає — додайте аніме або впишіть назву нижче.</p>'}</div>
+    <div class="row2" style="margin-top:10px"><input class="in" id="dubnew" placeholder="Своя озвучка (назва як на сайті)" autocapitalize="off"><button class="btn" data-act="dubadd">${ico('plus')}</button></div>`;
+}
+async function dubSave(k) {
+  const v = S.set[k]; try { await api('/api/settings', {[k]: v}); } catch (e) { toast(e.message, true); }
+  if (S.sheet && S.sheet.kind === 'dubs') renderSheet();
+}
 function renderSheet() {
   const s = S.sheet;
   if (!s) return;
@@ -11809,6 +12064,7 @@ function renderSheet() {
   if (s.kind === 'add') inner = addHTML();
   else if (s.kind === 'jobs') inner = jobsHTML();
   else if (s.kind === 'notifs') inner = notifsHTML();
+  else if (s.kind === 'dubs') inner = dubsHTML();
   else if (s.kind === 'cmenu' && s.res) inner = `<h3>${esc(s.res.title)}</h3><div class="cm">
      <button data-act="rsshare">${ico('share')} Поділитись</button>
      <button data-act="rslib" data-lp="gpick" data-m="lib">${ico('plus')} Додати в Бібліотеку</button>
@@ -11885,6 +12141,12 @@ function askNumber(title, value) {
   return new Promise(res => { S.dlg = res; openSheet('number', {title, value}); });
 }
 
+function addDubChips(dubs, L) {  // вибір озвучки: чипи (улюблені — із зірочкою-іконкою), за замовчуванням — за пріоритетом
+  const cur = dubs.includes(S.addDub) ? S.addDub : (L.dub_pick && dubs.includes(L.dub_pick) ? L.dub_pick : dubs[0]);
+  S.addDub = cur;
+  const fav = d => (S.set.dub_fav || []).some(x => x.toLowerCase() === d.toLowerCase());
+  return `<div class="dubs adddubs">${dubs.map(d => `<button class="dchip${d === cur ? ' on' : ''}" data-act="adddubpick" data-dub="${esc(d)}">${fav(d) ? `<span class="dstar">${ico('star')}</span>` : ''}${esc(d)}</button>`).join('')}</div>`;
+}
 function addHTML() {
   const L = S.lookup;
   let res = '';
@@ -11893,7 +12155,7 @@ function addHTML() {
     res = `<div class="res"><div class="pic"${L.meta.poster ? ` style="background-image:url('/img?u=${encodeURIComponent(L.meta.poster)}')"` : ''}></div>
       <div class="tx"><b>${esc(L.title)}</b>${siteIcon(L.site)} ${esc((L.site || {}).name || '')} · серій: ${esc(L.count)}${L.meta.year ? ' · ' + esc(L.meta.year) : ''}
       ${L.meta.description ? `<p>${esc(L.meta.description)}</p>` : ''}</div></div>
-      ${dubs.length ? `<div class="row2"><select class="in" id="adddub">${dubs.map(d => `<option>${esc(d)}</option>`).join('')}</select></div>` : ''}
+      ${dubs.length ? addDubChips(dubs, L) : ''}
       ${L.can_add ? `<button class="btn pri" style="width:100%" data-act="doadd" ${S.busy.has('add') ? 'disabled' : ''}>${ico('book')} Додати в бібліотеку</button>
         <button class="btn" style="width:100%;margin-top:8px" data-act="addview">${ico('play')} Переглянути вкладку</button>`
                   : `<p class="err">${esc(L.hint)}</p>`}`;
@@ -12174,6 +12436,7 @@ async function pollJobs() {
     lastDone = done;
     if (S.sheet && S.sheet.kind === 'jobs') updateJobs();
     else if (!S.sheet && route().name === 'home') render();
+    else if (route().name !== 'home' && route().name !== 'detail') dlHdrSync();
     else if (route().name === 'detail') {  // лічильник завантажень у шапці — на місці, без перемальовування
       const n = S.jobs.filter(x => x.status === 'running' || x.status === 'queued').length;
       const b = $('#root .bar .ib[data-act=jobs]');
@@ -12342,6 +12605,11 @@ const A = {
     if (!el.classList.contains('conf')) { el.classList.add('conf'); el.textContent = 'Точно?'; setTimeout(() => { if (el.isConnected) { el.classList.remove('conf'); el.textContent = 'Відʼєднати'; } }, 3000); return; }
     try { S.sync = await api('/api/sync_unpair', {id: el.dataset.id}); paintSync(); } catch (e) { toast(e.message, true); }
   },
+  fxsel(el) {
+    const k = el.dataset.s; S.set.fx_style = k; api('/api/settings', {fx_style: k}).catch(e => toast(e.message, true));
+    const b = $('#dvbox'); if (b) { b.dataset.h = ''; paintSync(); }
+    clearTimeout(FXDEMO); fxPlay('out', null, k); FXDEMO = setTimeout(() => fxPlay('in', null, k), FXDUR[k] + 900);
+  },
   async xgest(el) { try { await api('/api/settings', {xgest: el.dataset.m}); if (S.set) S.set.xgest = el.dataset.m; paintSync(); const b = $('#dvbox'); if (b) { b.dataset.h = ''; paintSync(); } } catch (e) { toast(e.message, true); } },
   async dxfer(el) { try { S.sync = await api('/api/sync_xfer', {id: el.dataset.id, mode: el.dataset.x}); paintSync(); } catch (e) { toast(e.message, true); } },
   async dpush(el) {
@@ -12363,6 +12631,7 @@ const A = {
   dvx(el) { S.dvOpen = S.dvOpen || {}; S.dvOpen[el.dataset.k] = !S.dvOpen[el.dataset.k]; const b = $('#dvbox'); if (b) b.dataset.h = ''; paintSync(); },
   dmenu(el) { const r = el.getBoundingClientRect(); openSheet('dmenu', {id: el.dataset.id, rect: r}); },
   async dsync(el) { closeSheet(); A.syncnow(); },
+  dremote(el) { const id = el.dataset.id; closeSheet(); rcStart(id); S.rm.manual = false; S.rm.pend = null; location.hash = '#/remote'; },
   async drename(el) {
     const p = peerOf(el.dataset.id); if (!p) return;
     const v = await askText('Назва пристрою', p.name, 'Так він називатиметься лише в цьому застосунку.');
@@ -12426,6 +12695,10 @@ const A = {
   smore() { S.search.limit = (S.search.limit || 36) + 36; paintSearch(true); },
   async dosearch() {
     const Q = S.search, inp = $('#sq'), q = (inp ? inp.value : Q.q).trim();
+    if (/^https?:\/\/\S+$/i.test(q)) {  // посилання на сторінку аніме — шукаємо саме його й пропонуємо додати
+      if (inp) inp.blur(); S.lookup = null; S.addErr = ''; openSheet('add');
+      setTimeout(() => { const u = $('#addurl'); if (u) { u.value = q; A.find(); } }, 80); return;
+    }
     if (q.length < 2) { toast('Введіть хоча б 2 символи', true); return; }
     if (inp) inp.blur();
     Q.q = q; Q.err = ''; Q.res = null; Q.loading = true; Q.limit = 36; const my = ++Q.seq; paintSearch(true);
@@ -12547,6 +12820,24 @@ const A = {
     try { await api('/api/watched_many', {id, episodes: w.map(e => e.n), value: v}); S.sel.clear(); S.selMode = false; await loadLib(); toast(v ? 'Позначено переглянутими' : 'Позначку знято', false, 'check'); }
     catch (e) { toast(e.message, true); }
   },
+  async dubset() { S.dubset = null; openSheet('dubs', {tab: 'fav'}); try { S.dubset = await api('/api/dubs'); } catch (e) { toast(e.message, true); } if (S.sheet && S.sheet.kind === 'dubs') renderSheet(); },
+  adddubpick(el) { S.addDub = el.dataset.dub; document.querySelectorAll('.adddubs .dchip').forEach(c => c.classList.toggle('on', c === el)); },
+  dubtab(el) { S.sheet.tab = el.dataset.t; renderSheet(); },
+  dubtog(el) {
+    const k = S.sheet.tab === 'prio' ? 'dub_prio' : 'dub_fav', n = el.dataset.d, a = (S.set[k] || []).slice(), i = a.findIndex(x => x.toLowerCase() === n.toLowerCase());
+    if (i >= 0) a.splice(i, 1); else a.push(n); S.set[k] = a; dubSave(k);
+  },
+  dubmv(el) {
+    const k = S.sheet.tab === 'prio' ? 'dub_prio' : 'dub_fav', a = (S.set[k] || []).slice(), i = a.findIndex(x => x.toLowerCase() === el.dataset.d.toLowerCase()), j = i + Number(el.dataset.v);
+    if (i < 0 || j < 0 || j >= a.length) return; [a[i], a[j]] = [a[j], a[i]]; S.set[k] = a; dubSave(k);
+  },
+  dubadd() {
+    const inp = $('#dubnew'), n = inp ? inp.value.trim() : ''; if (!n) return;
+    const k = S.sheet.tab === 'prio' ? 'dub_prio' : 'dub_fav', a = (S.set[k] || []).slice();
+    if (!a.some(x => x.toLowerCase() === n.toLowerCase())) a.push(n);
+    if (S.dubset && !S.dubset.dubs.some(d => d.name.toLowerCase() === n.toLowerCase())) S.dubset.dubs.push({name: n, count: 0});
+    S.set[k] = a; dubSave(k);
+  },
   sitetog() { S.siteOpen = !S.siteOpen; const g = $('#sitegrp'); if (g) g.classList.toggle('open', S.siteOpen); },
   sitemv(el) {
     const ord = siteOrder(), i = ord.indexOf(el.dataset.s), j = i + Number(el.dataset.d);
@@ -12555,6 +12846,7 @@ const A = {
     api('/api/settings', {site_order: ord}).catch(e => toast(e.message, true));
     render();
   },
+  gosearch() { location.hash = '#/search'; },
   add() { S.lookup = null; S.addErr = ''; openSheet('add'); setTimeout(() => $('#addurl') && $('#addurl').focus(), 250); },
   async paste() {
     try { $('#addurl').value = await navigator.clipboard.readText(); }
@@ -12578,7 +12870,7 @@ const A = {
         if (st.stage !== F.stage) { F.stage = st.stage; const el = $('#findstage'); if (el) el.textContent = st.stage; }
         if (st.done) {
           if (st.error) throw new Error(st.error);
-          S.lookup = st.result; S.lookup.srcurl = url; break;
+          S.lookup = st.result; S.lookup.srcurl = url; S.addDub = null; break;
         }
         await new Promise(r => setTimeout(r, 350));
       }
@@ -12595,7 +12887,7 @@ const A = {
     await openAnime(u, L.title, true, [{url: u, title: L.title}]);
   },
   async doadd() {
-    const dub = $('#adddub') ? $('#adddub').value : null;
+    const dub = S.addDub || null;
     S.busy.add('add'); renderSheet();
     try {
       const r = await api('/api/add', {token: S.lookup.token, dubbing: dub});
@@ -13092,7 +13384,7 @@ addEventListener('click', ev => { if (Date.now() - GP.t < 400) { ev.preventDefau
 function lpCancel() { clearTimeout(LP.timer); LP.timer = null; }
 document.addEventListener('pointerdown', ev => {
   if (route().name !== 'detail' || S.cur) return;
-  const row = ev.target.closest('.ep,.ec'); if (!row || ev.target.closest('button,a,select')) return;
+  const row = ev.target.closest('.ep,.ec,.erm'); if (!row || ev.target.closest('button,a,select')) return;
   LP.x = ev.clientX; LP.y = ev.clientY; lpCancel();
   LP.timer = setTimeout(() => {
     LP.timer = null; LP.t = Date.now();
@@ -13103,7 +13395,7 @@ document.addEventListener('pointerdown', ev => {
 });
 document.addEventListener('pointermove', ev => { if (LP.timer && Math.hypot(ev.clientX - LP.x, ev.clientY - LP.y) > 9) lpCancel(); });
 ['pointerup', 'pointercancel', 'scroll'].forEach(t => document.addEventListener(t, lpCancel, true));
-document.addEventListener('contextmenu', ev => { if (ev.target.closest('.ep,.ec')) ev.preventDefault(); });
+document.addEventListener('contextmenu', ev => { if (ev.target.closest('.ep,.ec,.erm')) ev.preventDefault(); });
 document.addEventListener('click', ev => {
   if (Date.now() - LP.t < 600 && !(ev.target.closest && ev.target.closest('.sheet button, .sheet input'))) { ev.preventDefault(); ev.stopPropagation(); return; }
   const el = ev.target.closest('[data-act]');
@@ -13179,6 +13471,7 @@ document.addEventListener('change', ev => {
     if (ev.target.dataset.set === 'blur_thumbs') document.querySelectorAll('.ec .th img, .rme .thi').forEach(i => i.classList.toggle('bl', ev.target.checked));
     if (ev.target.dataset.set === 'auto_next') { const c = $('#pauto'); if (c) c.checked = ev.target.checked; }
     if (ev.target.dataset.set === 'ios_player') applyPlayerMode();
+    if (ev.target.dataset.set === 'old_cards' && !ev.target.checked && S.epView === 'cards') { S.epView = 'list'; try { localStorage.setItem('epv', 'list'); } catch (e) {} }
   }
 });
 
@@ -13274,7 +13567,9 @@ async function play(id, n, startT, _retry) {
       let fsTries = 0;  // системний плеєр інколи не відкривається з першого разу (немає «жесту»/відео ще не готове) — пробуємо на кількох подіях і з інтервалом
       const fsTry = () => { try { if (S.cur && S.cur.id === id && S.cur.n === n && !V.webkitDisplayingFullscreen && V.webkitEnterFullscreen && V.readyState >= 1) V.webkitEnterFullscreen(); } catch (er) {} };
       ['loadedmetadata', 'canplay', 'playing'].forEach(ev => V.addEventListener(ev, fsTry, {once: true}));
-      const fsT = setInterval(() => { if (!S.cur || S.cur.id !== id || S.cur.n !== n || V.webkitDisplayingFullscreen || ++fsTries > 8) { clearInterval(fsT); return; } fsTry(); }, 500);
+      const fsT = setInterval(() => { if (!S.cur || S.cur.id !== id || S.cur.n !== n || V.webkitDisplayingFullscreen || ++fsTries > 40) { clearInterval(fsT); return; } fsTry(); }, 400);
+      const fsTap = () => { if (S.cur && S.cur.id === id && S.cur.n === n && !V.webkitDisplayingFullscreen) fsTry(); };  // запасний варіант: перший дотик у плеєрі відкриває системний
+      $('#player').addEventListener('pointerup', fsTap, {once: true});
     }
   } catch (er) { msg.classList.remove('hide'); msg.innerHTML = ico('error') + esc(er.message); }
 }
@@ -13453,7 +13748,7 @@ function zmFull() {  // у скільки разів треба збільшит
   return Math.max(ca / va, va / ca, 1);
 }
 function zmApply(anim) {
-  const f = zmFull(), sc = ZM.fill ? f : 1;
+  const f = zmFull(), sc = (ZM.fill && window.innerWidth > window.innerHeight) ? f : 1;  // у портреті — звичайний розмір, у горизонталі повертається
   V.style.transition = anim ? 'transform .3s cubic-bezier(.2,.8,.2,1)' : 'none';
   V.style.transform = sc > 1.002 ? `scale3d(${sc},${sc},1)` : '';
 }
@@ -13466,7 +13761,7 @@ function zmApply(anim) {
     if (ZM.cur !== tgt && ZM.on) raf = requestAnimationFrame(tick);
   };
   pl.addEventListener('touchstart', ev => {
-    if (ev.touches.length === 2 && !V.webkitDisplayingFullscreen) { ZM.on = true; ZM.t = Date.now(); ZM.f = zmFull(); ZM.d0 = dist(ev.touches) || 1; ZM.base = ZM.fill ? ZM.f : 1; ZM.cur = tgt = ZM.base; V.style.transition = 'none'; }
+    if (ev.touches.length === 2 && !V.webkitDisplayingFullscreen && window.innerWidth > window.innerHeight) { ZM.on = true; ZM.t = Date.now(); ZM.f = zmFull(); ZM.d0 = dist(ev.touches) || 1; ZM.base = ZM.fill ? ZM.f : 1; ZM.cur = tgt = ZM.base; V.style.transition = 'none'; }
   }, {passive: true});
   pl.addEventListener('touchmove', ev => {
     if (!ZM.on) return;
@@ -13537,7 +13832,7 @@ $('#vfs').addEventListener('click', () => {
 })();
 let PIPB = 0;
 $('#vpip').addEventListener('click', async () => {
-  if (PIPB && Date.now() - PIPB < 1500) return;  // швидкі повторні натискання ламають перехід у PiP
+  if (PIPB && Date.now() - PIPB < 3500) return;  // поки триває перехід у/з PiP, нові натискання ігноруємо — вони й «підвішували» плеєр
   PIPB = Date.now();
   try {
     if (V.webkitSetPresentationMode) V.webkitSetPresentationMode(V.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture');
@@ -13565,10 +13860,17 @@ function audRescue() {  // після повернення з фону ауді�
   setTimeout(() => { try { if (AUD && AUD.ctx.state !== 'running') AUD.ctx.resume().catch(() => {}); } catch (e) {} }, 900);
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) audRescue(); });
+function ghostFix() {  // після розгортання застосунку прибираємо залишкові анімації/зсуви карток (накладання)
+  try { document.querySelectorAll('#root .card, #root .card *').forEach(n => { if (n.style && (n.style.transform || n.style.transition || n.style.animation)) { n.style.transform = ''; n.style.transition = ''; n.style.animation = ''; } }); } catch (e) {}
+}
+document.addEventListener('touchmove', ev => { const sp = document.getElementById('splash'); if (sp && !sp.classList.contains('out')) ev.preventDefault(); }, {passive: false});
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { ghostFix(); setTimeout(ghostFix, 300); } });
+window.addEventListener('pageshow', ghostFix);
 window.addEventListener('pageshow', audRescue);
 window.addEventListener('focus', () => { if (S.cur && !V.paused) audRescue(); });
 V.addEventListener('webkitpresentationmodechanged', () => {  // вихід з PiP не повинен лишати інтерфейс «мертвим»
-  PIPB = 0;
+  PIPB = Date.now() - 2600;  // ще ~0.9 с після завершення переходу кнопка не реагує
+  setTimeout(() => { try { V.style.visibility = 'hidden'; void V.offsetHeight; V.style.visibility = ''; } catch (e) {} }, 200);
   if (V.webkitPresentationMode === 'picture-in-picture') return;
   [120, 600, 1500].forEach(d => setTimeout(() => {
     if (!S.cur) return;
@@ -13617,13 +13919,16 @@ function clearNowPlaying() {  // прибираємо картку «Мої ан
     ms.playbackState = 'none';
   } catch (e) {}
 }
+function audSleep() {  // Web Audio тримає системну картку «Відтворюється» (з IP замість назви) — зупиняємо контекст, коли серію закрито
+  [0, 500, 1500].forEach(d => setTimeout(() => { try { if (!S.cur && AUD && AUD.ctx.state === 'running') AUD.ctx.suspend().catch(() => {}); } catch (e) {} clearNowPlaying(); }, d));
+}
 function closePlayer() {
   nxCancel(); savePos(true);
   let wasFs = false;
   try { if (V.webkitDisplayingFullscreen && V.webkitExitFullscreen) { wasFs = true; V.webkitExitFullscreen(); } } catch (e) {}
   document.title = 'Мої аніме'; V.removeAttribute('poster');
   clearNowPlaying(); setTimeout(clearNowPlaying, 400);
-  V.pause();
+  V.pause(); audSleep();
   clearTimeout(clrT);
   // джерело знімаємо не одразу, а коли системний повноекранний плеєр вже закрився: зняття src під час його анімації могло вбивати програму
   if (wasFs) clrT = setTimeout(() => { if (!S.cur) { V.removeAttribute('src'); V.load(); } }, 600); else { V.removeAttribute('src'); V.load(); }
@@ -13685,6 +13990,9 @@ function devBody() {
       <div class="dvcard gest ${g === 'top' ? 'dim' : ''}"><div class="gdemo"><div class="gph e"><i class="gglow"></i><i class="gb b1"></i><i class="gb b2"></i><i class="gb b3"></i><i class="gf"></i></div></div>
       <div class="tx"><b>Затиснути справа й провести вгору</b><span class="d">Затисніть правий край посередині екрана — він затремтить. Тоді проведіть пальцем угору, щоб перекинути.</span></div></div>
       ${y.handoff_on ? '' : '<p class="dvhint" style="color:var(--ac)">Спершу ввімкніть «Передачу між пристроями».</p>'}`;
+    const fs = fxStyle();
+    h += `<div class="dvsec">Анімація передачі</div><div class="fxtiles">${[['blocks', 'Блоки'], ['vortex', 'Вихор'], ['edge', 'Свічення']].map(([k, t]) => `<button class="fxt${fs === k ? ' on' : ''}" data-act="fxsel" data-s="${k}"><div class="fxm v-${k}">${fxMini(k)}</div><span>${t}</span></button>`).join('')}</div>
+      <p class="dvhint">Торкніться, щоб вибрати й побачити приклад. Анімація однакова для надсилання й отримання.</p>`;
   }
   return h;
 }
@@ -13700,6 +14008,7 @@ function dmenuHTML(s) {
     ${p.online ? `<button data-act="dpx" class="${s.px ? 'xo' : ''}">${ico('download')} Передати налаштування <span class="chv">${ico('chev')}</span></button>
     <div class="px ${s.px ? 'o' : ''}">${[['all', 'Усе'], ['view', 'Вид бібліотеки'], ['player', 'Налаштування плеєра'], ['other', 'Інші налаштування']].map(([m, t]) => `<button data-act="dpush" data-id="${esc(p.id)}" data-sc="${m}">${t}</button>`).join('')}</div>` : ''}
     <div class="xf"><span class="xl">Перекидання на цей пристрій</span><div class="seg sm">${[['std', 'Звичайне'], ['only', 'Єдиний'], ['never', 'Ніколи']].map(([m, t]) => `<button data-act="dxfer" data-id="${esc(p.id)}" data-x="${m}" class="${(p.xfer || 'std') === m ? 'on' : ''}">${t}</button>`).join('')}</div></div>
+    ${p.online ? `<button data-act="dremote" data-id="${esc(p.id)}">${ico('cast')} Відкрити пульт</button>` : ''}
     <button data-act="drename" data-id="${esc(p.id)}">${ico('edit')} Змінити назву</button>
     <button class="dng" data-act="dunpair" data-id="${esc(p.id)}">${ico('trash')} Відʼєднати</button></div>`;
 }
@@ -13781,6 +14090,11 @@ function closePair() {
   if (!S.cur) document.body.style.overflow = '';
   api('/api/sync_pairmode', {on: false}).then(j => { S.sync = j; paintSync(); }).catch(() => {});
 }
+function fxMini(k) {
+  if (k === 'vortex') return '<i class="mc"></i>' + [0, 90, 180, 270, 45].map((a, n) => `<i class="mw" style="--a:${a}deg;animation-delay:${n * 90}ms"><i class="mv" style="animation-delay:${n * 90}ms"></i></i>`).join('');
+  if (k === 'edge') return '<i class="mf"></i><i class="mx"></i>';
+  return '<i class="mb m1"></i><i class="mb m2"></i><i class="mb m3"></i>';
+}
 function paintSync() {
   paintPair(); castSync();
   const o = S.sync && S.sync.offer; if (o && o.hid !== S.lastOffer) askOffer(o);
@@ -13821,7 +14135,7 @@ function castSync() { document.body.classList.toggle('nocast', !castTargets().le
 function castPick(mode, extra) {
   const on = castTargets();
   if (!S.sync || !S.sync.handoff_on) { toast('Увімкніть «Передачу між пристроями» у вкладці «Пристрої»', true); return; }
-  if (!on.length) { toast('Немає пристрою, на який можна перекинути', true); return; }
+  if (!on.length) { fxPlay('fail'); toast('Зараз немає пристрою, на який можна перекинути', true); return; }
   if (on.length === 1) { throwTo(on[0].id, mode, extra); return; }
   openSheet('cast', {mode, extra});
 }
@@ -13838,19 +14152,21 @@ async function throwTo(pid, mode, extra) {
   else if (r.name === 'detail') b.id = r.id;
   try {
     await api('/api/sync_cast', b);
-    gpHaptic();
-    fxRun('out');
-    const toRemote = mode === 'cast' && S.sync && S.sync.rc_out_on && (S.cur || b.play);  // самі передали відтворення — відкриваємо вкладку пульта
-    if (S.cur) { blurSwap(() => { closePlayer(); if (toRemote) { rcStart(pid); S.rm.manual = false; S.rm.pend = null; location.hash = '#/remote'; } }); }
-    else if (toRemote) { rcStart(pid); S.rm.manual = false; location.hash = '#/remote'; }
-  } catch (e) { toast(e.message, true); }
+  } catch (e) { fxPlay('fail'); toast(e.message, true); return; }
+  gpHaptic();
+  const toRemote = mode === 'cast' && S.sync && S.sync.rc_out_on && (S.cur || b.play);  // самі передали відтворення — відкриваємо вкладку пульта
+  fxPlay('out', () => {
+    if (S.cur) closePlayer();
+    if (toRemote) { rcStart(pid); S.rm.manual = false; S.rm.pend = null; location.hash = '#/remote'; }
+  });
 }
 async function applyHandoff(h) {
   S.lastHid = h.hid;
   api('/api/sync_ack', {hid: h.hid}).catch(() => {});
-  try { await loadLib('vis'); } catch (e) {}
-  fxRun('in'); gpHaptic();
-  blurSwap(() => {
+  gpHaptic();
+  const loaded = loadLib('vis').catch(() => {});  // дані вантажимо під час анімації; екран тим часом «застиг» під розмиттям
+  fxPlay('in', async () => {
+    await loaded;
     if (S.sheet) closeSheet();
     if (S.cur) closePlayer();
     rcStop();
@@ -13861,6 +14177,7 @@ async function applyHandoff(h) {
     if (y > 0) [300, 800, 1600].forEach(t => setTimeout(() => { if (!S.cur) window.scrollTo(0, y); }, t));
     if (h.open && h.open.url) openAnime(h.open.url, h.open.title, !!h.open.explicit, h.open.srcs || [{url: h.open.url, title: h.open.title}]);
     if (h.play && h.kid && item(h.kid)) setTimeout(() => play(h.kid, h.play.n, h.play.t), 350);
+    await new Promise(r => setTimeout(r, 120));  // даємо новій вкладці намалюватись під розмиттям
   });
 }
 // плеєр звітує про стан і забирає команди пульта
@@ -13907,7 +14224,7 @@ function rcBarFill() {
     <button class="rcx" data-rc="exp" aria-label="Розгорнути пульт">${ico('expand')}</button><button class="rcx" data-rc="min" aria-label="Згорнути">${ico('chev')}</button></div>
    <div class="rcsk"><span id="rcc">0:00</span><input type="range" id="rcseek" min="0" max="1000" value="0"><span id="rcd">0:00</span></div>
    <div class="rcb"><button class="cb sm" data-rc="prev">${ico('prev')}</button><button class="cb" data-rc="back">${ico('back10')}</button><button class="cb big" id="rcpp" data-rc="pp">${ico('pause')}</button><button class="cb" data-rc="fwd">${ico('fwd10')}</button><button class="cb sm" data-rc="next">${ico('next')}</button></div>
-   <div class="rcvl"><span class="rcvi">${ico('vol')}</span><input type="range" id="rcvol" min="0" max="100" value="100"><span id="rcvn">100</span></div></div>`;
+   <div class="rcvl"><span class="rcvi">${ico('vol')}</span><div class="rcvw"><input type="range" id="rcvol" min="0" max="100" value="100"><i class="rcv100"></i></div><span id="rcvn">100</span></div></div>`;
   if (RC.st) rcPaint(RC.st, true);
 }
 function rcStop() { RC.pid = null; const el = $('#rcbar'); if (el) { el.classList.add('hide'); el.innerHTML = ''; } document.body.classList.remove('rcon'); if (route().name === 'remote') renderRm(); }
@@ -13938,6 +14255,15 @@ function rcAct(b) {
   el.addEventListener('touchend', tap, {passive: false}); el.addEventListener('pointerup', ev => { if (ev.pointerType === 'mouse') tap(ev); });
   ['touchstart', 'pointerdown'].forEach(t => el.addEventListener(t, ev => ev.stopPropagation()));
 })();
+function rcSavePos(st) {  // пульт сам фіксує позицію перегляду: якщо пристрій, що грає, закрили/приспали, нічого не губиться
+  const now = Date.now();
+  if (!st || !st.id || !(st.t > 3) || now - (RC.posT || 0) < 5000) return;
+  RC.posT = now;
+  const it = item(st.id), e = it && (it.episodes || []).find(x => String(x.n) === String(st.ep)); if (!e) return;
+  if (st.dur && st.t > st.dur - 15) return;  // кінець серії лишаємо позначці «переглянуто»
+  e.pos = st.t; RC.lastPos = {id: st.id, n: e.n, t: st.t};
+  api('/api/progress', {id: st.id, n: e.n, t: st.t}).catch(() => {});
+}
 function rcPaint(st, force) {
   if (!force && Date.now() < (RC.hold || 0)) return;
   RC.st = st; const it = $('#rct'); if (!it) return;
@@ -13947,8 +14273,9 @@ function rcPaint(st, force) {
   if (RC.volT) { if (now < RC.volT.until && st.vol != null && Math.abs(st.vol - RC.volT.v) > 2) keepV = true; else RC.volT = null; }
   const tx = (e, v) => { if (e && e.textContent !== v) e.textContent = v; };  // пишемо лише зміни — інакше інтерфейс миготить
   const hh = (e, v) => { if (e && e.dataset.k !== v) { e.dataset.k = v; e.innerHTML = ico(v); } };
-  tx(it, st.title ? st.title : 'Грає на «' + RC.name + '»');
-  tx($('#rcs'), 'Серія ' + st.ep + ' · «' + RC.name + '»');
+  const onRm = route().name === 'remote';  // на сторінці пульта підписи інші, ніж у плаваючій панелі, — не перезаписуємо їх по черзі (це й блимало)
+  tx(it, onRm ? (st.title || 'Грає') : (st.title ? st.title : 'Грає на «' + RC.name + '»'));
+  tx($('#rcs'), onRm ? rmSubText(st) : 'Серія ' + st.ep + ' · «' + RC.name + '»');
   if (!RC.drag && !keepT) { tx($('#rcc'), fmtT(st.t)); const sv = st.dur ? Math.round(1000 * st.t / st.dur) : 0, sk = $('#rcseek'); if (sk && Number(sk.value) !== sv) sk.value = sv; }
   tx($('#rcd'), fmtT(st.dur));
   hh($('#rcpp'), st.paused ? 'play' : 'pause'); hh($('#rcpp2'), st.paused ? 'play' : 'pause');
@@ -13958,6 +14285,17 @@ function rcPaint(st, force) {
   rcPaintExtra(st);
   rmSync(st);
 }
+function rcSl() {  // кольори повзунків пульта (як у плеєрі): фіолетовий, жовтий понад 100%, позначки інтро/аутро під повзунком, мітка 100%
+  document.querySelectorAll('#rcseek').forEach(r => {
+    const p = Number(r.value) / Number(r.max || 1000) * 100; r.style.setProperty('--p', p + '%');
+  });
+  document.querySelectorAll('#rcvol').forEach(r => {
+    const m = Number(r.max) || 100, v = Number(r.value), p = v / m * 100, b = Math.min(p, 100 / m * 100);
+    r.style.setProperty('--p', p + '%'); r.style.setProperty('--b', b + '%');
+    const mk = r.parentNode.querySelector('.rcv100'); if (mk) { mk.style.display = m > 100 ? 'block' : 'none'; mk.style.left = 'calc(' + (100 / m * 100) + '% - 1px)'; }
+  });
+}
+setInterval(rcSl, 250); document.addEventListener('input', rcSl, true);
 function rcPaintExtra(st) {  // позначки інтро/аутро на шкалі, кнопка пропуску і відлік наступної серії
   const mk = $('#rcmks'); if (!mk) return;
   const d = st.dur || 0, key = d + '|' + (st.op || '') + '|' + (st.ed || '');
@@ -13969,6 +14307,9 @@ function rcPaintExtra(st) {  // позначки інтро/аутро на шк
       h += `<i class="${c}" style="left:${(a / d * 100).toFixed(2)}%;width:${((b - a) / d * 100).toFixed(2)}%"></i>`;
       lg += `<span class="${c}"><i></i>${n} ${fmtT(a)}–${fmtT(b)}</span>`;
     });
+    const sk = $('#rcseek');
+    if (sk) { ['os', 'oe', 'es', 'ee'].forEach(k => sk.style.setProperty('--' + k, '0%'));
+      [['o', st.op], ['e', st.ed]].forEach(([c, w]) => { if (!d || !w || w.length !== 2 || w[1] <= w[0]) return; sk.style.setProperty('--' + c + 's', (Math.max(0, w[0]) / d * 100) + '%'); sk.style.setProperty('--' + c + 'e', (Math.min(d, w[1]) / d * 100) + '%'); }); }
     mk.innerHTML = h; const lgd = $('#rcleg'); if (lgd) { lgd.innerHTML = lg; lgd.classList.toggle('on', !!lg); }
   }
   const sb = $('#rcsb'), has = !!st.sk && !st.nx;
@@ -14062,7 +14403,7 @@ function rmEps() {
   return (it.episodes || []).map((e, i) => {
     const cur = st.id === it.id && String(st.ep) === String(e.n), pend = S.rm.pend && S.rm.pend.kid === it.id && String(S.rm.pend.n) === String(e.n);
     const thi = e.th ? `<div class="thi${S.set.blur_thumbs ? ' bl' : ''}" style="background-image:url('/thumb/${it.id}/${encodeURIComponent(e.n)}?v=${e.downloaded ? 1 : 0}')"></div>` : '';  // немає обкладинки серії — порожній фон
-    return `<button class="rme${cur ? ' cur' : ''}${e.watched ? ' w' : ''}${pend ? ' pend' : ''}" data-act="rmep" data-n="${esc(e.n)}" style="--i:${Math.min(i, 10)}"><div class="th">${thi}<span class="num">${esc(e.n)}</span>${cur ? `<span class="eq">${ico('play')} Грає</span>` : pend ? `<span class="eq">${ico('spinner')}</span>` : ''}${e.new ? '<span class="nw">нова</span>' : ''}${e.pos > 5 && !e.watched ? `<span class="rs">${ico('clock')}${fmtT(e.pos)}</span>` : ''}</div><div class="n">Серія ${esc(e.n)}${e.watched ? `<span class="wk" title="Переглянуто">${ico('check')}</span>` : ''}</div>${e.title ? `<div class="tt">${esc(e.title)}</div>` : ''}</button>`;
+    return `<button class="rme${cur ? ' cur' : ''}${e.watched ? ' w' : ''}${pend ? ' pend' : ''}" data-act="rmep" data-n="${esc(e.n)}" style="--i:${Math.min(i, 10)}"><div class="th">${thi}<span class="num">${esc(e.n)}</span>${cur ? `<span class="eq">${ico('play')} Грає</span>` : pend ? `<span class="eq">${ico('spinner')}</span>` : ''}${e.new ? '<span class="nw">нова</span>' : ''}${e.pos > 5 && !e.watched ? `<span class="rs">${ico('clock')}${fmtT(e.pos)}</span>` : ''}</div><div class="n">Серія ${esc(e.n)}${e.watched ? `<span class="wk" title="Переглянуто">${ico('check')}</span>` : ''}</div>${e.title ? `<div class="tt">${esc(e.title)}</div>` : ''}${e.downloaded ? `<div class="rdl">${ico('download')}${esc(e.q || 'скачано')}</div>` : ''}</button>`;
   }).join('');
 }
 function rmBody() {
@@ -14075,7 +14416,7 @@ function rmBody() {
   const st = RC.st || {}, pit = st.id ? item(st.id) : null;
   const pimg = pit && pit.meta && pit.meta.poster ? esc(pit.meta.poster) : '';
   const on = !!st.id;
-  const sub = on ? 'Серія ' + esc(st.ep) : (RC.lost ? 'Немає звʼязку з пристроєм' : 'Оберіть серію нижче — вона запуститься там');
+  const sub = on ? esc(rmSubText(st)) : (RC.lost ? 'Немає звʼязку з пристроєм' : 'Оберіть серію нижче — вона запуститься там');
   const now = `<div class="rmnow${on ? '' : ' idle'}" id="rmnow">
     <div class="rmrow"><div class="rmcv"${pimg ? ` style="background-image:url('${pimg}')"` : ''}>${pimg ? '' : ico('cast')}</div>
       <div class="rmtx"><span class="rmdev">${ico('cast')} ${esc(RC.name)}</span><b id="rct">${on ? esc(st.title || 'Грає') : 'Нічого не грає'}</b><span id="rcs">${sub}</span></div>
@@ -14090,7 +14431,7 @@ function rmBody() {
         <div class="rcnxbt"><button class="rcnxc" data-act="rmnx" data-c="nxcancel">Скасувати</button><button class="rcnxg" data-act="rmnx" data-c="nxnow">Дивитись зараз</button></div></div>
     </div>
     <div class="rcb"><button class="cb sm" data-act="rmc" data-rc="prev">${ico('prev')}</button><button class="cb" data-act="rmc" data-rc="back">${ico('back10')}</button><button class="cb big" id="rcpp" data-act="rmc" data-rc="pp">${ico(st.paused ? 'play' : 'pause')}</button><button class="cb" data-act="rmc" data-rc="fwd">${ico('fwd10')}</button><button class="cb sm" data-act="rmc" data-rc="next">${ico('next')}</button></div>
-    <div class="rcvl"><span class="rcvi">${ico('vol')}</span><input type="range" id="rcvol" min="0" max="${st.vmax || 100}" value="${st.vol == null ? 100 : st.vol}"${st.own === false ? ' disabled' : ''}><span id="rcvn">${st.own === false ? 'сист.' : Math.round(st.vol == null ? 100 : st.vol)}</span></div></div></div>`;
+    <div class="rcvl"><span class="rcvi">${ico('vol')}</span><div class="rcvw"><input type="range" id="rcvol" min="0" max="${st.vmax || 100}" value="${st.vol == null ? 100 : st.vol}"${st.own === false ? ' disabled' : ''}><i class="rcv100"></i></div><span id="rcvn">${st.own === false ? 'сист.' : Math.round(st.vol == null ? 100 : st.vol)}</span></div></div></div>`;
   const mini = `<div class="rmmini" id="rmmini"><div class="rmcv"${pimg ? ` style="background-image:url('${pimg}')"` : ''}></div><b id="rmmt">${on ? esc(st.title || 'Грає') + ' · ' + esc(st.ep) : 'Нічого не грає'}</b><button class="cb sm" data-act="rmc" data-rc="back">${ico('back10')}</button><button class="cb big" id="rcpp2" data-act="rmc" data-rc="pp">${ico(st.paused ? 'play' : 'pause')}</button><button class="cb sm" data-act="rmc" data-rc="fwd">${ico('fwd10')}</button></div>`;
   RC.eKid = rmKid();
   return now + mini + `<div id="rmlist"><div class="rmh"><h3>Аніме</h3></div><div id="rmflt">${rmFilters()}</div><div class="rmas" id="rmstrip">${rmStrip()}</div><div id="rmsub">${rmSub()}</div><div class="rmh" id="rmeh">${rmEpsHead()}</div><div class="rmeps" id="rmeps">${rmEps()}</div></div>`;
@@ -14114,8 +14455,8 @@ function epAutoScroll(box, key, force) {  // відкрили список — �
 }
 function rmPaintStrip(keepScroll) {
   const s = $('#rmstrip'), sb = $('#rmsub'); if (!s) return;
-  const x = s.scrollLeft; s.innerHTML = rmStrip(); s.scrollLeft = x;
-  if (sb) sb.innerHTML = rmSub();
+  const x = s.scrollLeft; s.innerHTML = rmStrip(); s.scrollLeft = x; s._h = null;
+  if (sb) { sb.innerHTML = rmSub(); sb._h = null; }
 }
 function rmMarkStrip() {  // лише перемикаємо підсвітку — без перемальовування
   const kid = rmKid(), st = RC.st || {};
@@ -14144,6 +14485,10 @@ function rmSync(st) {
   if (S.rm.pend && String(S.rm.pend.n) === String(st.ep) && S.rm.pend.kid === st.id) S.rm.pend = null;
   rmSoft();
 }
+function rmSubText(st) {  // «Серія 8 · скачана 720p» — стан серії на цьому пристрої (яким керуємо)
+  const it = item(st.id), e = it && (it.episodes || []).find(x => String(x.n) === String(st.ep));
+  return 'Серія ' + st.ep + (e && e.downloaded ? ' · скачана' + (e.q ? ' ' + e.q : '') : (e ? ' · не скачана' : ''));
+}
 function rmPaintNow() {  // оновлюємо картку «зараз грає» на місці, без перемальовування сторінки
   const st = RC.st || {}, on = !!st.id, pit = on ? item(st.id) : null, pimg = pit && pit.meta && pit.meta.poster ? pit.meta.poster : '';
   const nw = $('#rmnow'); if (!nw) return;
@@ -14151,7 +14496,7 @@ function rmPaintNow() {  // оновлюємо картку «зараз гра�
   document.querySelectorAll('#rmnow .rmcv, #rmmini .rmcv').forEach(c => { const bg = pimg ? `url('${pimg}')` : ''; if (c.style.backgroundImage !== bg) c.style.backgroundImage = bg; const ic = pimg || c.closest('#rmmini') ? '' : ico('cast'); if (c.innerHTML !== ic) c.innerHTML = ic; });
   const set = (id, v) => { const e = $(id); if (e && e.textContent !== v) e.textContent = v; };
   set('#rct', on ? (st.title || 'Грає') : 'Нічого не грає');
-  set('#rcs', on ? 'Серія ' + st.ep : (RC.lost ? 'Немає звʼязку з пристроєм' : 'Оберіть серію нижче — вона запуститься там'));
+  set('#rcs', on ? rmSubText(st) : (RC.lost ? 'Немає звʼязку з пристроєм' : 'Оберіть серію нижче — вона запуститься там'));
   set('#rmmt', on ? (st.title || 'Грає') + ' · ' + st.ep : 'Нічого не грає');
   rmScrollChk();
 }
@@ -14218,7 +14563,7 @@ async function rcPoll() {
       let st = {};
       try { st = (await api('/api/sync_pstate', {peer: RC.pid})).state || {}; } catch (e) { st = null; }
       if (!RC.pid) return;
-      if (st && st.on) { RC.seen = true; RC.miss = 0; RC.lost = false; if (RC.idle) { RC.idle = false; RC.rkey = ''; if (route().name === 'remote') { RC.st = st; rmSoft(); } } rcPaint(st); if (S.cur && RC.auto) rcStop(); return; }
+      if (st && st.on) { rcSavePos(st); RC.seen = true; RC.miss = 0; RC.lost = false; if (RC.idle) { RC.idle = false; RC.rkey = ''; if (route().name === 'remote') { RC.st = st; rmSoft(); } } rcPaint(st); if (S.cur && RC.auto) rcStop(); return; }
       RC.miss++;
       if (route().name === 'remote') {  // на сторінці пульта не відключаємось, а показуємо «нічого не грає»
         if (RC.miss >= 4 && Date.now() > (RC.hold || 0) && (!RC.idle || (!st) !== !!RC.lost)) { RC.idle = true; RC.lost = !st; RC.st = null; RC.rkey = ''; rmSoft(); }
@@ -14240,7 +14585,7 @@ let RCVT = 0;
 document.addEventListener('input', ev => {
   if (ev.target.id === 'rcseek') { RC.drag = true; const d = (RC.st && RC.st.dur) || 0; $('#rcc').textContent = fmtT(d * ev.target.value / 1000); }
   if (ev.target.id === 'rcvol') {
-    RC.vdrag = true; const v = Number(ev.target.value); $('#rcvn').textContent = Math.round(v);
+    RC.vdrag = true; let v = Number(ev.target.value); if (Number(ev.target.max) > 100 && Math.abs(v - 100) <= 3) { v = 100; ev.target.value = 100; } $('#rcvn').textContent = Math.round(v); rcSl();
     if (Date.now() - RCVT > 160) { RCVT = Date.now(); rcCmd('vol', v); }  // гучність лине на пристрій одразу під час тягнення
   }
 });
@@ -14251,7 +14596,7 @@ document.addEventListener('change', ev => {
 window.addEventListener('resize', rcLayout);
 // ───────── жест: затиснути (верх екрана або правий край посередині) → екран тремтить → свайп угору ─────────
 const TH = {t: 0, f: 0, armed: false, sx: 0, sy: 0, mode: ''};
-const thReady = () => castTargets().length > 0;
+const thReady = () => !!(S.sync && S.sync.handoff_on && (S.sync.peers || []).length);  // жест працює, поки є підключені пристрої: якщо вони не в мережі — червоний спалах і підказка
 const xgest = () => (S.set && S.set.xgest) || 'both';
 function fxBlocks(kind) {
   const n = 8; let h = '<i class="fxg"></i>';
@@ -14261,12 +14606,42 @@ function fxBlocks(kind) {
   }
   return h;
 }
-function fxRun(kind) {  // 'out' — блоки злітають угору; 'in' — влітають згори
-  const el = $('#fx'); if (!el) return;
-  el.className = ''; el.innerHTML = fxBlocks(kind); void el.offsetWidth; el.className = kind;
-  document.body.classList.remove('armed'); document.body.classList.add('shk');
-  setTimeout(() => document.body.classList.remove('shk'), 700);
-  setTimeout(() => { el.className = ''; el.innerHTML = ''; }, 2000);
+let FXT = [], FXBUSY = false, FXDEMO = 0;
+const FXDUR = {blocks: 1750, vortex: 2000, edge: 1800};
+function fxStyle() { const v = S.set && S.set.fx_style; return FXDUR[v] ? v : 'blocks'; }
+function fxClear() {
+  FXT.forEach(clearTimeout); FXT = []; FXBUSY = false;
+  const el = $('#fx'), v = $('#fxv');
+  if (el) { el.className = ''; el.innerHTML = ''; }
+  if (v) v.classList.remove('on', 'lite');
+  document.body.classList.remove('shk');
+}
+function fxMarkup(kind, st) {
+  if (st === 'vortex') {
+    let h = '<i class="vxc"></i>';
+    for (let k = 0; k < 16; k++) { const a = (k * 137) % 360, rad = 16 + (k * 7) % 30, w = 34 + (k * 11) % 30, d = (k % 8) * 60; h += `<i class="vxw" style="--a:${a}deg;--rad:${rad};--d:${d}ms"><i class="vxb" style="width:${w}px;height:${Math.round(w * 1.38)}px;margin:${-Math.round(w * .69)}px 0 0 ${-Math.round(w / 2)}px"></i></i>`; }
+    return h;
+  }
+  if (st === 'edge') return '<i class="edf"></i><i class="edw"></i>';
+  return fxBlocks(kind);
+}
+// kind: 'out' — відправник, 'in' — отримувач, 'fail' — червоний спалах «немає куди»; swap() виконується під розмиттям (зміна вкладки)
+function fxPlay(kind, swap, styleOv) {
+  const el = $('#fx'), v = $('#fxv');
+  if (!el) { try { swap && swap(); } catch (e) {} return; }
+  fxClear(); FXBUSY = true;
+  const st = kind === 'fail' ? 'edge' : (styleOv || fxStyle());
+  el.innerHTML = fxMarkup(kind, st); void el.offsetWidth; el.className = kind + ' s-' + st;
+  const t = (f, ms) => FXT.push(setTimeout(f, ms));
+  if (kind === 'fail') { document.body.classList.add('shk'); t(() => document.body.classList.remove('shk'), 600); t(fxClear, 1300); return; }
+  if (v) { v.classList.toggle('lite', kind === 'out'); v.classList.add('on'); }
+  const T = FXDUR[st], t0 = Date.now(), at = kind === 'in' ? 750 : 560;
+  t(async () => {
+    try { if (swap) await Promise.race([Promise.resolve(swap()), new Promise(r => setTimeout(r, 4500))]); } catch (e) {}
+    const left = Math.max(300, T - (Date.now() - t0));
+    t(() => { if (v) v.classList.remove('on'); t(fxClear, 650); }, left);
+  }, at);
+  t(fxClear, 14000);
 }
 function thArm() {
   TH.armed = true; gpHaptic(); GP.t = Date.now();
@@ -14356,7 +14731,7 @@ function diagSend(ev) {
   const fit = () => { const b = document.querySelector('.bar'); if (b) { const h = b.offsetHeight + 'px'; if (document.documentElement.style.getPropertyValue('--barh') !== h) document.documentElement.style.setProperty('--barh', h); } };
   const sync = () => {  // кнопка-ручка: показуємо лише коли панель сховалась (щоб розкрити) або закріплена відкритою (щоб сховати)
     const h = document.querySelector('.hdr2');
-    const show = !!h && (S.hdrPin || h.classList.contains('hdr-off'));
+    const show = !!h && ((S.hdrPin && window.scrollY > 40) || h.classList.contains('hdr-off'));
     tog.classList.toggle('on', show);
     if (h) {  // ручка завжди під панеллю (або під шапкою, коли панель сховалась) — не накриває вміст панелі
       const bar = document.querySelector('.bar'), bb = bar ? bar.getBoundingClientRect().bottom : 58;
