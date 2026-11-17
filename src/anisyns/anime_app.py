@@ -3944,11 +3944,26 @@ def _sweep_tmp():
     pass
 
 
+NEW_TTL = 3 * 86400  # мітка «нова серія» гасне сама через 3 дні від першого виявлення (синхронізується між пристроями)
+
+
+def _new_fresh(e, o):
+  """Чи мітка «нова» для серії o ще діє (не старша за NEW_TTL). Для старих записів без часу відлік іде від першого перегляду."""
+  na = e.setdefault('new_at', {})
+  t = na.get(str(o))
+  if t is None:
+    t = na[str(o)] = int(time.time())
+  return time.time() - t < NEW_TTL
+
+
 def _apply_current(e, current, titles=None):
   known = set(e.get('known', []))
   new = sorted(o for o in current if o not in known)
   e['known'] = sorted(known | set(current))
   e['new'] = sorted(set(e.get('new', [])) | set(new))
+  na = e.setdefault('new_at', {})
+  for o in new:
+    na.setdefault(str(o), int(time.time()))
   e['checked'] = _now()
   if titles:
     e.setdefault('ep_titles', {}).update({str(k): v for k, v in titles.items() if v})
@@ -4275,7 +4290,7 @@ def entry_view(key, e):
         'title': titles.get(str(o)) or '',
         'downloaded': dl,
         'watched': o in watched,
-        'new': o in newset and not dl and o not in watched,
+        'new': o in newset and not dl and o not in watched and _new_fresh(e, o),
         'pos': prog.get(str(o), 0),
     })
   if miss:
@@ -4928,6 +4943,25 @@ def api_lookup_cancel(tid):
   return {'ok': True}
 
 
+def _dub_snaps(e, info):
+  """Запам'ятовує списки серій УСІХ озвучок аніме: перемикання озвучки тоді миттєве, без повторного завантаження сторінки
+  (для One Piece це 1000+ серій × озвучки — кілька секунд, а після 10 хв кеш уже порожній)."""
+  try:
+    with LOCK:
+      sn = e.setdefault('dubs', {})
+      for d in info.get('dubbings') or []:
+        if d and d != e.get('dubbing') and d not in sn:
+          oc = sorted({x['ordinal'] for x in _eps_for(info, d)})
+          if oc:
+            sn[d] = {'known': oc, 'new': []}
+      tt = e.setdefault('ep_titles', {})
+      for x in info.get('eps') or []:
+        if x.get('title') and str(x['ordinal']) not in tt:
+          tt[str(x['ordinal'])] = x['title']
+  except Exception:
+    pass
+
+
 def _switch_dub(e, dub, info=None):
   """Перемикає озвучку; епізоди й «нові» кожної озвучки зберігаються окремо, файли не чіпаємо."""
   cur = e.get('dubbing')
@@ -5053,6 +5087,7 @@ def api_add(token, dub, temp=False, sources=None, preview_of=None):
       e['all_dubs'] = list(dict.fromkeys((e.get('all_dubs') or []) + dubs))
       _set_counts(e, info)
       _switch_dub(e, dub, info)
+      _dub_snaps(e, info)
       _apply_current(e, cur, titles)
       e['meta'] = {**(e.get('meta') or {}), **{k: v for k, v in (info['meta'] or {}).items() if v}}
     else:
@@ -5071,6 +5106,7 @@ def api_add(token, dub, temp=False, sources=None, preview_of=None):
           library[key]['preview_of'] = preview_of
     _merge_sources(library[key], [{'url': url, 'title': info['title']}] + list(sources or []))
   _note_eps(library[key], dub, eps)
+  _dub_snaps(library[key], info)
   lib_save()
   if not temp and len(library[key].get('sources') or []) < 2 and net_state()['state'] != 'offline':
     threading.Thread(target=_alts_bg, args=(_kid(key),), daemon=True).start()  # у фоні шукаємо те саме аніме на інших сайтах
@@ -5413,6 +5449,8 @@ def api_set_dub(kid, dub):
         except Exception:
           info = None
       _switch_dub(e, dub, info)
+      if info:
+        _dub_snaps(e, info)
       lib_save()
       return {'ok': True, 'online': info is not None or dub in (e.get('dubs') or {})}
   if not need:
@@ -5728,7 +5766,13 @@ def notif_add(typ, **kw):
           x['ts'] = time.time()
           _notif_save()
           return
-    NOTIFS.append({'id': hashlib.sha1(f'{typ}{time.time()}{random.random()}'.encode()).hexdigest()[:10], 'type': typ, 'ts': time.time(), 'read': False, **kw})
+    if typ == 'new' and kw.get('kid') and kw.get('eps'):  # однакове повідомлення на всіх пристроях має однаковий id — тоді воно синхронізується, а не дублюється
+      nid = 'n' + hashlib.sha1(f"{kw['kid']}|{min(kw['eps'])}".encode()).hexdigest()[:9]
+      if any(x['id'] == nid for x in NOTIFS):
+        return
+    else:
+      nid = hashlib.sha1(f'{typ}{time.time()}{random.random()}'.encode()).hexdigest()[:10]
+    NOTIFS.append({'id': nid, 'type': typ, 'ts': time.time(), 'read': False, **kw})
     del NOTIFS[:-80]
     _notif_save()
 
@@ -6508,7 +6552,7 @@ def net_state():
 
 
 SETTINGS = {'mobile_download': False, 'auto_skip': False, 'auto_skip_opening': True, 'auto_skip_ending': True, 'auto_next': True,
-            'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': True, 'ios_player': True, 'np_ep_cover': True,
+            'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': True, 'ios_player': False, 'ios_pl2': False, 'np_ep_cover': True,
             'bg_keep': True, 'bg_check': False, 'island': True, 'island_dl': True, 'island_check': False,
             'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'old_cards': False, 'dub_fav': [], 'dub_prio': [], 'dub_seen': [], 'fx_style': 'blocks', 'recent_min': 3, 'handoff': True, 'rc': True, 'rc_in': True, 'rc_out': True, 'dv2': False, 'xgest': 'both', 'client': {},
             'site_order': ['aniliberty', 'yummyani', 'animevost', 'animru'], 'view': {}}
@@ -6528,6 +6572,8 @@ def settings_load():
       SETTINGS.update({k: v for k, v in d.items() if k in SETTINGS})
       if 'auto_skip' not in d and (d.get('auto_skip_opening') or d.get('auto_skip_ending')):
         SETTINGS['auto_skip'] = True
+      if not d.get('ios_pl2'):  # одноразова міграція: iOS-плеєр тепер вимкнений за замовчуванням
+        SETTINGS['ios_player'] = False; SETTINGS['ios_pl2'] = True
       if not SETTINGS.get('dv2'):  # одноразова міграція: передача між пристроями й пульт тепер увімкнені за замовчуванням
         SETTINGS.update({'handoff': True, 'rc': True, 'rc_in': True, 'rc_out': True, 'dv2': True})
   except Exception:
@@ -8220,9 +8266,10 @@ SYNC_LOCK = threading.RLock()
 SYNC = {'st': None, 'srv': None, 'srv_err': '', 'started': False, 'found': {}, 'pending': None, 'pair_out': None, 'gen': 0,
         'status': {}, 'wake': threading.Event(), 'scanning': 0.0, 'last_rescan': 0.0, 'pair_until': 0.0, 'last_scan': 0.0}
 SYNC_SETTINGS_KEYS = ['view', 'auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'auto_check', 'auto_check_hours', 'blur_thumbs',
-                      'np_ep_cover', 'skip_mode', 'vol_max', 'own_vol', 'recent_min', 'site_order', 'dub_fav', 'dub_prio']
+                      'np_ep_cover', 'skip_mode', 'vol_max', 'own_vol', 'recent_min', 'site_order', 'dub_fav', 'dub_prio', 'fx_style']
 SYNC_GROUPS = {'view': ['view'], 'player': ['auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'skip_mode', 'vol_max', 'own_vol', 'np_ep_cover']}
 SYNC_SCOPES = ('all', 'view', 'player', 'other')
+SYNC_ALWAYS = ('fx_style',)  # анімація передачі синхронізується завжди, незалежно від груп
 
 
 def _sgroup(k):
@@ -8233,6 +8280,8 @@ def _sgroup(k):
 
 
 def _sync_group_on(st, k):
+  if k in SYNC_ALWAYS:
+    return True
   return bool(st.get('sync_' + _sgroup(k)))
 
 
@@ -8307,8 +8356,13 @@ def _known_max(e):
 def _sync_kinfo(e):
   m = e.get('meta') or {}
   return {'known': sorted(e.get('known') or []), 'titles': {str(a): b for a, b in (e.get('ep_titles') or {}).items() if b},
+          'na': {str(n): int((e.get('new_at') or {}).get(str(n)) or 0) for n in (e.get('new') or []) if (e.get('new_at') or {}).get(str(n))},
           'dubs': sorted(e.get('all_dubs') or []), 'next': m.get('next'), 'desc': m.get('description') or '',
           'meta': {a: b for a, b in m.items() if a not in ('poster', 'next', 'description') and isinstance(b, (str, int, float, bool))}}
+
+
+def _nt_hash(x):
+  return hashlib.sha1(json.dumps({a: b for a, b in x.items() if a != 'ts'}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
 
 
 def _sync_snapshot(st):
@@ -8347,11 +8401,9 @@ def _sync_snapshot(st):
   for k in SYNC_SETTINGS_KEYS:
     if k in SETTINGS and _sync_group_on(st, k):
       out['s/' + k] = (json.dumps(SETTINGS[k]), SETTINGS[k], None)
-  with _NOTIF_LOCK:
+  with _NOTIF_LOCK:  # повідомлення: нові, прочитані (read у значенні) і видалені (див. _sync_scan) синхронізуються повністю
     for x in NOTIFS:
-      if x.get('type') == 'new' and x.get('read') and x.get('kid') and x.get('eps'):
-        for e in x['eps']:
-          out[f"nr/{x['kid']}/{e}"] = ('1', 1, None)
+      out['nt/' + x['id']] = (_nt_hash(x), json.loads(json.dumps(x, ensure_ascii=False)), None)
   return out
 
 
@@ -8398,6 +8450,9 @@ def _sync_scan():
       if k.startswith('i/'):
         _sync_set(st, k, {'del': 1}, me)
         _sync_purge_kid(st, k[2:])
+        changed = True
+      elif k.startswith('nt/'):  # повідомлення видалили (очистка прочитаних)
+        _sync_set(st, k, {'del': 1}, me)
         changed = True
       elif k.startswith('w/'):
         if 'i/' + k.split('/')[1] in snap:
@@ -8463,6 +8518,36 @@ def _sync_apply_one(st, k, r):
       last[k] = json.dumps(SETTINGS.get(parts[1]))
       return last[k] != before  # зміна → піднімаємо «gen», і відкритий інтерфейс сам підтягне нові налаштування
     return False
+  if kind == 'nt':
+    nid = parts[1]
+    with _NOTIF_LOCK:
+      cur = next((x for x in NOTIFS if x['id'] == nid), None)
+      if isinstance(v, dict) and v.get('del'):
+        if cur is not None:
+          NOTIFS.remove(cur)
+          _notif_save()
+          last.pop(k, None)
+          return True
+        last.pop(k, None)
+        return False
+      if not isinstance(v, dict) or not v.get('type'):
+        return False
+      nv = dict(v)
+      nv['id'] = nid
+      if cur is None:
+        NOTIFS.append(nv)
+        NOTIFS.sort(key=lambda x: x.get('ts') or 0)
+        del NOTIFS[:-80]
+      elif cur == nv:
+        last[k] = _nt_hash(nv)
+        return False
+      else:
+        nv['ts'] = max(nv.get('ts') or 0, cur.get('ts') or 0) if nv.get('read') == cur.get('read') else nv.get('ts') or cur.get('ts')
+        cur.clear()
+        cur.update(nv)
+      _notif_save()
+      last[k] = _nt_hash(nv)
+      return True
   if kind == 'nr':  # повідомлення про нові серії: прочитано на одному пристрої — прочитано всюди
     if v and len(parts) >= 3:
       with _NOTIF_LOCK:
@@ -8536,6 +8621,20 @@ def _sync_apply_one(st, k, r):
         e['known'] = sorted(old | set(rk))
         e['new'] = sorted((set(e.get('new') or []) | set(added)) - w)
         changed_ = True
+      na = e.setdefault('new_at', {})  # мітка «нова серія»: беремо найраніший час виявлення; якщо мітка ще діє — вмикаємо її й тут
+      wset = set(e.get('watched') or [])
+      for n_, t_ in (v.get('na') or {}).items():
+        try:
+          t_ = int(t_)
+          num_ = _num_arg(n_)
+        except Exception:
+          continue
+        if str(n_) not in na or t_ < na[str(n_)]:
+          na[str(n_)] = t_
+          changed_ = True
+        if time.time() - na[str(n_)] < NEW_TTL and num_ in set(rk) and num_ not in wset and num_ not in (e.get('new') or []):
+          e['new'] = sorted(set(e.get('new') or []) | {num_})
+          changed_ = True
       tt = e.setdefault('ep_titles', {})
       for a_, b_ in (v.get('titles') or {}).items():
         if b_ and tt.get(a_) != b_:
@@ -8606,7 +8705,7 @@ def _sync_apply_one(st, k, r):
 def _sync_apply(st, incoming):
   """Зливає чужі регістри: по кожному ключу перемагає новіша мітка (при рівності — більший id пристрою)."""
   changed = False
-  order = 'ifgkwps'
+  order = 'ifgkwpsn'
   for k in sorted(incoming, key=lambda x: order.index(x[0]) if x[:1] in order else 9):
     r = incoming[k]
     try:
@@ -8633,7 +8732,35 @@ def _sync_sign(secret, ts, path, raw):
   return hmac.new(secret.encode(), f'{ts}.{path}.{hashlib.sha256(raw).hexdigest()}'.encode(), hashlib.sha256).hexdigest()
 
 
+def _peer_seen(peer, addr):
+  """Запам'ятовує адресу, з якої/на якій бачили пристрій; попередні лишаємо як запасні (VPN/Wi-Fi можуть давати різні адреси й односторонній звʼязок)."""
+  old = peer.get('addr')
+  if addr and old != addr:
+    alts = [a for a in dict.fromkeys([old] + list(peer.get('alts') or [])) if a and a != addr]
+    peer['alts'] = alts[:4]
+    peer['addr'] = addr
+
+
 def _sync_http(addr, port, path, body, peer=None, timeout=8):
+  import urllib.error
+  cands = [addr] + ([a for a in (peer.get('alts') or []) if a != addr] if peer else [])
+  last = None
+  for i, a in enumerate(cands):
+    try:
+      r = _sync_http1(a, port, path, body, peer, timeout if i == 0 else min(timeout, 2.5))
+      if i and peer is not None:
+        _peer_seen(peer, a)  # запасна адреса спрацювала — робимо основною
+      return r
+    except urllib.error.HTTPError:
+      raise
+    except Exception as ex:
+      if not isinstance(ex, (urllib.error.URLError, OSError, TimeoutError)):
+        raise
+      last = ex
+  raise last
+
+
+def _sync_http1(addr, port, path, body, peer=None, timeout=8):
   import urllib.request
   raw = json.dumps(body, ensure_ascii=False).encode('utf8')
   hd = {'Content-Type': 'application/json'}
@@ -8692,7 +8819,8 @@ def _sync_note_found(pid, name, addr, port, kind='phone', pair=False):
     return
   p = st['peers'].get(pid)
   if p and (p.get('addr') != addr or p.get('port') != port or p.get('kind') != kind):
-    p['addr'], p['port'], p['kind'] = addr, port, kind
+    _peer_seen(p, addr)
+    p['port'], p['kind'] = port, kind
     _sync_save()
   if p and not (SYNC['status'].get(pid) or {}).get('ok'):
     SYNC['wake'].set()  # знайомий пристрій «прокинувся» і кричить — одразу перевіряємо зв'язок, а не чекаємо цикл
@@ -8798,7 +8926,7 @@ class _SyncHandler(BaseHTTPRequestHandler):
       if not peer or abs(time.time() * 1000 - float(ts or 0)) > 120000 or \
               not hmac.compare_digest(self.headers.get('X-Sync-Sig') or '', _sync_sign(peer['secret'], ts, path, raw)):
         return self._send({'error': 'Не авторизовано', 'gone': not peer}, 401)
-      peer['addr'] = ip
+      _peer_seen(peer, ip)
       if path == '/sync/exchange':
         if not st.get('sync'):
           return self._send({'error': 'Синхронізація вимкнена', 'off': True}, 403)
@@ -8968,12 +9096,12 @@ def _sync_scan_net():
 def _sync_loop():
   n = 0
   while True:
-    lost0 = any(not (SYNC['status'].get(pid) or {}).get('ok') for pid in _sync_state()['peers'])
+    lost0 = any(not (SYNC['status'].get(pid) or {}).get('ok') or (SYNC['status'].get(pid) or {}).get('fails') for pid in _sync_state()['peers'])
     SYNC['wake'].wait(4 if lost0 else 10)  # якщо хтось не відповідає (iOS присипляє згорнуті програми) — перевіряємо частіше
     SYNC['wake'].clear()
     st = _sync_state()
     n += 1
-    lost = any(not (SYNC['status'].get(pid) or {}).get('ok') for pid in st['peers'])
+    lost = any(not (SYNC['status'].get(pid) or {}).get('ok') or (SYNC['status'].get(pid) or {}).get('fails') for pid in st['peers'])
     if lost:  # пристрій зник (змінилась мережа/IP або він спить) — кричимо, щоб він нас знайшов за id
       _sync_send_beacon()
     if st.get('sync'):
@@ -8988,7 +9116,12 @@ def _sync_loop():
         if st.get('sync') and r.get('sync'):
           _sync_exchange(pid)
       except Exception as ex:
-        SYNC['status'][pid] = {'ok': False, 't': time.time(), 'err': str(ex)[:90]}
+        prev = SYNC['status'].get(pid) or {}
+        fails = int(prev.get('fails', 0)) + 1
+        if prev.get('ok') and fails < 3 and time.time() - prev.get('t', 0) < 25:
+          SYNC['status'][pid] = {**prev, 'fails': fails, 'err': str(ex)[:90]}  # один-два збої підряд (VPN/Wi-Fi блимнули) — ще не «офлайн»
+        else:
+          SYNC['status'][pid] = {'ok': False, 't': time.time(), 'err': str(ex)[:90], 'fails': fails}
         if time.time() - SYNC['last_rescan'] > 60:  # адреса могла змінитись — шукаємо пристрій за id
           SYNC['last_rescan'] = time.time()
           threading.Thread(target=_sync_scan_net, daemon=True).start()
@@ -9534,7 +9667,7 @@ body.bsw #bswl{opacity:1;-webkit-backdrop-filter:blur(22px) saturate(1.25);backd
 .dvx.open .dvxc{transform:rotate(180deg)}
 .dvxb{display:none;border-top:1px solid #ffffff12;padding:4px 14px 6px}
 .dvx.open .dvxb{display:block}
-.dvxb.off{opacity:.45}
+.dvxb.off{opacity:.45}.dvxb .dvcard{background:var(--s1)}.dvsub{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--mu);margin:12px 2px 8px}.dvxb .fxtiles{margin-bottom:8px}
 .dvck{display:flex;align-items:center;gap:12px;padding:10px 0;cursor:pointer}
 .dvck span{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}.dvck b{font-size:14.5px;font-weight:600}.dvck small{font-size:12px;color:var(--mu);line-height:1.3}
 .dvck input{-webkit-appearance:none;appearance:none;width:24px;height:24px;border-radius:7px;border:2px solid var(--mu);flex:none;position:relative;background:none;margin:0}
@@ -9644,7 +9777,7 @@ body.fxo #root,body.fxo #tabs{transition:filter .75s ease}
 @keyframes edfI{0%{opacity:0;box-shadow:inset 0 0 0 4px rgba(190,178,255,1),inset 0 0 44px 12px rgba(124,108,255,1),inset 0 0 190px 38px rgba(76,150,255,0.8)}22%{opacity:1;box-shadow:inset 0 0 0 4px rgba(190,178,255,1),inset 0 0 44px 12px rgba(124,108,255,1),inset 0 0 190px 38px rgba(76,150,255,0.8)}100%{opacity:0;box-shadow:inset 0 0 0 2px rgba(190,178,255,0.55),inset 0 0 8px 1px rgba(124,108,255,0.45),inset 0 0 30px 6px rgba(76,150,255,0.15)}}
 #fx.k-fail .edf{opacity:0;box-shadow:inset 0 0 0 3px rgba(255,92,108,.98),inset 0 0 28px 6px rgba(255,60,80,.95),inset 0 0 110px 16px rgba(255,40,70,.55);animation:edfF 1.2s ease both}
 @keyframes edfF{0%{opacity:0}15%{opacity:1}35%{opacity:.3}55%{opacity:1}100%{opacity:0}}
-.fxtiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:6px 0 4px}
+.fxtiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:6px 0 4px}
 .fxt{border:2px solid transparent;background:var(--s1);border-radius:18px;padding:8px 8px 10px;color:var(--mu);font-weight:650;font-size:13px;display:flex;flex-direction:column;gap:8px;align-items:stretch;text-align:center}
 .fxt.on{border-color:var(--ac);color:#fff;box-shadow:0 6px 20px #6a5cff44}
 .fxm{position:relative;width:100%;aspect-ratio:3/4;border-radius:12px;background:#0e0f18;border:1px solid #ffffff12;overflow:hidden}
@@ -9940,9 +10073,14 @@ body.pressing,body.pressing *{-webkit-user-select:none!important;user-select:non
 .epgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 12px}
 /* серії — звичайна частина сторінки (одна прокрутка на весь екран, без вкладеного скролу) */
 .epscr,.rmeps{position:relative;padding:8px 0 24px}
-.epscr .ec,.epscr .ep,.epscr .erm{content-visibility:auto;contain-intrinsic-size:auto 190px}
+/* блок серій має власну прокрутку; дотик по краях і проміжках між блоками (pointer-events:none) прокручує сторінку, по самих блоках — список */
+.epscr,.rmeps{max-height:calc(100vh - var(--barh,58px) - 190px);max-height:calc(100dvh - var(--barh,58px) - 190px);min-height:min(320px,60vh);overflow-y:auto;overflow-x:hidden;overscroll-behavior-y:auto;-webkit-overflow-scrolling:touch;pointer-events:none;scrollbar-width:none}
+.epscr::-webkit-scrollbar,.rmeps::-webkit-scrollbar{display:none}
+.epscr [data-n],.rmeps>*{pointer-events:auto}
+.epscr .eps{margin:0 14px}.epscr .epgrid{margin:0 14px}
+#root.detail .dr .epscr .eps,#root.detail .dr .epscr .epgrid{margin:0 8px}
+/* content-visibility прибрано: у WebKit рядки інколи лишались «пропущеними» (порожні блоки на 190px), а списки тепер обмежені 100 серіями */
 .epscr .pre,.rme.pre{content-visibility:visible!important}
-.epscr .ep{contain-intrinsic-size:auto 76px}
 @media(min-width:720px){.epgrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 .ec{background:var(--s1);border-radius:16px;overflow:hidden;position:relative;transition:transform .15s,box-shadow .2s}
 .ec:active{transform:scale(.98)}
@@ -10233,6 +10371,7 @@ button:active,.card:active,.btn:active,.ib:active,#tabs a:active,.dchip:active{t
 .chip.sitechip .site{width:18px;height:18px;border-radius:6px;font-size:9px}
 .dubs{display:flex;gap:8px;overflow-x:auto;overflow-y:hidden;padding:2px 16px 10px;scrollbar-width:none}
 .dubs::-webkit-scrollbar{display:none}
+.eprng{grid-column:1/-1;display:flex;gap:6px;overflow-x:auto;padding:4px 14px 10px;scrollbar-width:none}.eprng::-webkit-scrollbar{display:none}
 .dchip{flex:none;display:inline-flex;align-items:center;gap:6px;border:1px solid #ffffff14;background:var(--s2);border-radius:99px;padding:7px 13px;font-size:13px;font-weight:600;color:var(--mu)}
 .dchip small{font-weight:700;font-size:11px;background:#173a2b;color:var(--ok);border-radius:99px;padding:1px 6px}
 .dchip.on{background:linear-gradient(135deg,var(--ac),#6a5cff);color:#fff;border-color:transparent;box-shadow:0 4px 14px #6a5cff55}
@@ -10240,7 +10379,7 @@ button:active,.card:active,.btn:active,.ib:active,#tabs a:active,.dchip:active{t
 .adddubs{flex-wrap:wrap;overflow:visible!important;padding:2px 0 10px!important;margin:8px 0}
 .dstar{display:inline-grid;color:#ffc94d}.dstar .i{width:13px;height:13px;fill:currentColor}.dchip.on .dstar{color:#ffe08a}
 .dubtabs{display:flex;gap:6px;margin-top:6px}.dubtabs button{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:11px;background:var(--s2);color:var(--mu);padding:10px;font-weight:650}.dubtabs button.on{background:linear-gradient(135deg,var(--ac),#6a5cff);color:#fff}.dubtabs .i{width:15px;height:15px}
-.dublist{max-height:46vh;overflow:auto;margin:0 -4px;padding:0 4px}.dubr{display:flex!important;flex-direction:row!important;align-items:center;gap:10px;padding:6px 0;background:none!important;border:0!important}.dubr .tx{flex:1;min-width:0}.dubr .tx b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dubr .d{display:block;font-size:12px;color:var(--mu)}
+.dublist{max-height:46vh;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;margin:0 -4px;padding:0 4px}.dubr{display:flex!important;flex-direction:row!important;align-items:center;gap:10px;padding:6px 0;background:none!important;border:0!important}.dubr .tx{flex:1;min-width:0}.dubr .tx b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dubr .d{display:block;font-size:12px;color:var(--mu)}
 .dstb,.dnum{flex:none;width:38px;height:36px;border:0;border-radius:10px;background:var(--s2);color:var(--mu);display:grid;place-items:center;font-weight:800}
 .dstb .i{width:19px;height:19px}.dstb.on{color:#ffc94d}.dstb.on .i{fill:currentColor}.dnum.on{background:linear-gradient(135deg,var(--ac),#6a5cff);color:#fff}
 #sitegrp .row .tx b .i{width:13px;height:13px;color:#ffc94d;vertical-align:-1px}
@@ -10460,7 +10599,7 @@ body.rmpg #rcbar{display:none!important}
 @media (min-width:560px){.rmeps{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (min-width:900px){.rmeps{grid-template-columns:repeat(4,minmax(0,1fr))}}
 .rmeps.in .rme{animation:rmUp .32s cubic-bezier(.2,.8,.2,1) backwards;animation-delay:calc(var(--i) * 28ms)}
-.rme{background:none;border:0;color:inherit;text-align:left;padding:0;min-width:0;content-visibility:auto;contain-intrinsic-size:auto 150px}
+.rme{background:none;border:0;color:inherit;text-align:left;padding:0;min-width:0}
 .rme .th{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:transparent;border:0;transition:transform .14s}
 .rme .th::before{content:"";position:absolute;inset:0;border-radius:inherit;border:2px solid transparent;pointer-events:none;z-index:3;transition:border-color .18s}
 .rme .thi{position:absolute;inset:0;background-repeat:no-repeat;background-size:cover;background-position:center}
@@ -10652,7 +10791,7 @@ const S = {
   sel: new Set(), q: ls.get('q', '720p'), descOpen: false,
   sheet: null, busy: new Set(), checking: false, lookup: null, addErr: '',
   cur: null, // що зараз грає: {id, n}
-  net: {state: 'unknown'}, set: {site_order: ['aniliberty', 'yummyani', 'animevost', 'animru'], mobile_download: false, auto_next: true, auto_check: true, auto_check_hours: 3, blur_thumbs: false, logging: false, multitask: true, ios_player: true}, st: {data: null, t: 0, loading: false},
+  net: {state: 'unknown'}, set: {site_order: ['aniliberty', 'yummyani', 'animevost', 'animru'], mobile_download: false, auto_next: true, auto_check: true, auto_check_hours: 3, blur_thumbs: false, logging: false, multitask: true, ios_player: false}, st: {data: null, t: 0, loading: false},
   epView: (function () { try { return localStorage.getItem('epv') || 'list'; } catch (e) { return 'list'; } })(), reorder: false, acOpen: false, ac: null,
 };
 
@@ -10665,7 +10804,25 @@ const S = {
 })();
 
 /* ---------- мережа ---------- */
+// WebView має ~6 з'єднань на хост: довгі запити до сайтів (каталог, відкриття, озвучки) разом з постерами забивали всі, і навіть легкі /api/* ставали в чергу.
+// Тому одночасно тримаємо не більше 3 «довгих» запитів, решта чекає у черзі тут, а не займає з'єднання.
+const SLOW_RE = /^\/api\/(browse|open|set_dub|warm|add|search|find_alts|switch_site|check|comments|lookup|dubs)$/;
+let SLOW_N = 0; const SLOW_Q = [], SLOW_CAP = 3;
+function slowAcquire(signal) {
+  if (SLOW_N < SLOW_CAP) { SLOW_N++; return Promise.resolve(); }
+  return new Promise((res, rej) => {
+    const w = {res};
+    SLOW_Q.push(w);
+    if (signal) signal.addEventListener('abort', () => { const i = SLOW_Q.indexOf(w); if (i >= 0) { SLOW_Q.splice(i, 1); rej(new DOMException('Aborted', 'AbortError')); } }, {once: true});
+  });
+}
+function slowRelease() { const w = SLOW_Q.shift(); if (w) w.res(); else SLOW_N = Math.max(0, SLOW_N - 1); }
 async function api(path, body, signal) {
+  if (!SLOW_RE.test(String(path).split('?')[0])) return apiRaw(path, body, signal);
+  await slowAcquire(signal);
+  try { return await apiRaw(path, body, signal); } finally { slowRelease(); }
+}
+async function apiRaw(path, body, signal) {
   const opt = body === undefined ? {} : {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)};
   if (signal) opt.signal = signal;
   let r;
@@ -10873,11 +11030,21 @@ const tabName = n => n === 'storage' ? 'settings' : n === 'remote' ? 'devices' :
 let CURTAB = (() => { const n = route().name; return n === 'detail' || n === 'group' ? 'home' : tabName(n); })();
 const tabOf = () => CURTAB;
 TABMEM[CURTAB] = location.hash || '#/';
-window.addEventListener('hashchange', () => { const n = route().name; if (n !== 'detail' && n !== 'group') CURTAB = tabName(n); TABMEM[CURTAB] = n === 'remote' ? '#/devices' : (location.hash || '#/'); });
+let PREVH = '';
+window.addEventListener('hashchange', ev => {
+  const r = route(), n = r.name;
+  try { PREVH = new URL(ev.oldURL).hash || ''; } catch (e) { PREVH = ''; }
+  if (n !== 'detail' && n !== 'group') CURTAB = tabName(n);
+  // тимчасові сторінки (перегляд аніме з пошуку/новинок) вкладка не запам'ятовує: інакше вкладка «застрягала» на них
+  if (n === 'detail') { const it = item(r.id); if (!it || it.temp || CURTAB !== 'home') return; }
+  TABMEM[CURTAB] = n === 'remote' ? '#/devices' : (location.hash || '#/');
+});
 document.addEventListener('click', ev => {
   const a = ev.target.closest && ev.target.closest('#tabs a'); if (!a) return;
   const t = TABS.find(x => x[1] === a.getAttribute('href')); if (!t || t[0] === tabOf()) return;
-  const m = TABMEM[t[0]]; if (m && m !== t[1]) { ev.preventDefault(); location.hash = m; }
+  let m = TABMEM[t[0]];
+  if (m) { const q = /^#\/(a|g)\/([^/?]+)/.exec(m); if (q && q[1] === 'a' && !item(q[2])) { m = ''; TABMEM[t[0]] = t[1]; } }  // запам'ятане аніме вже видалене — відкриваємо корінь вкладки
+  if (m && m !== t[1]) { ev.preventDefault(); CURTAB = t[0]; location.hash = m; }  // CURTAB ставимо одразу: інакше відкрите з пам'яті аніме лишалось «чужим» для вкладки, і наступні перемикання вели не туди
 }, true);
 // тримає на місці картку, що була вгорі екрана, поки список перемальовується (вхід/вихід з редагування)
 function keepAnchor(fn) {
@@ -10992,7 +11159,7 @@ function render() {
   root.classList.toggle('detail', r.name === 'detail');
   root.classList.toggle('settings-pg', r.name === 'settings' || r.name === 'storage' || r.name === 'devices');
   root.classList.toggle('fill', r.name === 'home' || r.name === 'group');
-  if (r.name === 'detail') maybeWarm(r.id);
+  if (r.name === 'detail') { const wid = r.id; clearTimeout(S._wt); S._wt = setTimeout(() => { const q = route(); if (q.name === 'detail' && q.id === wid) maybeWarm(wid); }, 1200); }
   if (dit) { const b = $('#epscr'); if (b) { if (S.scrollEp && S.scrollEp.kid === dit.id) b._k = dit.id; else epAutoScroll(b, dit.id); } }
   if (r.name === 'remote') { const b = $('#rmeps'); if (b) epAutoScroll(b, 'k' + rmKid()); }
   if (S.scrollEp && r.name === 'detail' && r.id === S.scrollEp.kid) {  // з повідомлення: прокручуємо до нової серії, але не вмикаємо її
@@ -11014,6 +11181,7 @@ function bump(sel) { const el = document.querySelector(sel); if (el) { el.classL
 S.warmed = new Set();
 function warm(id, n, dub) {
   const key = id + '|' + (dub || '') + '|' + n; if (S.warmed.has(key) || S.net.state === 'offline') return;
+  if (SLOW_N >= 2) return;  // прогрів — найнижчий пріоритет: не відбираємо з'єднання в користувацьких запитів
   S.warmed.add(key);
   api('/api/warm', {id, n}).then(j => {
     const v = j && j.view, it = item(id); if (!v || !it) return;
@@ -11132,7 +11300,7 @@ const IMG_SET = new Set();
 setInterval(() => { for (const im of [...IMG_SET]) if (!im.isConnected) { if (IMG_IO) IMG_IO.unobserve(im); IMG_SET.delete(im); im.removeAttribute('src'); } }, 8000);  // чистимо картинки зі сторінок, яких уже немає
 const IMG_Q = [];
 function pumpImg() {  // не більше 4 картинок одночасно: з'єднань до локального сервера мало, і вони потрібні пошуку
-  while (IMG_ACT < 6 && IMG_Q.length) {
+  while (IMG_ACT < 3 && IMG_Q.length) {
     const im = IMG_Q.pop();  // найсвіжіші (ті, що зараз на екрані) — першими
     if (!im.isConnected || im.getAttribute('src') || !im.dataset.s || im.dataset.vis === '0') continue;
     IMG_ACT++;
@@ -11293,8 +11461,7 @@ function nwResHTML() {
         <div class="ct"><div class="t">${esc(x.title)}</div><div class="s">${esc([x.type, x.year, x.info].filter(Boolean).join(' · '))}</div></div>
       </div></div>`;
   }).join('') + `</div>`;
-  if (vis.length > lim) h += `<div style="padding:4px 16px 24px"><button class="btn" style="width:100%" data-act="nlim">Показати ще (${vis.length - lim})</button></div>`;
-  else if (D.more) h += `<div style="padding:4px 16px 24px"><button class="btn" style="width:100%" data-act="nmore" ${D.loading ? 'disabled' : ''}>${ico(D.loading ? 'spinner' : 'plus')} Завантажити наступну сторінку</button></div>`;
+  if (vis.length > lim || D.more) h += `<div style="padding:4px 16px 24px"><button class="btn" style="width:100%" data-act="nlim" ${D.loading ? 'disabled' : ''}>${ico(D.loading ? 'spinner' : 'plus')} ${vis.length > lim ? 'Показати ще (' + (vis.length - lim) + (D.more ? '+' : '') + ')' : D.loading ? 'Завантажую…' : 'Показати ще'}</button></div>`;
   else h += `<p class="hint" style="text-align:center;padding:4px 16px 24px">Це все, що показує сайт.</p>`;
   return h;
 }
@@ -11342,6 +11509,7 @@ async function nwLoad(more, force) {
   const ss = nwSites().filter(s => !more || nwSD(s).more);
   await Promise.all(ss.map(s => nwLoadSite(s, more, force)));
   const D = nwD();
+  if (more && D.more && !D.loading && S.nw.want && nwVisible(D).length < S.nw.want && (S.nw.tries = (S.nw.tries || 0) + 1) <= 6) { nwLoad(true); return; }  // ще не вистачає до потрібної кількості — одразу беремо наступну
   if (more !== undefined && D.more && (nwFilterCount() + (S.nw.f.hide ? 1 : 0)) && nwVisible(D).length < 12 && (S.nw.tries = (S.nw.tries || 0) + 1) <= 4) nwLoad(true);  // фільтри лишили мало — підвантажуємо наступну сторінку
 }
 function nwEnsure() {
@@ -11470,7 +11638,7 @@ function settingsHTML() {
       <div class="row"><div class="tx"><b>Обкладинка серії на екрані блокування</b><span class="d">Кадр серії замість обкладинки аніме.</span></div>
         <label class="sw"><input type="checkbox" data-set="np_ep_cover" ${S.set.np_ep_cover !== false ? 'checked' : ''}></label></div>
       ${IOS_APP ? `<div class="row"><div class="tx"><b>Віддавати перевагу плеєру iOS</b><span class="d">Стандартний плеєр iOS: PiP, AirPlay, екран блокування.</span></div>
-        <label class="sw"><input type="checkbox" data-set="ios_player" ${S.set.ios_player !== false ? 'checked' : ''}></label></div>` : ''}
+        <label class="sw"><input type="checkbox" data-set="ios_player" ${S.set.ios_player === true ? 'checked' : ''}></label></div>` : ''}
       <div class="skg ${S.skOpen === true && S.set.auto_skip ? 'open' : ''}" id="skg">
         <div class="skh" data-act="sktog"><div class="tx"><b>Автопропуск</b><span class="d">Пропускає інтро та аутро.</span></div>
           <label class="sw"><input type="checkbox" id="skmaster" ${S.set.auto_skip ? 'checked' : ''}></label>
@@ -11749,10 +11917,30 @@ function groupSheetHTML(gid) {
       <button class="btn dng" data-act="gungroup" data-g="${esc(gid)}" style="flex:1">Розгрупувати</button></div>`;
 }
 
+// великі серіали (One Piece — 1180 серій): рендеримо лише діапазон по 100, інакше WebView падає
+const EP_PG = 100, EP_BIG = 150;
+S.epPg = S.epPg || {};
+function epRange(it, scope) {
+  const n = (it.episodes || []).length;
+  if (n <= EP_BIG) return {from: 0, to: n, chips: ''};
+  const pages = Math.ceil(n / EP_PG);
+  let p = S.epPg[scope + it.id];
+  if (p == null) { const i = it.episodes.findIndex(e => !e.watched); p = Math.floor((i < 0 ? n - 1 : i) / EP_PG); }
+  p = Math.max(0, Math.min(pages - 1, p));
+  let c = '';
+  for (let i = 0; i < pages; i++) { const a = i * EP_PG + 1, b = Math.min(n, (i + 1) * EP_PG); c += `<button class="dchip${i === p ? ' on' : ''}" data-act="eprng" data-p="${i}" data-s="${scope}">${a}–${b}</button>`; }
+  return {from: p * EP_PG, to: Math.min(n, (p + 1) * EP_PG), chips: `<div class="eprng">${c}</div>`};
+}
 function nextEp(it) {
   return it.episodes.find(e => !e.watched) || null;
 }
 
+function epListHTML(it) {
+  const cardsMode = epMode() === 'cards', rmMode = epMode() === 'rm';
+  const rng = epRange(it, 'd');
+  const eps = it.episodes.map((e, i) => i < rng.from || i >= rng.to ? '' : rmMode ? epRmHTML(it, e, i) : cardsMode ? epCardHTML(it, e, i) : epHTML(it, e, i)).join('');
+  return eps ? `${rng.chips}<div class="epscr" id="epscr"><div class="${rmMode ? 'epgrid epr' : cardsMode ? 'epgrid' : 'eps'}">${eps}</div></div>` : '<div class="eps"><div style="padding:18px;color:var(--mu)">Серій поки немає.</div></div>';
+}
 function detailHTML(id) {
   const it = item(id);
   if (!it) return `<div class="bar"><button class="back" data-act="back">‹ Назад</button><h1></h1></div><div class="empty"><h2>Не знайдено</h2></div>`;
@@ -11764,8 +11952,7 @@ function detailHTML(id) {
   const sel = S.sel.size, sm = S.selMode;
   const dlN = S.jobs.filter(j => j.status === 'running' || j.status === 'queued').length;
   const cardsMode = epMode() === 'cards', rmMode = epMode() === 'rm';
-  const eps = it.episodes.map((e, i) => rmMode ? epRmHTML(it, e, i) : cardsMode ? epCardHTML(it, e, i) : epHTML(it, e, i)).join('');
-  const rc = relCounts(it), hasRel = rc.ord + rc.sim > 0;
+    const rc = relCounts(it), hasRel = rc.ord + rc.sim > 0;
   const canCm = !!(it.site && ['yummyani', 'aniliberty', 'animru', 'animevost'].includes(it.site.id));
   if (S.dtab === 'cm' ? !canCm : (!(hasRel || canCm) || (S.dtab === 'sim' && !rc.sim) || (S.dtab === 'ord' && !rc.ord))) S.dtab = 'eps';
   const onEps = S.dtab === 'eps';
@@ -11822,7 +12009,7 @@ function detailHTML(id) {
   </div>
   <h3 class="sec">Серії</h3>
   ${sm ? `<p class="hint"${sel ? ' style="display:none"' : ''}>Торкайтесь серій, щоб вибрати кілька. Серію можна також утримати пальцем.</p>` : ''}
-  ${eps ? `<div class="epscr" id="epscr"><div class="${rmMode ? 'epgrid epr' : cardsMode ? 'epgrid' : 'eps'}">${eps}</div></div>` : '<div class="eps"><div style="padding:18px;color:var(--mu)">Серій поки немає.</div></div>'}` : S.dtab === 'cm' ? commentsHTML(it) : relHTML(it)}
+  <div id="eplist">${epListHTML(it)}</div>` : S.dtab === 'cm' ? commentsHTML(it) : relHTML(it)}
   ${tmp ? '' : `<p style="text-align:center;color:var(--mu);font-size:12px;margin-top:14px">Остання перевірка: ${esc(it.checked || '—')}</p>`}
   </div></div>
   ${sel && onEps ? `<div class="dlbar">${dlbarInner(it)}</div><div class="dlsp" style="height:150px"></div>` : ''}`;
@@ -12119,7 +12306,7 @@ function dubsHTML() {  // озвучки: улюблені (зірочка, по
 }
 async function dubSave(k) {
   const v = S.set[k]; try { await api('/api/settings', {[k]: v}); } catch (e) { toast(e.message, true); }
-  if (S.sheet && S.sheet.kind === 'dubs') renderSheet();
+  if (S.sheet && S.sheet.kind === 'dubs') { const l = $('.dublist'), y = l ? l.scrollTop : 0; renderSheet(); const n = $('.dublist'); if (n) n.scrollTop = y; }
 }
 function renderSheet() {
   const s = S.sheet;
@@ -12692,7 +12879,7 @@ const A = {
     try { S.sync = await api('/api/sync_cfg', {sync_settings: all}); paintSync(); } catch (e) { toast(e.message, true); }
   },
   dpx() { if (S.sheet) { S.sheet.px = !S.sheet.px; renderSheet(); } },
-  dvx(el) { S.dvOpen = S.dvOpen || {}; S.dvOpen[el.dataset.k] = !S.dvOpen[el.dataset.k]; const b = $('#dvbox'); if (b) b.dataset.h = ''; paintSync(); },
+  dvx(el) { S.dvOpen = S.dvOpen || {}; const k = el.dataset.k; S.dvOpen[k] = k === 'ho' ? S.dvOpen.ho === false : !S.dvOpen[k]; const b = $('#dvbox'); if (b) b.dataset.h = ''; paintSync(); },
   dmenu(el) { const r = el.getBoundingClientRect(); openSheet('dmenu', {id: el.dataset.id, rect: r}); },
   async dsync(el) { closeSheet(); A.syncnow(); },
   dremote(el) { const id = el.dataset.id; closeSheet(); rcStart(id); S.rm.manual = false; S.rm.pend = null; location.hash = '#/remote'; },
@@ -12747,7 +12934,12 @@ const A = {
     } catch (e) { toast(e.message, true); }
   },
   home() { location.hash = '#/'; },
-  back() { if (history.length > 1) history.back(); else location.hash = '#/search'; },
+  back() {  // «Назад» веде у список, звідки відкрили аніме (а не на попередню сторінку аніме після перемикання озвучки/сайту)
+    const r = route(), prevDetail = /^#\/(a|g)\//.test(PREVH || '');
+    if (history.length > 1 && PREVH && !prevDetail) { history.back(); return; }
+    const t = r.name === 'detail' ? S.origTab : 'home';
+    location.hash = t === 'new' ? '#/new' : t === 'search' ? '#/search' : '#/';
+  },
   sclear() { const i = $('#sq'); if (i) { i.value = ''; i.focus(); } S.search.q = ''; },
   sfil(el) {
     const Q = S.search, id = el.dataset.s;
@@ -12842,13 +13034,16 @@ const A = {
     S.scrollEp = {kid, n: ep};
     if (location.hash === '#/a/' + kid) { S.dtab = 'eps'; render(); } else location.hash = '#/a/' + kid;
   },
-  nsite(el) { S.nw.site = el.dataset.s; try { localStorage.setItem('nwsite', S.nw.site); } catch (e) {} S.nw.limit = 24; S.nw.tries = 0; paintNew(); nwEnsure(); },
+  nsite(el) { S.nw.want = 0; S.nw.site = el.dataset.s; try { localStorage.setItem('nwsite', S.nw.site); } catch (e) {} S.nw.limit = 24; S.nw.want = 0; S.nw.tries = 0; paintNew(); nwEnsure(); },
   nfilt() { S.nw.open = !S.nw.open; paintNew(); },
-  nhide() { S.nw.f.hide = !S.nw.f.hide; S.nw.limit = 24; S.nw.tries = 0; paintNew(); const D = nwD(); if (D.more && nwVisible(D).length < 12) nwLoad(true); },
-  nreset() { Object.assign(S.nw.f, {year: '', type: '', genre: '', sort: 'def'}); S.nw.limit = 24; paintNew(); },
+  nhide() { S.nw.f.hide = !S.nw.f.hide; S.nw.limit = 24; S.nw.want = 0; S.nw.tries = 0; paintNew(); const D = nwD(); if (D.more && nwVisible(D).length < 12) nwLoad(true); },
+  nreset() { Object.assign(S.nw.f, {year: '', type: '', genre: '', sort: 'def'}); S.nw.limit = 24; S.nw.want = 0; paintNew(); },
   nrefresh() { S.nw.tries = 0; nwLoad(false, true); },
   nmore() { S.nw.tries = 0; nwLoad(true); },
-  nlim() { S.nw.limit = (S.nw.limit || 24) + 24; paintNew(); },
+  nlim() {  // одна кнопка: показує ще 24; якщо локально майже не лишилось — сама підвантажує наступну сторінку й дозаповнює
+    S.nw.limit = (S.nw.limit || 24) + 24; S.nw.want = S.nw.limit; S.nw.tries = 0; paintNew();
+    const D = nwD(); if (D.more && !D.loading && nwVisible(D).length < S.nw.limit + 24) nwLoad(true);
+  },
   async bopen(el) {
     const x = nwD().items[Number(el.dataset.i)]; if (!x) return;
     const srcs = x.srcs || [{url: x.url, title: x.title}];
@@ -13107,7 +13302,7 @@ const A = {
     document.querySelectorAll('.dubs .dchip').forEach(c => c.style.opacity = c === el ? 1 : .5);
     try {
       const r = await api('/api/set_dub', {id, dubbing: dub});
-      if (r.task) await waitTask(r.task);
+      if (r.task) await Promise.race([waitTask(r.task), new Promise((_, rj) => setTimeout(() => rj(new Error('Сайт довго відповідає — озвучку не змінено, спробуйте ще раз')), 30000))]);
       S.sel.clear(); S.selMode = false; fx(); S.chipFix = true; await loadLib();
       const n = item(id);
       toast('Озвучка: ' + dub + (n && n.episodes.length ? '' : ' — серій поки немає'), false, 'check');
@@ -13185,7 +13380,18 @@ const A = {
     if (nx) play(id, nx.n);
   },
   pclose() { closePlayer(); },
-  epview(el) { S.epView = el.dataset.v; try { localStorage.setItem('epv', S.epView); } catch (e) {} render(); },
+  eprng(el) { S.epPg[el.dataset.s + (el.dataset.s === 'r' ? rmKid() : (route().id || ''))] = +el.dataset.p; if (el.dataset.s === 'r') rmPaintEps(); else { const y = scrollY; render(); } },
+  epview(el) {  // перемикаємо вигляд серій без перемальовування всієї сторінки
+    const v = el.dataset.v; if (S.epView === v) return;
+    S.epView = v; try { localStorage.setItem('epv', S.epView); } catch (e) {}
+    const r = route(), it = r.name === 'detail' ? item(r.id) : null, box = $('#eplist');
+    if (!it || !box || S.dtab !== 'eps') { render(); return; }
+    ENTER = false;
+    box.innerHTML = epListHTML(it);
+    const m = epMode();
+    document.querySelectorAll('.seg [data-act="epview"]').forEach(b => b.classList.toggle('on', b.dataset.v === (m === 'list' ? 'list' : m)));
+    const b = $('#epscr'); if (b) epAutoScroll(b, it.id + '|' + Date.now(), true);
+  },
   reorder() { keepAnchor(() => { S.reorder = !S.reorder; if (!S.reorder) S.libSel.clear(); render(); }); },
   mv(el) { moveItem(el.dataset.id, el.dataset.d); },
   actog() { S.acOpen = !S.acOpen; const g = $('#acgrp'); if (g) g.classList.toggle('open', S.acOpen); },
@@ -13473,7 +13679,7 @@ document.addEventListener('click', ev => {
 });
 document.addEventListener('change', ev => {
   if (ev.target.dataset && ev.target.dataset.nf) {
-    S.nw.f[ev.target.dataset.nf] = ev.target.value; S.nw.limit = 24; S.nw.tries = 0; const D = nwD(); paintNew();
+    S.nw.f[ev.target.dataset.nf] = ev.target.value; S.nw.limit = 24; S.nw.want = 0; S.nw.tries = 0; const D = nwD(); paintNew();
     if (D.more && nwVisible(D).length < 12 && ev.target.dataset.nf !== 'sort') nwLoad(true);
     return;
   }
@@ -13628,7 +13834,7 @@ async function play(id, n, startT, _retry) {
       if (s.type !== 'file' && PRET < 2) { PRET++; const keep = V.currentTime || P.good || resume || 0; msg.classList.remove('hide'); msg.innerHTML = ico('hourglass') + 'Повторюю спробу…'; setTimeout(() => { if (S.cur && S.cur.id === id && S.cur.n === n) play(id, n, keep, true); }, 700); return; }
       msg.classList.remove('hide'); msg.innerHTML = ico('error') + esc('Не вдалося відтворити відео.' + (s.type !== 'file' ? ' Спробуйте іншу якість або завантажте серію.' : '')); };
     const p = V.play(); if (p && p.catch) p.catch(() => {});
-    if (IOS_APP && S.set.ios_player !== false && !S.mirror && !S.awp && Math.min(screen.width, screen.height) >= 700) {  // iPad не відкриває системний плеєр сам (відео йде вбудовано) — просимо його при старті
+    if (IOS_APP && S.set.ios_player === true && !S.mirror && !S.awp && Math.min(screen.width, screen.height) >= 700) {  // iPad не відкриває системний плеєр сам (відео йде вбудовано) — просимо його при старті
       let fsTries = 0;  // системний плеєр інколи не відкривається з першого разу (немає «жесту»/відео ще не готове) — пробуємо на кількох подіях і з інтервалом
       const fsTry = () => { try { if (S.cur && S.cur.id === id && S.cur.n === n && !V.webkitDisplayingFullscreen && V.webkitEnterFullscreen && V.readyState >= 1) V.webkitEnterFullscreen(); } catch (er) {} };
       ['loadedmetadata', 'canplay', 'playing'].forEach(ev => V.addEventListener(ev, fsTry, {once: true}));
@@ -13865,7 +14071,7 @@ function airplayInit() {
 }
 setTimeout(airplayInit, 0);
 function applyPlayerMode() {  // без playsinline iPhone сам відкриває стандартний плеєр iOS (PiP, AirPlay, керування з екрана блокування)
-  const native = IOS_APP && S.set.ios_player !== false && !S.mirror && !S.awp;  // під час трансляції екрана системний плеєр йде на інший екран і гасить телефон — тоді свій
+  const native = IOS_APP && S.set.ios_player === true && !S.mirror && !S.awp;  // під час трансляції екрана системний плеєр йде на інший екран і гасить телефон — тоді свій
   ['playsinline', 'webkit-playsinline'].forEach(a => native ? V.removeAttribute(a) : V.setAttribute(a, ''));
 }
 function setNowPlaying(it, e, n) {
@@ -14039,7 +14245,22 @@ function devBody() {
   h += `<button class="btn pri dvadd" data-act="pairopen">${ico('plus')} Додати пристрій</button>`;
   if (nP) {
     h += '<div class="dvsec">Можливості</div>';
-    h += `<label class="dvcard dvsw"><div class="dvic ft">${ico('xfer')}</div><div class="tx"><b>Передача між пристроями</b><span class="d">Перекидайте вкладку, серію з поточного моменту, пошук і прокрутку на інший пристрій. Увімкніть на обох.</span></div><span class="sw"><input type="checkbox" id="hosw" ${y.handoff_on ? 'checked' : ''}></span></label>`;
+    let hb = '';
+    const g = (S.set && S.set.xgest) || 'both';
+    hb += `<div class="dvsub">Жест перекидання</div>
+      <div class="seg" role="tablist">${[['both', 'Обидва'], ['top', 'Зверху'], ['edge', 'Справа']].map(([m, t]) => `<button data-act="xgest" data-m="${m}" class="${g === m ? 'on' : ''}">${t}</button>`).join('')}</div>
+      <div class="dvcard gest ${g === 'edge' ? 'dim' : ''}"><div class="gdemo"><div class="gph"><i class="gglow"></i><i class="gb b1"></i><i class="gb b2"></i><i class="gb b3"></i><i class="gf"></i></div></div>
+      <div class="tx"><b>Затиснути зверху</b><span class="d">Затисніть верх екрана — екран затремтить і засяє. Продовжуйте тримати, і відкрите перелетить на інший пристрій.</span></div></div>
+      <div class="dvcard gest ${g === 'top' ? 'dim' : ''}"><div class="gdemo"><div class="gph e"><i class="gglow"></i><i class="gb b1"></i><i class="gb b2"></i><i class="gb b3"></i><i class="gf"></i></div></div>
+      <div class="tx"><b>Затиснути справа й провести вгору</b><span class="d">Затисніть правий край посередині екрана — він затремтить. Тоді проведіть пальцем угору, щоб перекинути.</span></div></div>
+      `;
+    const fs = fxStyle();
+    hb += `<div class="dvsub">Анімація передачі</div><div class="fxtiles">${[['blocks', 'Блоки'], ['vortex', 'Вихор'], ['edge', 'Свічення']].map(([k, t]) => `<button class="fxt${fs === k ? ' on' : ''}" data-act="fxsel" data-s="${k}"><div class="fxm v-${k}">${fxMini(k)}</div><span>${t}</span></button>`).join('')}</div>
+      <p class="dvhint">Торкніться, щоб вибрати й побачити приклад. Анімація однакова для надсилання й отримання і синхронізується на всіх ваших пристроях.</p>`;
+    const hoO = !(S.dvOpen && S.dvOpen.ho === false);
+    h += `<div class="dvcard dvx ${hoO ? 'open' : ''}"><div class="dvxh"><div class="dvxl" data-act="dvx" data-k="ho"><div class="dvic ft">${ico('xfer')}</div><div class="tx"><b>Передача між пристроями</b><span class="d">Перекидайте вкладку, серію з поточного моменту, пошук і прокрутку на інший пристрій. Увімкніть на обох.</span></div></div>
+      <button class="dvxc" data-act="dvx" data-k="ho" aria-label="Розгорнути">${ico('chev')}</button><label class="sw"><input type="checkbox" id="hosw" ${y.handoff_on ? 'checked' : ''}></label></div>
+      <div class="dvxb ${y.handoff_on ? '' : 'off'}">${hb}</div></div>`;
     h += dvxHTML('sync', 'refresh', 'Синхронізація', 'Бібліотека, перегляд, позиція, архів і видалення. Увімкніть на обох.', 'sysw', y.sync, [
       ['sy_view', 'Вид бібліотеки', y.sync_view, 'Сортування, групи й вигляд карток'],
       ['sy_player', 'Налаштування плеєра', y.sync_player, 'Автопропуск, автоперехід, гучність'],
@@ -14047,17 +14268,6 @@ function devBody() {
     h += dvxHTML('rc', 'cast', 'Пульт', 'Керуйте серією, що грає на іншому пристрої, прямо з цього.', 'rcsw', y.rc_on, [
       ['rc_in', 'Дозволити керувати цим пристроєм', y.rc_in, 'Інший пристрій зможе ставити паузу, перемотувати й міняти серію тут'],
       ['rc_out', 'Керувати іншими з цього пристрою', y.rc_out, 'Показувати пульт, коли на іншому пристрої грає серія']]);
-    const g = (S.set && S.set.xgest) || 'both';
-    h += `<div class="dvsec">Жест перекидання</div>
-      <div class="seg" role="tablist">${[['both', 'Обидва'], ['top', 'Зверху'], ['edge', 'Справа']].map(([m, t]) => `<button data-act="xgest" data-m="${m}" class="${g === m ? 'on' : ''}">${t}</button>`).join('')}</div>
-      <div class="dvcard gest ${g === 'edge' ? 'dim' : ''}"><div class="gdemo"><div class="gph"><i class="gglow"></i><i class="gb b1"></i><i class="gb b2"></i><i class="gb b3"></i><i class="gf"></i></div></div>
-      <div class="tx"><b>Затиснути зверху</b><span class="d">Затисніть верх екрана — екран затремтить і засяє. Продовжуйте тримати, і відкрите перелетить на інший пристрій.</span></div></div>
-      <div class="dvcard gest ${g === 'top' ? 'dim' : ''}"><div class="gdemo"><div class="gph e"><i class="gglow"></i><i class="gb b1"></i><i class="gb b2"></i><i class="gb b3"></i><i class="gf"></i></div></div>
-      <div class="tx"><b>Затиснути справа й провести вгору</b><span class="d">Затисніть правий край посередині екрана — він затремтить. Тоді проведіть пальцем угору, щоб перекинути.</span></div></div>
-      ${y.handoff_on ? '' : '<p class="dvhint" style="color:var(--ac)">Спершу ввімкніть «Передачу між пристроями».</p>'}`;
-    const fs = fxStyle();
-    h += `<div class="dvsec">Анімація передачі</div><div class="fxtiles">${[['blocks', 'Блоки'], ['vortex', 'Вихор'], ['edge', 'Свічення']].map(([k, t]) => `<button class="fxt${fs === k ? ' on' : ''}" data-act="fxsel" data-s="${k}"><div class="fxm v-${k}">${fxMini(k)}</div><span>${t}</span></button>`).join('')}</div>
-      <p class="dvhint">Торкніться, щоб вибрати й побачити приклад. Анімація однакова для надсилання й отримання.</p>`;
   }
   return h;
 }
@@ -14480,7 +14690,9 @@ function rmEps() {
   const st = RC.st || {}, it = item(rmKid()); if (!it) return '';
   const dd = RMDL.kid === it.id && RMDL.pid === RC.pid && RMDL.eps ? RMDL.eps : null;
   const q = it.meta && it.meta.poster;
-  return (it.episodes || []).map((e, i) => {
+  const rg = epRange(it, 'r');
+  return rg.chips + (it.episodes || []).map((e, i) => {
+    if (i < rg.from || i >= rg.to) return '';
     const cur = st.id === it.id && String(st.ep) === String(e.n), pend = S.rm.pend && S.rm.pend.kid === it.id && String(S.rm.pend.n) === String(e.n);
     const thi = e.th ? `<div class="thi${S.set.blur_thumbs ? ' bl' : ''}" style="background-image:url('/thumb/${it.id}/${encodeURIComponent(e.n)}?v=${e.downloaded ? 1 : 0}')"></div>` : '';  // немає обкладинки серії — порожній фон
     return `<button class="rme${cur ? ' cur' : ''}${e.watched ? ' w' : ''}${pend ? ' pend' : ''}" data-act="rmep" data-n="${esc(e.n)}" style="--i:${Math.min(i, 10)}"><div class="th">${thi}<span class="num">${esc(e.n)}</span>${cur ? `<span class="eq">${ico('play')} Грає</span>` : pend ? `<span class="eq">${ico('spinner')}</span>` : ''}${e.new ? '<span class="nw">нова</span>' : ''}${e.pos > 5 && !e.watched ? `<span class="rs">${ico('clock')}${fmtT(e.pos)}</span>` : ''}</div><div class="n">Серія ${esc(e.n)}${e.watched ? `<span class="wk" title="Переглянуто">${ico('eye')}</span>` : ''}</div>${e.title ? `<div class="tt">${esc(e.title)}</div>` : ''}${dd && String(e.n) in dd ? `<div class="rdl" title="Скачано на «${esc(RC.name || '')}»">${ico('download')}${esc(dd[String(e.n)] || 'скачано')}</div>` : ''}</button>`;
