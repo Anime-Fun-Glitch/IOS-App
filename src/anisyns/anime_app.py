@@ -401,7 +401,12 @@ def _anilib_meta(node, base=None):
     src = poster.get('src') or (opt.get('src') if isinstance(opt, dict) else None)
   name = node.get('name') if isinstance(node.get('name'), dict) else {}
   genres = [g.get('name') for g in node.get('genres') or [] if isinstance(g, dict) and g.get('name')]
+  ong = node.get('isOngoing', node.get('is_ongoing'))
+  tot = node.get('episodesTotal') or node.get('episodes_total')
+  prod = node.get('isInProduction', node.get('is_in_production'))
   return {
+      'fin': True if (ong is False and prod is not True) else None,  # сайт прямо каже: не онгоїнг
+      'eps_total': tot if isinstance(tot, int) and tot > 0 else None,
       'poster': _abs(base or 'https://anilibria.top/', src),
       'description': (node.get('description') or '').replace('\r', '').strip() or None,
       'year': node.get('year'),
@@ -2347,6 +2352,10 @@ def _yummy_meta(a):
   d = a.get('description')
   meta['description'] = _strip_tags(d) if isinstance(d, str) and d.strip() else None
   meta['year'] = a.get('year')
+  st = a.get('anime_status')
+  stt = str((st.get('title') if isinstance(st, dict) else st) or '').lower()
+  if re.search(r'вийшло|вышло|released|completed|завершен', stt):
+    meta['fin'] = True
   ot = a.get('other_titles')
   if isinstance(ot, list) and ot:
     meta['original'] = str(ot[0])
@@ -4802,7 +4811,7 @@ def _ac_pick(hours, limit):
   due, soonest = [], None
   with LOCK:
     for k, e in library.items():
-      if e.get('temp') or e.get('archived'):
+      if e.get('temp') or (e.get('archived') and not e.get('arc_auto')):
         continue
       if not e.get('chk_ts'):  # після оновлення розкидаємо перевірки у часі, щоб не було «шторму»
         e['chk_ts'] = now - random.random() * hours * 3600
@@ -5560,11 +5569,18 @@ def api_check(kid, bg=False, quiet=False):
     e['poster_v'] = POSTER_VER
     if isinstance(e.get('meta'), dict):
       e['meta']['next'] = info['meta'].get('next')  # прибираємо застарілий таймер, якщо сайт його більше не дає
+      e['meta']['fin'] = info['meta'].get('fin')  # «вийшло повністю» — лише поки сайт так каже
+      e['meta']['eps_total'] = info['meta'].get('eps_total')
   lib_save()
   new_poster = (e.get('meta') or {}).get('poster')
   if not _poster_file(kid) or new_poster != old_poster or e.get('poster_src') != new_poster:
     if cache_poster(kid, new_poster):
       lib_save()
+  if new and e.get('archived') and e.get('arc_auto'):  # аніме закинули в «Переглянуте» автоматично, а серії таки з'явились — повертаємо в бібліотеку
+    with LOCK:
+      e.pop('archived', None)
+      e.pop('arc_auto', None)
+    lib_save()
   if new and not e.get('temp') and not e.get('archived'):
     notif_add('new', kid=kid, title=e['title'], eps=list(new))
   return {'new': new}
@@ -5595,7 +5611,7 @@ def _all_folders(e):
   return list(dict.fromkeys([_folder(e, d) for d in (names or [None])] + [e.get('folder') or '']))
 
 
-def api_archive(kid, value=True):
+def api_archive(kid, value=True, auto=False):
   """Архів: перегляднуте аніме не засмічує бібліотеку (і не перевіряється на нові серії), але нічого не видаляється."""
   key, e = _find(kid)
   with LOCK:
@@ -5604,8 +5620,13 @@ def api_archive(kid, value=True):
     if value:
       e['archived'] = True
       _mark_all_seen(e)
+      if auto:
+        e['arc_auto'] = True  # такі аніме й надалі перевіряються на нові серії
+      else:
+        e.pop('arc_auto', None)
     else:
       e.pop('archived', None)
+      e.pop('arc_auto', None)
   lib_save()
   return {'ok': True}
 
@@ -6596,7 +6617,7 @@ def net_state():
 
 
 SETTINGS = {'mobile_download': False, 'auto_skip': False, 'auto_skip_opening': True, 'auto_skip_ending': True, 'auto_next': True,
-            'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': True, 'ios_player': False, 'ios_pl2': False, 'web_inapp': True, 'np_ep_cover': True,
+            'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': True, 'ios_player': False, 'ios_pl2': False, 'web_inapp': True, 'np_ep_cover': True, 'hide_psave': False, 'auto_arc': True, 'show_scrollbar': False,
             'bg_keep': True, 'bg_check': False, 'island': True, 'island_dl': True, 'island_check': False,
             'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'old_cards': False, 'dub_fav': [], 'dub_prio': [], 'dub_seen': [], 'fx_style': 'blocks', 'recent_min': 3, 'handoff': True, 'rc': True, 'rc_in': True, 'rc_out': True, 'dv2': False, 'xgest': 'both', 'client': {},
             'site_order': ['aniliberty', 'yummyani', 'animevost', 'animru'], 'view': {}}
@@ -6675,6 +6696,12 @@ def api_settings(data=None):
       _log_on() if _logging() else _log_off()
     if data and 'multitask' in data:
       _apply_multitask()
+    if data and 'show_scrollbar' in data:
+      try:
+        fn = SB_PROVIDER.get('fn')
+        fn and fn(bool(SETTINGS.get('show_scrollbar')))
+      except Exception:
+        pass
   d = dict(SETTINGS)
   d['island_ok'] = bool(ISLAND_OK['v'])
   return d
@@ -7197,7 +7224,7 @@ class Handler(BaseHTTPRequestHandler):
           '/api/clientlog': lambda: api_clientlog(b.get('msg')),
           '/api/open': lambda: api_open_start(b.get('url'), b.get('sources'), bool(b.get('explicit'))),
           '/api/keep': lambda: api_keep(b.get('id'), bool(b.get('archived'))),
-          '/api/archive': lambda: api_archive(b.get('id'), bool(b.get('value', True))),
+          '/api/archive': lambda: api_archive(b.get('id'), bool(b.get('value', True)), bool(b.get('auto'))),
           '/api/rename': lambda: api_rename(b.get('id'), b.get('name')),
           '/api/group': lambda: api_group(b.get('ids'), b.get('name'), b.get('gid')),
           '/api/ungroup': lambda: api_ungroup(b.get('ids')),
@@ -7507,6 +7534,7 @@ _OWN_DIRS = ('crash_reports', 'anime_videos', 'app_data', 'Збереження'
 # ═════════════════════════ Збереження: експорт / імпорт ═════════════════════════
 
 BK = {'state': 'idle', 'kind': '', 'done': 0, 'total': 0, 'msg': '', 'path': '', 'err': '', 'cancel': threading.Event(), 'result': None}
+SB_PROVIDER = {'fn': None}  # iOS: показати/сховати системну смугу прокрутки
 BROWSER_PROVIDER = {'fn': None}  # iOS: відкрити сторінку у вбудованому системному браузері (SFSafariViewController)
 SHARE_PROVIDER = {'fn': None}  # iOS: показати системне вікно «Поділитись» (зберегти у Файли тощо)
 _BK_DIRNAME = 'Збереження'
@@ -8325,8 +8353,8 @@ SYNC_LOCK = threading.RLock()
 SYNC = {'st': None, 'srv': None, 'srv_err': '', 'started': False, 'found': {}, 'pending': None, 'pair_out': None, 'gen': 0,
         'status': {}, 'wake': threading.Event(), 'scanning': 0.0, 'last_rescan': 0.0, 'pair_until': 0.0, 'last_scan': 0.0}
 SYNC_SETTINGS_KEYS = ['view', 'auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'auto_check', 'auto_check_hours', 'blur_thumbs',
-                      'np_ep_cover', 'skip_mode', 'vol_max', 'own_vol', 'recent_min', 'site_order', 'dub_fav', 'dub_prio', 'fx_style']
-SYNC_GROUPS = {'view': ['view'], 'player': ['auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'skip_mode', 'vol_max', 'own_vol', 'np_ep_cover']}
+                      'np_ep_cover', 'hide_psave', 'auto_arc', 'skip_mode', 'vol_max', 'own_vol', 'recent_min', 'site_order', 'dub_fav', 'dub_prio', 'fx_style']
+SYNC_GROUPS = {'view': ['view'], 'player': ['auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'skip_mode', 'vol_max', 'own_vol', 'np_ep_cover', 'hide_psave', 'auto_arc']}
 SYNC_SCOPES = ('all', 'view', 'player', 'other')
 SYNC_ALWAYS = ('fx_style',)  # анімація передачі синхронізується завжди, незалежно від груп
 
@@ -9708,10 +9736,13 @@ body{padding-bottom:calc(84px + var(--bot))}
 #tabs a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;font-size:11px;color:var(--mu);border-radius:12px}
 #tabs a .i{width:24px;height:24px}
 #tabs a.on{color:var(--ac)}
-#rcbar{bottom:calc(var(--tabh,92px) + 10px)!important;z-index:95!important;touch-action:manipulation;-webkit-tap-highlight-color:transparent;transition:all .25s}
+#rcbar{z-index:95!important;touch-action:manipulation;-webkit-tap-highlight-color:transparent;transition:width .25s,height .25s,border-radius .25s,padding .25s,bottom .3s cubic-bezier(.2,.9,.3,1),top .3s cubic-bezier(.2,.9,.3,1)}
+#rcbar.drag{transition:none!important;box-shadow:0 18px 50px #000c,0 0 0 2px var(--ac)}#rcbar.min{touch-action:none;cursor:grab}
+#rcbar .rcgrip{display:block;width:38px;height:4px;border-radius:2px;background:#ffffff2e;margin:-4px auto 8px}
+#rcbar:not(.min){touch-action:none}#rcbar input[type=range]{touch-action:pan-x}
 #rcbar .rcx{background:none;border:0;color:var(--mu);width:38px;height:38px;display:flex;align-items:center;justify-content:center}
 #rcbar .rcpill{display:none;background:none;border:0;color:var(--ac);width:48px;height:48px;align-items:center;justify-content:center}
-#rcbar.min{left:auto;right:12px;width:50px;height:50px;padding:0;border-radius:25px}
+#rcbar.min{width:50px;height:50px;padding:0;border-radius:25px;margin:0}
 #rcbar.min .rcfull{display:none}#rcbar.min .rcpill{display:flex}
 .rcvl{display:flex;align-items:center;gap:8px;margin-top:6px;color:var(--mu);font-size:12px}.rcvl input{flex:1}.rcvl .rcvi .i{width:20px;height:20px}#rcvn{min-width:34px;text-align:right}
 .rcb .cb,.rcx{-webkit-tap-highlight-color:transparent}
@@ -10119,6 +10150,11 @@ body.pressing,body.pressing *{-webkit-user-select:none!important;user-select:non
 .nempty{text-align:center;color:var(--mu);padding:30px 0}
 @keyframes flashrow{0%,100%{background:transparent}30%,70%{background:#0e9f8455}}
 .flash{animation:flashrow 1.1s ease 2}
+.rme .nw .i{width:12px;height:12px}
+.rme.flash{position:relative;animation:rmflash 1.3s ease 2;border-radius:14px}
+.rme.flash .th::after{content:'';position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 3px #19d3a8,0 0 24px #19d3a8aa;animation:rmflashb 1.3s ease 2;pointer-events:none}
+@keyframes rmflash{0%,100%{transform:scale(1);background:transparent}35%{transform:scale(1.045);background:#0e9f8433}}
+@keyframes rmflashb{0%,100%{opacity:0}35%,70%{opacity:1}}
 .lvprev{margin:4px 0 8px;padding:10px;border-radius:14px;background:var(--s1)}
 .lvprev .lbl{font-size:11.5px;color:var(--mu);margin:0 2px 8px;text-transform:uppercase;letter-spacing:.6px}
 .lvprev .grid{padding:0;pointer-events:none}
@@ -10259,7 +10295,53 @@ body.dragging{-webkit-user-select:none;user-select:none;-webkit-touch-callout:no
 .dlbar .c .btn{flex:none}
 .rb2{border:0;border-radius:10px;background:var(--s2);color:#fff;width:38px;height:36px;display:grid;place-items:center;flex:none}
 .rb2:disabled{opacity:.3}.rb2 .i{width:18px;height:18px}
+html.nosb,html.nosb *{scrollbar-width:none}
+html.nosb ::-webkit-scrollbar,html.nosb::-webkit-scrollbar{display:none;width:0;height:0;background:transparent}
 .rb2.up .i{transform:rotate(180deg)}
+/* ---------- «Переглянуте»: анімація ---------- */
+.card.arcfx{position:relative;z-index:5;animation:arcpulse 1.5s cubic-bezier(.3,.8,.3,1) both}
+@keyframes arcpulse{0%{transform:scale(1)}22%{transform:scale(1.07)}65%{transform:scale(1.05)}100%{transform:scale(1)}}
+@keyframes arcglow{0%{box-shadow:0 0 0 0 #7fd6a400}22%{box-shadow:0 0 0 4px #7fd6a4cc,0 18px 50px #7fd6a466}65%{box-shadow:0 0 0 3px #7fd6a488,0 14px 40px #7fd6a444}100%{box-shadow:0 0 0 0 #7fd6a400}}
+.card.arcfx .poster{animation:arcgrey 1.2s ease .35s both,arcglow 1.5s ease both}.card.arcin .poster{animation:arcglow 1.6s ease both}
+@keyframes arcgrey{to{filter:grayscale(.9) brightness(.8)}}
+.card .stamp{position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;gap:8px;align-items:center;justify-content:center;pointer-events:none;background:radial-gradient(circle,#06201499,#06201455 70%,transparent);animation:stampin 1.4s cubic-bezier(.2,.9,.3,1.2) both}
+.stamp i{width:58px;height:58px;border-radius:50%;background:#7fd6a4;color:#0b2a1c;display:grid;place-items:center;box-shadow:0 0 0 7px #7fd6a455,0 8px 24px #0008}.stamp i .i{width:30px;height:30px;stroke-width:3}
+.stamp b{font-size:13px;font-weight:800;color:#d5ffe8;text-shadow:0 2px 8px #000c;letter-spacing:.02em}
+@keyframes stampin{0%{opacity:0;transform:scale(.35)}28%{opacity:1;transform:scale(1.12)}45%{transform:scale(1)}100%{opacity:1;transform:scale(1)}}
+.card.arcout{animation:arcout .43s cubic-bezier(.5,0,.8,.4) both}
+@keyframes arcout{to{opacity:0;transform:scale(.55) translateY(16px)}}
+.card.arcin{position:relative;z-index:5;animation:arcin 1.6s cubic-bezier(.2,.9,.3,1.1) both}
+@keyframes arcin{0%{transform:scale(.6);opacity:0}25%{transform:scale(1.08);opacity:1}60%{transform:scale(1.03)}100%{transform:scale(1)}}
+/* ---------- меню вибору серій (v3: тонка капсула) ---------- */
+.dlbar{display:flex!important;align-items:center;gap:8px;width:fit-content!important;min-width:min(330px,calc(100% - 20px));max-width:calc(100% - 20px);padding:8px!important;border-radius:20px!important;background:#1b1e2cf2!important;border:1px solid #ffffff1f!important;box-shadow:0 12px 34px #000b!important}
+.dlbar .dlx{width:42px;height:42px;border-radius:13px;background:#ffffff12;flex:none}
+.dlbar .dlt{display:flex;flex-direction:column;line-height:1.1;min-width:42px;padding:0 4px}.dlbar .dlt b{font-size:18px;font-variant-numeric:tabular-nums}.dlbar .dlt small{font-size:11px;color:var(--mu)}
+.dlbar .dlsp2{flex:1}
+.dlc{position:relative;width:46px;height:46px;border-radius:13px;border:0;background:#ffffff14;color:#fff;display:grid;place-items:center;flex:none;touch-action:manipulation;transition:transform .12s,background .15s}
+.dlc .i{width:21px;height:21px}.dlc:active{transform:scale(.92)}
+.dlc.ok{background:#1fa876;color:#fff}.dlc.dng{background:#ff4d5e2e;color:#ff8a94}.dlc.on{background:#ffffff30}.dlc:disabled{opacity:.4}
+.dlc em{position:absolute;top:-5px;right:-5px;min-width:19px;height:19px;border-radius:7px;background:#fff;color:#111;font-style:normal;font-size:11px;font-weight:800;display:grid;place-items:center;padding:0 5px;box-shadow:0 2px 6px #0007}
+.dlbar{left:50%!important;right:auto!important;transform:translateX(-50%);width:min(560px,calc(100% - 20px));display:block;padding:12px;border-radius:22px;background:linear-gradient(160deg,#262a40f5,#171a2af5);border:1px solid #ffffff1c;animation:dlin .28s cubic-bezier(.2,.9,.3,1.1) both}
+.dlbar.out{animation:dlout .2s ease-in both;pointer-events:none}
+@keyframes dlin{from{opacity:0;transform:translateX(-50%) translateY(18px) scale(.97)}to{opacity:1;transform:translateX(-50%)}}
+@keyframes dlout{to{opacity:0;transform:translateX(-50%) translateY(18px) scale(.97)}}
+.dlh{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.dlcnt{min-width:38px;height:38px;border-radius:12px;background:var(--ac);display:grid;place-items:center;font-weight:800;font-size:17px;padding:0 8px;flex:none;font-variant-numeric:tabular-nums}
+.dlt{flex:1;min-width:0;display:flex;flex-direction:column}.dlt b{font-size:15px}.dlt small{font-size:12px;color:var(--mu);min-height:14px}
+.dlx{width:38px;height:38px;border-radius:12px;border:0;background:#ffffff14;color:#fff;display:grid;place-items:center;flex:none}.dlx .i{width:18px;height:18px}.dlx:active{transform:scale(.93)}
+.dlbar .dact{display:grid;grid-template-columns:repeat(auto-fit,minmax(76px,1fr));gap:8px}
+.dlk{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;height:62px;border:0;border-radius:14px;background:#ffffff12;color:#fff;font-size:12.5px;font-weight:600;padding:0 6px;touch-action:manipulation;transition:transform .12s,background .15s}
+.dlk .i{width:20px;height:20px}.dlk:active{transform:scale(.95)}
+.dlk.ok{background:#1f9d6e33;color:#5ef0b5}.dlk.dng{background:#ff4d5e26;color:#ff8a94}.dlk:disabled{opacity:.4}
+.dlbar .dact .dlk{width:auto;padding:0 6px;font-size:12.5px}
+/* галочки вибору серій */
+.ep,.ec,.erm{transition:background .22s,box-shadow .22s}
+@keyframes ckin{0%{transform:scale(.3);opacity:0}70%{transform:scale(1.12);opacity:1}100%{transform:scale(1)}}
+@keyframes ckout{to{transform:scale(.3);opacity:0}}
+@keyframes ckpop{from{transform:scale(.2);opacity:0}to{transform:none;opacity:1}}
+.ep .ck,.ec .th .ck,.erm .ck{animation:ckin .26s cubic-bezier(.2,.9,.3,1.2) both}
+.ck.ckout{animation:ckout .16s ease-in both!important}
+.ck .i{animation:ckpop .22s cubic-bezier(.2,.9,.3,1.4)}
 .grp .row .site{width:26px;height:26px;border-radius:8px}
 /* ---------- шторки ---------- */
 .back-d{position:fixed;inset:0;z-index:50;background:#000a;display:flex;align-items:flex-end}
@@ -10700,7 +10782,7 @@ body.rmpg #rcbar{display:none!important}
 .rme .th::after{content:"";position:absolute;inset:0;background:linear-gradient(to top,#000b 0%,#0000 55%);pointer-events:none}
 .rme .num{position:absolute;left:8px;bottom:6px;z-index:2;font-weight:800;font-size:17px;text-shadow:0 1px 6px #000}
 .rme .eq{position:absolute;z-index:2;right:6px;top:6px;max-width:calc(100% - 12px);white-space:nowrap;overflow:hidden;display:flex;align-items:center;gap:4px;background:var(--ac);color:#fff;border-radius:10px;padding:3px 8px;font-size:11.5px;font-weight:700}.rme .eq .i{width:12px;height:12px}
-.rme .nw{position:absolute;z-index:2;left:6px;top:6px;white-space:nowrap;background:#0e9f84;color:#fff;border-radius:8px;padding:2px 7px;font-size:11px;font-weight:700}
+.rme .nw{display:inline-flex;align-items:center;gap:4px;position:absolute;z-index:2;left:6px;top:6px;white-space:nowrap;background:#0e9f84;color:#fff;border-radius:8px;padding:2px 7px;font-size:11px;font-weight:700}
 .rme .rs{position:absolute;z-index:2;white-space:nowrap;right:8px;bottom:6px;display:flex;align-items:center;gap:3px;font-size:11px;color:#ffffffd0}.rme .rs .i{width:11px;height:11px}
 .rdl{display:flex;align-items:center;gap:4px;margin-top:2px;font-size:11.5px;font-weight:600;color:#6fe0a0}.rdl .i{width:12px;height:12px}
 .epr{gap:14px 12px}
@@ -10892,7 +10974,7 @@ const S = {
   sel: new Set(), q: ls.get('q', '720p'), descOpen: false,
   sheet: null, busy: new Set(), checking: false, lookup: null, addErr: '',
   cur: null, // що зараз грає: {id, n}
-  net: {state: 'unknown'}, set: {web_inapp: true, site_order: ['aniliberty', 'yummyani', 'animevost', 'animru'], mobile_download: false, auto_next: true, auto_check: true, auto_check_hours: 3, blur_thumbs: false, logging: false, multitask: true, ios_player: false}, st: {data: null, t: 0, loading: false},
+  net: {state: 'unknown'}, set: {web_inapp: true, site_order: ['aniliberty', 'yummyani', 'animevost', 'animru'], mobile_download: false, auto_next: true, auto_check: true, auto_check_hours: 3, blur_thumbs: false, logging: false, multitask: true, ios_player: false, hide_psave: false, auto_arc: true, show_scrollbar: false}, st: {data: null, t: 0, loading: false},
   epView: (function () { try { return localStorage.getItem('epv') || 'list'; } catch (e) { return 'list'; } })(), reorder: false, acOpen: false, ac: null,
 };
 
@@ -10999,6 +11081,7 @@ const ICONS = {
   cell: '<path d="M5 20v-3M10 20v-7M15 20V9M20 20V4"/>',
   offline: '<path d="M2 9a15 15 0 0 1 4-2.6M22 9a15 15 0 0 0-9-4.9"/><path d="M5.5 12.6a10 10 0 0 1 3-1.8M18.5 12.6a10 10 0 0 0-3-1.8"/><path d="M9 16.2a5 5 0 0 1 2.2-1"/><path d="M3 3l18 18"/>',
   cog: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+  devdl: '<rect width="20" height="14" x="2" y="3" rx="2"/><path d="M12 7v6"/><path d="m15 10-3 3-3-3"/><path d="M12 17v4"/><path d="M8 21h8"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>',
   phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.6"/><path d="M11 18.6h2"/>',
   tablet: '<rect x="3.5" y="4" width="17" height="16" rx="2.4"/><path d="M11 17h2"/>',
@@ -11258,6 +11341,7 @@ async function waitTask(tid, limitMs) {
 }
 function morphInto(root, html) { const t = document.createElement('template'); t.innerHTML = html; morphKids(root, t.content); }
 function render() {
+  document.documentElement.classList.toggle('nosb', S.set.show_scrollbar !== true);
   if (DR.on) return;  // триває перетягування картки
   if (S.ps) { const r0 = route(); if (r0.name === 'detail' && r0.id === S.ps.id) psTouch(); }  // поки ви в цьому аніме — сеанс живий
   if (S.reorder && !LAY.cur) { LAY.cur = laySnap(); LAY.undo = []; LAY.redo = []; } else if (!S.reorder && LAY.cur) layCommit();
@@ -11778,6 +11862,10 @@ function settingsHTML() {
     <div class="fold"><div>
       <div class="row"><div class="tx"><b>Автоматично наступна серія</b><span class="d">Сама вмикає наступну серію.</span></div>
         <label class="sw"><input type="checkbox" data-set="auto_next" ${S.set.auto_next !== false ? 'checked' : ''}></label></div>
+      <div class="row"><div class="tx"><b>Сховати «Зберегти для аніме»</b><span class="d">Прибирає кнопку з налаштувань плеєра. Зміни озвучки й якості діють лише на сеанс.</span></div>
+        <label class="sw"><input type="checkbox" data-set="hide_psave" ${S.set.hide_psave === true ? 'checked' : ''}></label></div>
+      <div class="row"><div class="tx"><b>Переглянуте — автоматично</b><span class="d">Лише коли сайт каже, що аніме вийшло повністю, і ти переглянув усі серії. Воно лишається на місці, доки не повернешся в бібліотеку. Якщо серії таки з'являться — саме повернеться з «Переглянутого».</span></div>
+        <label class="sw"><input type="checkbox" data-set="auto_arc" ${S.set.auto_arc !== false ? 'checked' : ''}></label></div>
       <div class="row"><div class="tx"><b>Обкладинка серії на екрані блокування</b><span class="d">Кадр серії замість обкладинки аніме.</span></div>
         <label class="sw"><input type="checkbox" data-set="np_ep_cover" ${S.set.np_ep_cover !== false ? 'checked' : ''}></label></div>
       ${IOS_APP ? `<div class="row"><div class="tx"><b>Сайт аніме у програмі</b><span class="d">Кнопка «Сайт» відкриває вбудований браузер зі кнопкою «Закрити» й поверненням до цієї сторінки. Вимкнено — одразу відкривається Safari. Подвійний тап копіює посилання.</span></div>
@@ -11849,6 +11937,7 @@ function settingsHTML() {
       <label class="row sub"><input type="checkbox" data-set="logging" ${S.set.logging ? 'checked' : ''}><div class="tx"><b>Вести логи</b><span class="d">Журнали збоїв у папці crash_reports (її видно в «Файлах»).</span></div></label>
       <label class="row sub"><input type="checkbox" data-set="multitask" ${S.set.multitask ? 'checked' : ''}><div class="tx"><b>Багатозадачність</b><span class="d">До 3 серій одночасно й більше паралельних запитів. Швидше, але більше пам'яті й батареї.</span></div></label>
       <label class="row sub"><input type="checkbox" data-set="wv_reload" ${S.set.wv_reload ? 'checked' : ''}><div class="tx"><b>Очищати WebView перезавантаженням</b><span class="d">Після кількох переглянутих серій чи відкритих аніме сторінка перезавантажується, щоб звільнити пам'ять. Помітно (бібліотека на мить оновлюється), тому вимкнено.</span></div></label>
+      <label class="row sub"><input type="checkbox" data-set="show_scrollbar" ${S.set.show_scrollbar ? 'checked' : ''}><div class="tx"><b>Смуга прокрутки</b><span class="d">Повертає білу смугу праворуч, що показує, наскільки прокручено сторінку. Вимкнено — смуги не видно ніде (на iPhone змінюється після перезапуску).</span></div></label>
       <label class="row sub"><input type="checkbox" data-set="old_cards" ${S.set.old_cards ? 'checked' : ''}><div class="tx"><b>Старий блоковий стиль</b><span class="d">Повертає у вкладці аніме другий варіант відображення серій (картки). Вимкнено — доступні лише список і блоки як у пульті.</span></div></label>
       ${IOS_APP ? `<label class="row sub"><input type="checkbox" data-set="plain_wv" ${S.set.plain_wv ? 'checked' : ''}><div class="tx"><b>Штатний WebView</b><span class="d">Замість власної оболонки — стандартний WebView Toga, без фонових циклів. Діє після перезапуску застосунку.</span></div></label>` : ''}
     </div></div>
@@ -12284,19 +12373,30 @@ function dlbarInner(it) {
   const nDl = it.episodes.filter(e => S.sel.has(String(e.n)) && e.downloaded).length, nUp = sel - nDl;
   const selW = it.episodes.filter(e => S.sel.has(String(e.n)));
   const allW = selW.length && selW.every(e => e.watched);
-  return `<div class="c"><span>Вибрано: ${sel}</span><button class="btn sm" data-act="selnone">Зняти вибір</button></div>
-     <div class="dact">
-     ${nUp ? `<button class="btn ok" data-act="download" ${S.ffmpeg ? '' : 'disabled'}>${ico('download')} Скачати · ${nUp}</button>` : ''}
-     ${nDl ? `<button class="btn dng" data-act="delsel">${ico('trash')} Видалити · ${nDl}</button>` : ''}
-     ${nUp && S.sync && S.sync.peers.length ? `<button class="btn" data-act="rdl">${ico('download')} На іншому</button>` : ''}
-     <button class="btn" data-act="watchsel" aria-label="Переглянуто">${ico('eye')} ${allW ? 'Не дивився' : 'Переглянуто'}</button></div>`;
+  const peerOn = typeof onlinePeers === 'function' && onlinePeers().length > 0;  // «на інший пристрій» — лише коли є хоч один у мережі
+  const cnt = n => n > 1 ? `<em>${n}</em>` : '';
+  return `<button class="dlx" data-act="selnone" aria-label="Зняти вибір">${ico('close')}</button>
+     <div class="dlt"><b>${sel}</b><small>${sel === 1 ? 'серія' : sel < 5 ? 'серії' : 'серій'}</small></div><i class="dlsp2"></i>
+     ${nUp ? `<button class="dlc ok" data-act="download" aria-label="Скачати" ${S.ffmpeg ? '' : 'disabled'}>${ico('download')}${cnt(nUp)}</button>` : ''}
+     ${nUp && peerOn ? `<button class="dlc" data-act="rdl" aria-label="Скачати на іншому пристрої">${ico('devdl')}</button>` : ''}
+     ${nDl ? `<button class="dlc dng" data-act="delsel" aria-label="Видалити скачане">${ico('trash')}${cnt(nDl)}</button>` : ''}
+     <button class="dlc${allW ? ' on' : ''}" data-act="watchsel" aria-label="${allW ? 'Не дивився' : 'Переглянуто'}">${ico('eye')}</button>`;
 }
-function applySelMode() {  // вхід/вихід з режиму вибору без повного перемальовування: нічого не блимає
+function applySelMode() {  // вихід з режиму: галочки спершу ховаються з анімацією
+  if (!S.selMode && S.dtab === 'eps' && !S._selOut) {
+    const cks = document.querySelectorAll('#root .ck');
+    if (cks.length) { S._selOut = true; cks.forEach(c => c.classList.add('ckout')); setTimeout(() => { S._selOut = false; applySelModeNow(); }, 170); paintSel(); return; }
+  }
+  if (S._selOut) return;
+  applySelModeNow();
+}
+function applySelModeNow() {  // вхід/вихід з режиму вибору без повного перемальовування: нічого не блимає
   if (S.dtab !== 'eps') { render(); return; }
   const r = route(), it = r.name === 'detail' ? item(r.id) : null;
   if (!it) { render(); return; }
   const cards = epMode() === 'cards', rmv = epMode() === 'rm', sm = S.selMode, sel = S.sel.size;
   const saved = ENTER; ENTER = false;
+  const keepSel = S.sel; if (sm) S.sel = new Set();  // рядки будуємо без вибору — а потім вмикаємо його з анімацією (інакше перша вибрана серія з'являлась би без неї)
   it.episodes.forEach((e, i) => {
     const row = document.querySelector(`#root ${rmv ? '.erm' : cards ? '.ec' : '.ep'}[data-n="${CSS.escape(String(e.n))}"]`);
     if (!row) return;
@@ -12306,6 +12406,7 @@ function applySelMode() {  // вхід/вихід з режиму вибору �
     if (oi && ni) ni.replaceWith(oi);
     row.replaceWith(nr);
   });
+  S.sel = keepSel;
   ENTER = saved;
   const tools = $('#root .tools');
   if (tools) {
@@ -12325,7 +12426,7 @@ function applySelMode() {  // вхід/вихід з режиму вибору �
   let hint = $('#root .hint');
   if (sm && !hint) { const sec = $('#root h3.sec'); if (sec) sec.insertAdjacentHTML('afterend', `<p class="hint"${sel ? ' style="display:none"' : ''}>Торкайтесь серій, щоб вибрати кілька. Серію можна також утримати пальцем.</p>`); }
   else if (!sm && hint) hint.remove();
-  paintSel();
+  if (sm && S.sel.size) requestAnimationFrame(() => requestAnimationFrame(() => { if (S.selMode) paintSel(); })); else paintSel();
 }
 function paintSel() {  // зміна вибору без перемальовування сторінки: нічого не блимає, картинки не перезавантажуються
   const r = route(), it = r.name === 'detail' ? item(r.id) : null;
@@ -12340,8 +12441,10 @@ function paintSel() {  // зміна вибору без перемальову�
   if (sel) {
     const h = dlbarInner(it);
     if (bar) { if (bar._h !== h) { bar.innerHTML = h; bar._h = h; } }
-    else { $('#root').insertAdjacentHTML('beforeend', `<div class="dlbar">${h}</div><div class="dlsp" style="height:150px"></div>`); const nb = $('#root .dlbar'); if (nb) nb._h = h; }
-  } else { if (bar) bar.remove(); if (sp) sp.remove(); }
+    else { $('#root').insertAdjacentHTML('beforeend', `<div class="dlbar">${h}</div><div class="dlsp" style="height:190px"></div>`); const nb = $('#root .dlbar'); if (nb) nb._h = h; }
+    if (bar && bar.classList.contains('out')) { bar.classList.remove('out'); bar.innerHTML = h; bar._h = h; }
+  } else { if (bar && !bar.classList.contains('out')) { bar.classList.add('out'); setTimeout(() => { if (bar.classList.contains('out')) bar.remove(); }, 210); } if (sp) sp.remove(); }
+  try { dockLayout(); } catch (e) {}
 }
 S.thOk = new Set();
 function thOk(img) { img.classList.add('ld'); if (img.dataset.k) S.thOk.add(img.dataset.k); }  // запам'ятовуємо: при перемальовуванні картинка одразу видима, без блимання
@@ -12373,9 +12476,9 @@ function epRmHTML(it, e, i) {  // «блоки як у пульті» + знач
   const qt = dl ? [e.q, e.size ? fmtSize(e.size) : ''].filter(Boolean).join(' · ') : ('онлайн' + (e.qs && e.qs.length ? ' · до ' + e.qs[0] : ''));
   return `<div class="rme erm${ENTER ? ' enter' : ''}${sel ? ' sel' : ''}${e.watched ? ' w' : ''}" data-n="${esc(e.n)}" style="--i:${Math.min(i || 0, 12)}">
     <div class="th" data-act="${sm ? 'sel' : 'play'}">${thi}<span class="num">${esc(e.n)}</span>
-      ${sm ? `<span class="ck">${sel ? ico('check') : ''}</span>` : e.new ? '<span class="nw">нова</span>' : ''}
+      ${sm ? `<span class="ck">${sel ? ico('check') : ''}</span>` : e.new ? `<span class="nw">${ico('spark')}нова</span>` : ''}
       ${e.pos > 5 && !e.watched ? `<span class="rs">${ico('clock')}${fmtT(e.pos)}</span>` : ''}</div>
-    <div class="n">Серія ${esc(e.n)}</div><div class="tt">${e.title ? esc(e.title) : '&nbsp;'}</div>
+    <div class="n">Серія ${esc(e.n)}</div>${e.title ? `<div class="tt">${esc(e.title)}</div>` : ''}
     <div class="ers">${sm ? `<span class="ei${e.watched ? ' on' : ''}">${ico('eye')}</span>` : `<button class="ei${e.watched ? ' on' : ''}" data-act="watch" aria-label="Переглянуто">${ico('eye')}</button>`}<span class="ei edl${dl ? ' on' : ''}" title="${dl ? 'Скачано' : 'Не скачано'}">${ico(dl ? 'download' : 'cloud')}</span><span class="eqs">${esc(qt)}</span></div>
   </div>`;
 }
@@ -12490,7 +12593,7 @@ function renderSheet() {
   else if (s.kind === 'opening') inner = `<h3>${esc(s.title || 'Відкриваю…')}</h3><div class="findbox"><span class="spin">${ico('spinner')}</span><div class="tx"><b id="opstage">${esc(s.stage || 'Підключаюсь до сайту…')}</b></div>
      <button class="btn sm" data-act="opencancel">${ico('close')} Скасувати</button></div>`;
   else if (s.kind === 'rdl') inner = `<h3>Скачати на іншому пристрої</h3><p class="hint" style="margin:0 0 10px;font-size:13px">Вибрано серій: ${(s.eps || []).length}. Вони стануть у чергу завантаження там.</p>
-     ${((S.sync && S.sync.peers) || []).map(p => `<button class="btn ${p.online ? 'pri' : ''}" data-act="rdlgo" data-id="${esc(p.id)}" style="width:100%;margin-bottom:8px;justify-content:flex-start">${esc(p.name)} <span class="d" style="margin-left:auto">${p.online ? 'онлайн' : 'офлайн'}</span></button>`).join('')}
+     ${((S.sync && S.sync.peers) || []).map(p => `<button class="btn ${p.online ? 'pri' : ''}" data-act="rdlgo" data-id="${esc(p.id)}" ${p.online ? '' : 'disabled'} style="width:100%;margin-bottom:8px;justify-content:flex-start">${esc(p.name)} <span class="d" style="margin-left:auto">${p.online ? 'онлайн' : 'офлайн'}</span></button>`).join('')}
      <div class="row2"><button class="btn" data-act="dlg-no" style="flex:1">Скасувати</button></div>`;
   else if (s.kind === 'report') inner = `<h3>Звіт про запуски</h3><p class="hint" style="margin:0 0 8px;font-size:12px">Pillow: ${s.pillow ? 'є — постери стискаються' : 'немає — постери не стискаються'}. Зробіть знімок екрана й надішліть.</p>
      <pre style="white-space:pre-wrap;word-break:break-word;font-size:11px;line-height:1.35;background:#0006;border-radius:10px;padding:10px;max-height:52vh;overflow:auto;user-select:text">${esc(s.text || '')}</pre>
@@ -13234,7 +13337,7 @@ const A = {
     const id = route().id, it = item(id);
     const w = it.episodes.filter(e => S.sel.has(String(e.n)));
     const v = !w.every(e => e.watched);
-    try { await api('/api/watched_many', {id, episodes: w.map(e => e.n), value: v}); S.sel.clear(); S.selMode = false; await loadLib(); toast(v ? 'Позначено переглянутими' : 'Позначку знято', false, 'check'); }
+    try { await api('/api/watched_many', {id, episodes: w.map(e => e.n), value: v}); S.sel.clear(); S.selMode = false; await loadLib(); arcCheck(item(id)); toast(v ? 'Позначено переглянутими' : 'Позначку знято', false, 'check'); }
     catch (e) { toast(e.message, true); }
   },
   async dubset() { S.dubset = null; openSheet('dubs', {tab: 'fav'}); try { S.dubset = await api('/api/dubs'); } catch (e) { toast(e.message, true); } if (S.sheet && S.sheet.kind === 'dubs') renderSheet(); },
@@ -13342,9 +13445,9 @@ const A = {
   sel(el) {
     const n = el.closest('[data-n]').dataset.n;
     S.sel.has(n) ? S.sel.delete(n) : S.sel.add(n);
-    if (!S.sel.size) { S.selMode = false; applySelMode(); return; }  // нічого не вибрано — виходимо з режиму
     paintSel();
     bump(`[data-n="${CSS.escape(n)}"] .ck`);
+    if (!S.sel.size) setTimeout(() => { if (!S.sel.size && S.selMode) { S.selMode = false; applySelMode(); } }, 230);  // нічого не вибрано — виходимо з режиму (після анімації зняття)
   },
   selnone() { S.sel.clear(); S.selMode = false; applySelMode(); },  // «Зняти вибір» — заодно вимикає режим вибору
   selmissing() {
@@ -13445,7 +13548,7 @@ const A = {
     const nx = nextEp(it);
     const v = await askNumber('Подивився до серії (включно)', nx ? Number(nx.n) - 1 : '');
     if (v === null || v === '' || isNaN(Number(v))) return;
-    try { await api('/api/watched', {id, upto: Number(v)}); await loadLib(); } catch (e) { toast(e.message, true); }
+    try { await api('/api/watched', {id, upto: Number(v)}); await loadLib(); arcCheck(item(id)); } catch (e) { toast(e.message, true); }
   },
   async delfile(el) {
     const id = route().id, n = Number(el.closest('[data-n]').dataset.n);
@@ -13574,7 +13677,68 @@ const A = {
 function recount(it) {
   it.stats.watched = it.episodes.filter(e => e.watched).length;
   it.stats.new = it.episodes.filter(e => e.new).length;
+  arcCheck(it);
 }
+/* ---------- «Переглянуте» автоматично: аніме лишається на місці, доки не повернешся в бібліотеку — тоді красива анімація ---------- */
+S.arcPend = new Set((() => { try { return JSON.parse(localStorage.getItem('arcPend') || '[]'); } catch (e) { return []; } })());
+function arcSave() { try { localStorage.setItem('arcPend', JSON.stringify([...S.arcPend])); } catch (e) {} }
+function arcFinal(it) {  // упевнені, що серій більше не буде: сайт каже «вийшло повністю», немає таймера й вийшли всі заплановані серії
+  const m = it.meta || {};
+  return m.fin === true && !m.next && (!m.eps_total || it.episodes.length >= m.eps_total);
+}
+function arcDone(it) { return !!(it && !it.temp && !it.archived && S.set.auto_arc !== false && it.episodes && it.episodes.length && it.episodes.every(e => e.watched) && arcFinal(it)); }
+function arcCheck(it) {
+  if (!it) return;
+  if (arcDone(it)) S.arcPend.add(it.id); else S.arcPend.delete(it.id);
+  arcSave();
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function arcCardOf(it) { return document.querySelector(`#root .card[data-id="${CSS.escape(it.id)}"]`) || (it.group ? document.querySelector(`#root .card[data-gid="${CSS.escape(it.group)}"]`) : null); }
+async function arcRun() {
+  if (S.arcBusy || !S.arcPend.size || S.cur || route().name !== 'home' || S.reorder) return;
+  S.arcBusy = true;
+  try {
+    for (const id of [...S.arcPend]) {
+      if (route().name !== 'home' || S.cur) break;
+      const it = item(id);
+      if (!it || !arcDone(it)) { S.arcPend.delete(id); arcSave(); continue; }
+      const tab = S.libTab, card = arcCardOf(it);
+      const vanish = tab === 'lib' && (!it.group || groupMembers(it.group).every(x => x === it || x.archived));
+      let rects = null;
+      if (card && tab !== 'arc') {
+        card.scrollIntoView({block: 'center', behavior: 'smooth'}); await sleep(600);
+        if (route().name !== 'home' || S.cur) break;
+        const po = card.querySelector('.poster');
+        card.classList.add('arcfx');
+        if (po) po.insertAdjacentHTML('beforeend', `<div class="stamp"><i>${ico('check')}</i><b>Переглянуто</b></div>`);
+        if (navigator.vibrate) try { navigator.vibrate([12, 40, 18]); } catch (e) {}
+        await sleep(1500);
+        if (vanish) {
+          rects = {}; document.querySelectorAll('#root .card[data-id]').forEach(c => { rects[c.dataset.id] = c.getBoundingClientRect(); });
+          card.classList.add('arcout'); await sleep(430);
+        }
+      }
+      S.arcPend.delete(id); arcSave();
+      try { await api('/api/archive', {id, value: true, auto: true}); } catch (e) { toast(e.message, true); continue; }
+      it.archived = true; S.arcNew = (tab === 'arc' || !card) ? id : null;
+      if (route().name === 'home') {
+        render();
+        if (rects) document.querySelectorAll('#root .card[data-id]').forEach(c => {  // решта карток плавно зсувається на звільнене місце
+          const r0 = rects[c.dataset.id]; if (!r0) return; const r1 = c.getBoundingClientRect(), dx = r0.left - r1.left, dy = r0.top - r1.top;
+          if (dx || dy) try { c.animate([{transform: `translate(${dx}px,${dy}px)`}, {transform: 'translate(0,0)'}], {duration: 460, easing: 'cubic-bezier(.2,.8,.2,1)'}); } catch (e) {}
+        });
+        if (S.arcNew) {
+          const nc = arcCardOf(it);
+          if (nc && tab === 'arc') { nc.scrollIntoView({block: 'center', behavior: 'smooth'}); nc.classList.add('arcin'); setTimeout(() => nc.classList.remove('arcin'), 1700); }
+          S.arcNew = null;
+        }
+      }
+      loadLib().catch(() => {});
+      await sleep(250);
+    }
+  } catch (e) {} finally { S.arcBusy = false; }
+}
+setInterval(() => { if (S.arcPend.size && route().name === 'home' && !S.cur && !document.hidden) arcRun(); }, 900);
 
 const LP = {t: 0, timer: null, x: 0, y: 0};
 const DR = {lock: 0, el: null, on: false, timer: null, sx: 0, sy: 0, gx: 0, gy: 0, px: 0, py: 0, auto: 0, id: '', pid: null, stack: [], clones: [], aux: null, corner: false, w: 0};
@@ -13822,6 +13986,7 @@ document.addEventListener('pointerdown', ev => {
     const n = row.dataset.n; if (n == null) return;
     S.selMode = true; S.sel.add(n); if (navigator.vibrate) try { navigator.vibrate(15); } catch (e) {}
     applySelMode();
+    setTimeout(() => bump(`[data-n="${CSS.escape(String(n))}"] .ck`), 60);
   }, 480);
 });
 document.addEventListener('pointermove', ev => { if (LP.timer && Math.hypot(ev.clientX - LP.x, ev.clientY - LP.y) > 9) lpCancel(); });
@@ -13843,6 +14008,7 @@ document.addEventListener('change', ev => {
   if (id === 'rpss') { rmPsSet('sp', ev.target.value); rcCmd('pssp', Number(ev.target.value)); return; }
   if (id === 'rpsq') { rmPsSet('q', qNum(ev.target.value)); rcCmd('psq', ev.target.value); return; }
   if (id === 'rpso' || id === 'rpse') { const v = ev.target.checked, k = id === 'rpso' ? 'op' : 'ed'; rmPsSet(k, v); if (v && RC.st && RC.st.ps) { RC.st.ps.op = RC.st.ps.op || k === 'op'; } rcCmd(id === 'rpso' ? 'psop' : 'psed', v); return; }
+  if (ev.target.id === 'pshs') { setOpt('hide_psave', ev.target.checked); psPaint(); return; }
   if (ev.target.id === 'psqs') { A.psq({dataset: {v: ev.target.value}}); return; }
   if (ev.target.id === 'psss') { A.pssp({dataset: {v: ev.target.value}}); return; }
   if (ev.target.dataset && (ev.target.dataset.act === 'psop' || ev.target.dataset.act === 'psed')) { const k = ev.target.dataset.act === 'psop' ? 'auto_skip_opening' : 'auto_skip_ending', v = ev.target.checked; setOpt(k, v); if (v && !S.set.auto_skip) setOpt('auto_skip', true); return; }
@@ -13979,7 +14145,7 @@ function psSnap() {  // зліпок налаштувань плеєра для 
   const p = psGet(S.cur.id) || {}, curDub = (p.dub != null && p.dub !== '') ? p.dub : (PS_INFO.dub || it.dubbing || '');
   const quals = (PS_INFO.id === S.cur.id && PS_INFO.quals.length) ? PS_INFO.quals : [];
   return {dubs: (it.dubs || []).map(d => [d.name, d.downloaded ? 1 : 0]), dub: curDub, sp: p.speed || 1, quals, q: qNum(PS_INFO.q || p.q || S.q), dq: PS_INFO.dq ? qNum(PS_INFO.dq) : 0,
-    op: !!(S.set.auto_skip && S.set.auto_skip_opening), ed: !!(S.set.auto_skip && S.set.auto_skip_ending), dirty: psDirty()};
+    op: !!(S.set.auto_skip && S.set.auto_skip_opening), ed: !!(S.set.auto_skip && S.set.auto_skip_ending), dirty: psDirty() && S.set.hide_psave !== true};
 }
 function psTouch() { if (S.ps) S.ps.t = Date.now(); }
 function psEnsure(id) { return psGet(id) || (S.ps = {id, dub: null, q: null, speed: 1, t: Date.now()}); }
@@ -14003,7 +14169,8 @@ function psPaint() {
     <div class="rw"><span>Якість</span><select class="q" id="psqs" ${quals.length ? '' : 'disabled'} aria-label="Якість">${quals.length ? quals.map(q => `<option value="${esc(q)}" ${PS_INFO.dq && qNum(PS_INFO.dq) === qNum(q) ? 'data-dl="1"' : ''} ${qNum(q) === curQ ? 'selected' : ''}>${esc(q)}${PS_INFO.dq && qNum(PS_INFO.dq) === qNum(q) ? ' ⤓' : ''}</option>`).join('') : '<option>завантажую…</option>'}</select></div>
     <div class="rw"><span>Автопропуск опенінгу</span><label class="sw"><input type="checkbox" data-act="psop" ${S.set.auto_skip && S.set.auto_skip_opening ? 'checked' : ''}></label></div>
     <div class="rw"><span>Автопропуск ендингу</span><label class="sw"><input type="checkbox" data-act="psed" ${S.set.auto_skip && S.set.auto_skip_ending ? 'checked' : ''}></label></div>
-    ${dirty ? '<button class="save" data-act="pssave">Зберегти для аніме</button>' : ''}`;
+    <div class="rw"><span>Сховати «Зберегти для аніме»</span><label class="sw"><input type="checkbox" id="pshs" ${S.set.hide_psave === true ? 'checked' : ''}></label></div>
+    ${dirty && S.set.hide_psave !== true ? '<button class="save" data-act="pssave">Зберегти для аніме</button>' : ''}`;
   box.scrollTop = _st; psPlace();
 }
 function psPlace() {  // меню стоїть над кнопкою-шестернею (серед нижніх кнопок), не виходячи за краї екрана
@@ -14825,7 +14992,7 @@ function rcLayout() {
 }
 function rcStart(pid, auto) {
   const p = peerOf(pid); RC.pid = pid; RC.name = p ? p.name : 'пристрій'; RC.t0 = Date.now(); RC.miss = 0; RC.st = null; RC.drag = RC.vdrag = false; RC.seen = false; RC.auto = !!auto; RC.min = false; RC.idle = false; RC.lost = false;
-  const el = $('#rcbar'); rcLayout(); el.classList.remove('hide', 'min');
+  const el = $('#rcbar'); rcLayout(); el.classList.remove('hide', 'min'); dockLayout();
   document.body.classList.add('rcon');
   if (route().name === 'remote') { el.innerHTML = ''; renderRm(); return; }
   rcBarFill();
@@ -14833,12 +15000,13 @@ function rcStart(pid, auto) {
 function rcBarFill() {
   const el = $('#rcbar'); if (!el) return;
   el.innerHTML = `<button class="rcpill" data-rc="open" aria-label="Пульт">${ico('cast')}</button>
-   <div class="rcfull"><div class="rch"><span class="rci">${ico('cast')}</span><div class="tx"><b id="rct">Запускаю на «${esc(RC.name)}»…</b><span id="rcs">Пульт керування</span></div>
+   <div class="rcfull"><i class="rcgrip"></i><div class="rch"><span class="rci">${ico('cast')}</span><div class="tx"><b id="rct">Запускаю на «${esc(RC.name)}»…</b><span id="rcs">Пульт керування</span></div>
     <button class="rcx" data-rc="exp" aria-label="Розгорнути пульт">${ico('expand')}</button><button class="rcx" data-rc="min" aria-label="Згорнути">${ico('chev')}</button></div>
    <div class="rcsk"><span id="rcc">0:00</span><input type="range" id="rcseek" min="0" max="1000" value="0"><span id="rcd">0:00</span></div>
    <div class="rcb"><button class="cb sm" data-rc="prev">${ico('prev')}</button><button class="cb" data-rc="back">${ico('back10')}</button><button class="cb big" id="rcpp" data-rc="pp">${ico('pause')}</button><button class="cb" data-rc="fwd">${ico('fwd10')}</button><button class="cb sm" data-rc="next">${ico('next')}</button></div>
    <div class="rcvl"><span class="rcvi">${ico('vol')}</span><div class="rcvw"><input type="range" id="rcvol" min="0" max="100" value="100"><i class="rcv100"></i></div><span id="rcvn">100</span></div></div>`;
   if (RC.st) rcPaint(RC.st, true);
+  dockLayout();
 }
 function rcStop() { RC.pid = null; const el = $('#rcbar'); if (el) { el.classList.add('hide'); el.innerHTML = ''; } document.body.classList.remove('rcon'); if (route().name === 'remote') renderRm(); }
 async function rcCmd(c, v) { if (!RC.pid) return; try { await api('/api/sync_rc', {peer: RC.pid, c, v}); } catch (e) { toast(e.message, true); } }
@@ -14853,18 +15021,86 @@ function rcAct(b) {
   if (b.dataset.rc === 'exp') { location.hash = '#/remote'; return; }
   const a = b.dataset.rc, wasPaused = !!(RC.st && RC.st.paused);
   rcOpt(a);
-  if (a === 'min') { RC.min = true; $('#rcbar').classList.add('min'); }
-  else if (a === 'open') { RC.min = false; $('#rcbar').classList.remove('min'); }
+  if (a === 'min') { RC.min = true; $('#rcbar').classList.add('min'); dockLayout(); }
+  else if (a === 'open') { RC.min = false; $('#rcbar').classList.remove('min'); dockLayout(); }
   else if (a === 'stop') { rcCmd('close'); rcStop(); }
   else if (a === 'pp') rcCmd(wasPaused ? 'play' : 'pause');
   else if (a === 'prev') rcCmd('prev'); else if (a === 'next') rcCmd('next');
   else if (a === 'back') rcCmd('seekby', -10); else if (a === 'fwd') rcCmd('seekby', 10);
 }
+const RCP = (() => { try { const o = JSON.parse(localStorage.getItem('rcpos') || 'null'); if (o && (o.v === 't' || o.v === 'b') && (o.h === 'l' || o.h === 'r')) return o; } catch (e) {} return {v: 'b', h: 'r'}; })();
+function rcPosSave() { try { localStorage.setItem('rcpos', JSON.stringify(RCP)); } catch (e) {} }
+function dockLayout() {  // острівець пульта: кут екрана, не заходить під верхню/нижню панелі та стоїть над меню вибору (серій / бібліотеки)
+  const el = $('#rcbar'); if (!el || el.classList.contains('hide') || RC.dragging) return;
+  const vh = innerHeight, tabs = $('#tabs');
+  let low = tabs ? tabs.getBoundingClientRect().top : vh - 90;
+  document.querySelectorAll('.dlbar:not(.out),.libbar').forEach(b => { const r = b.getBoundingClientRect(); if (r.height > 0 && r.top < low) low = r.top; });
+  const bar = document.querySelector('#root .bar'), br = bar ? bar.getBoundingClientRect() : null;
+  const topEdge = br && br.height > 0 && br.bottom > 0 ? br.bottom : 54;
+  const min = el.classList.contains('min'), h = el.offsetHeight;
+  let v = RCP.v;
+  if (v === 'b' && !min && h > low - topEdge - 20) v = 't';  // панель завелика, щоб стояти над меню вибору, — тимчасово вгорі
+  if (v === 'b') { el.style.bottom = Math.round(vh - low + 10) + 'px'; el.style.top = 'auto'; }
+  else { el.style.top = Math.round(topEdge + 10) + 'px'; el.style.bottom = 'auto'; }
+  if (min) { el.style.left = RCP.h === 'l' ? 'calc(12px + var(--lft,0px))' : 'auto'; el.style.right = RCP.h === 'r' ? 'calc(12px + var(--rgt,0px))' : 'auto'; }
+  else { el.style.left = ''; el.style.right = ''; }
+  el.dataset.v = v;
+}
+function rcFlip(el, fn, dur) {  // плавний перескок: показуємо рух від старого місця до нового
+  const r0 = el.getBoundingClientRect(); fn(); dockLayout();
+  const r1 = el.getBoundingClientRect(), dx = r0.left - r1.left, dy = r0.top - r1.top;
+  if (!dx && !dy) return;
+  try { el.animate([{transform: `translate(${dx}px,${dy}px)`}, {transform: 'translate(0,0)'}], {duration: dur || 420, easing: 'cubic-bezier(.2,.9,.25,1.1)'}); } catch (e) {}
+}
+window.addEventListener('resize', () => dockLayout());
+setInterval(dockLayout, 600);
+(function rcMove() {
+  const el = $('#rcbar'); if (!el) return;
+  let d = null, sw = null;
+  el.addEventListener('pointerdown', ev => {
+    if (el.classList.contains('min')) {
+      const r = el.getBoundingClientRect(); d = {id: ev.pointerId, x: ev.clientX, y: ev.clientY, l: r.left, t: r.top, moved: false};
+      try { el.setPointerCapture(ev.pointerId); } catch (e) {}
+    } else if (!ev.target.closest('button,input,a')) sw = {id: ev.pointerId, x: ev.clientX, y: ev.clientY, done: false};
+  });
+  el.addEventListener('pointermove', ev => {
+    if (d && ev.pointerId === d.id) {
+      const dx = ev.clientX - d.x, dy = ev.clientY - d.y;
+      if (!d.moved && Math.hypot(dx, dy) > 8) { d.moved = true; RC.dragging = true; el.classList.add('drag'); gpHaptic(); }
+      if (d.moved) {
+        RC.dragMoved = Date.now();
+        const w = el.offsetWidth, hh = el.offsetHeight, x = Math.max(4, Math.min(innerWidth - w - 4, d.l + dx)), y = Math.max(4, Math.min(innerHeight - hh - 4, d.t + dy));
+        el.style.left = x + 'px'; el.style.right = 'auto'; el.style.top = y + 'px'; el.style.bottom = 'auto';
+      }
+    } else if (sw && ev.pointerId === sw.id && !sw.done) {
+      const dy = ev.clientY - sw.y, dx = ev.clientX - sw.x;
+      if (Math.abs(dy) > 36 && Math.abs(dy) > Math.abs(dx) * 1.4) {
+        sw.done = true; RC.dragMoved = Date.now();
+        const want = dy < 0 ? 't' : 'b';
+        if (want !== RCP.v) { gpHaptic(); rcFlip(el, () => { RCP.v = want; rcPosSave(); }, 460); }
+        else { try { el.animate([{transform: 'translateY(0)'}, {transform: `translateY(${dy < 0 ? -10 : 10}px)`}, {transform: 'translateY(0)'}], {duration: 260, easing: 'ease-out'}); } catch (e) {} }
+      }
+    }
+  });
+  const end = ev => {
+    if (sw && ev.pointerId === sw.id) sw = null;
+    if (!d || ev.pointerId !== d.id) return;
+    const moved = d.moved; d = null; if (!moved) return;
+    RC.dragMoved = Date.now(); RC.dragging = false; el.classList.remove('drag');
+    const r = el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    RCP.h = cx < innerWidth / 2 ? 'l' : 'r'; RCP.v = cy < innerHeight / 2 ? 't' : 'b'; rcPosSave();
+    el.style.left = r.left + 'px'; el.style.top = r.top + 'px';
+    const f0 = {l: r.left, t: r.top};
+    dockLayout(); const r1 = el.getBoundingClientRect();
+    try { el.animate([{transform: `translate(${f0.l - r1.left}px,${f0.t - r1.top}px)`}, {transform: 'translate(0,0)'}], {duration: 460, easing: 'cubic-bezier(.2,1.1,.3,1.05)'}); } catch (e) {}
+  };
+  el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
+})();
 (function rcInit() {
   const el = $('#rcbar'); if (!el) return;
   el.addEventListener('click', ev => { ev.stopPropagation(); ev.preventDefault(); });
   let last = 0;
-  const tap = ev => { const b = ev.target.closest && ev.target.closest('[data-rc]'); if (!b) return; if (ev.type === 'touchend' && ev.cancelable) ev.preventDefault(); if (Date.now() - last < 350) return; last = Date.now(); rcAct(b); };
+  const tap = ev => { if (RC.dragging || Date.now() - (RC.dragMoved || 0) < 450) return; const b = ev.target.closest && ev.target.closest('[data-rc]'); if (!b) return; if (ev.type === 'touchend' && ev.cancelable) ev.preventDefault(); if (Date.now() - last < 350) return; last = Date.now(); rcAct(b); };
   el.addEventListener('touchend', tap, {passive: false}); el.addEventListener('pointerup', ev => { if (ev.pointerType === 'mouse') tap(ev); });
   ['touchstart', 'pointerdown'].forEach(t => el.addEventListener(t, ev => ev.stopPropagation()));
 })();
