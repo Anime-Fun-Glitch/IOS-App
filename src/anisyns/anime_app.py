@@ -14018,6 +14018,7 @@ const qNum = q => parseInt(String(q || '').replace(/\D/g, ''), 10) || 0;
 function psReplay() { if (!S.cur) return; const t = V.currentTime || 0; play(S.cur.id, S.cur.n, t > 3 ? t : 0); }
 let PRET = 0;
 async function play(id, n, startT, _retry) {
+  if (!V.parentNode && V.__par) { try { V.__par.insertBefore(V, V.__nx || null); } catch (e) {} }
   if (!_retry) PRET = 0;
   clearTimeout(clrT);
   const it = item(id); if (!it) return;
@@ -14140,9 +14141,14 @@ V.addEventListener('ended', async () => {
 /* пауза перед автопереходом на наступну серію: можна скасувати або перейти одразу */
 let nxT = 0;
 let NXS = null;  // відлік до наступної серії (для пульта)
-function nxCancel() { const was = !!NXS; clearInterval(nxT); nxT = 0; NXS = null; const b = $('#vnx'); if (b) b.classList.add('hide'); if (was) { try { pstTick(); } catch (e) {} } }
+let NXWAIT = 0;  // відлік відкладено: програма згорнута / відео в PiP — тоді переходу на наступну серію ніхто не бачить
+const appAway = () => document.hidden || pipOn();
+function nxResume() { if (NXWAIT && S.cur && !appAway()) { const s = NXWAIT; NXWAIT = 0; nxStart(s); } }
+setInterval(nxResume, 700);
+function nxCancel() { const was = !!NXS; NXWAIT = 0; clearInterval(nxT); nxT = 0; NXS = null; const b = $('#vnx'); if (b) b.classList.add('hide'); if (was) { try { pstTick(); } catch (e) {} } }
 function nxStart(secs) {
   if (nxT || !S.cur) return;
+  if (appAway()) { NXWAIT = secs || 5; return; }  // не стартуємо наступну серію «в нікуди»: чекаємо, поки повернешся в програму
   const it = item(S.cur.id), i = it ? it.episodes.findIndex(x => x.n === S.cur.n) : -1, nx = it && it.episodes[i + 1];
   if (!nx) { closePlayer(); return; }
   const tot = secs || 5; let left = tot;
@@ -14151,7 +14157,12 @@ function nxStart(secs) {
   const bw = $('#vnxw'); if (bw) bw.classList.toggle('hide', !canBack);
   const bar = $('#vnxbar'); if (bar) { bar.style.transition = 'none'; bar.style.width = '0%'; void bar.offsetWidth; bar.style.transition = ''; }
   $('#vnx').classList.remove('hide'); paint(); skipBtn(null); try { pstTick(); } catch (e) {}
-  nxT = setInterval(() => { left--; if (left <= 0) nxNow(); else paint(); }, 1000);
+  let away = false;
+  nxT = setInterval(() => {
+    if (appAway()) { away = true; return; }  // вийшов з програми посеред відліку — стоїмо
+    if (away) { away = false; left = tot; paint(); return; }  // повернувся — відлік іде спочатку
+    left--; if (left <= 0) nxNow(); else paint();
+  }, 1000);
 }
 function nxNow() { nxCancel(); stepPlayer(1, true); }
 function moveItem(id, d) {
@@ -14175,6 +14186,22 @@ function moveItem(id, d) {
   clearTimeout(moveItem.t);
   moveItem.t = setTimeout(() => api('/api/reorder', {ids: S.items.map(x => x.id)}).catch(e => toast(e.message, true)), 400);
 }
+let HIDLOAD = false;  // нове відео завантажилось, поки програма була згорнута — після повернення картинка може «застигнути» (звук і шкала йдуть)
+V.addEventListener('loadstart', () => { if (appAway()) HIDLOAD = true; });
+function awayBack() {
+  if (document.hidden) return;
+  nxResume();
+  if (HIDLOAD && S.cur) {
+    HIDLOAD = false;
+    setTimeout(() => {
+      if (!S.cur || V.paused || V.seeking || V.webkitDisplayingFullscreen) return;
+      try { P.prog = true; setTimeout(() => { P.prog = false; }, 800); V.currentTime = Math.max(0, V.currentTime - 1.5); } catch (e) {}  // невелика перемотка «розштовхує» картинку
+    }, 350);
+  }
+}
+document.addEventListener('visibilitychange', awayBack);
+window.addEventListener('focus', awayBack);
+window.addEventListener('pageshow', awayBack);
 function stepPlayer(d, auto) {
   if (!S.cur) return;
   const it = item(S.cur.id); const i = it.episodes.findIndex(x => x.n === S.cur.n);
@@ -14361,7 +14388,7 @@ const PIP = {st: 'idle', t: 0, wd: 0};
 const pipOn = () => V.webkitPresentationMode === 'picture-in-picture' || document.pictureInPictureElement === V;
 function pipSet(st) { PIP.st = st; PIP.t = Date.now(); clearTimeout(PIP.wd); }
 function pipSettled() {  // перехід завершено (подією): повертаємо інтерфейс у норму
-  const on = pipOn();
+  const on = pipOn(); if (!on) setTimeout(awayBack, 200);
   pipSet(on ? 'active' : 'idle');
   document.documentElement.style.pointerEvents = ''; document.body.style.pointerEvents = '';
   if (on || V.webkitDisplayingFullscreen) return;
@@ -14483,8 +14510,20 @@ function clearNowPlaying() {  // прибираємо картку «Мої ан
     ms.playbackState = 'none';
   } catch (e) {}
 }
-function audSleep() {  // Web Audio тримає системну картку «Відтворюється» (з IP замість назви) — зупиняємо контекст, коли серію закрито
+function audSleep() {
+  try { if (navigator.audioSession && !S.cur) navigator.audioSession.type = 'ambient'; } catch (e) {}  // поза плеєром сторінка не претендує на системну картку «Відтворюється»  // Web Audio тримає системну картку «Відтворюється» (з IP замість назви) — зупиняємо контекст, коли серію закрито
   [0, 500, 1500].forEach(d => setTimeout(() => { try { if (!S.cur && AUD && AUD.ctx.state === 'running') AUD.ctx.suspend().catch(() => {}); } catch (e) {} clearNowPlaying(); }, d));
+}
+function vDetach() {  // iOS тримає системну картку «Мої аніме» (пауза, ±10) доки <video> у документі: на мить виймаємо його й повертаємо порожнім
+  setTimeout(() => {
+    try {
+      if (S.cur || V.webkitDisplayingFullscreen || V.webkitPresentationMode === 'picture-in-picture' || document.pictureInPictureElement) return;
+      const par = V.parentNode, nx = V.nextSibling; if (!par) return;
+      V.__par = par; V.__nx = nx;
+      par.removeChild(V);
+      setTimeout(() => { try { if (!V.parentNode) par.insertBefore(V, nx && nx.parentNode === par ? nx : null); } catch (e) {} }, 250);
+    } catch (e) {}
+  }, 700);
 }
 function closePlayer() {
   nxCancel(); savePos(true);
@@ -14495,7 +14534,7 @@ function closePlayer() {
   V.pause(); audSleep();
   clearTimeout(clrT);
   // джерело знімаємо не одразу, а коли системний повноекранний плеєр вже закрився: зняття src під час його анімації могло вбивати програму
-  if (wasFs) clrT = setTimeout(() => { if (!S.cur) { V.removeAttribute('src'); V.load(); } }, 600); else { V.removeAttribute('src'); V.load(); }
+  if (wasFs) clrT = setTimeout(() => { if (!S.cur) { V.removeAttribute('src'); V.load(); vDetach(); } }, 600); else { V.removeAttribute('src'); V.load(); vDetach(); }
   $('#player').classList.add('hide'); lockScroll(false); document.body.classList.remove('pl');
   S.cur = null; beat(true); loadLib('vis').catch(() => {});
   // кожні 2 переглянуті серії WebView чиститься перезавантаженням: WebContent накопичує пам'ять, і iOS рано чи пізно вбиває його разом із застосунком
