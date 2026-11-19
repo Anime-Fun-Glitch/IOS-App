@@ -14672,25 +14672,46 @@ function pipWatch(want) {  // якщо перехід не завершився 
     pipSettled();
   }, 3500);
 }
+/* Єдиний шлях: у WKWebView стабільно працює webkitSetPresentationMode (стандартний requestPictureInPicture + exitPictureInPicture
+   у змішаному режимі лишав шар відео «над інтерфейсом» після третього натискання). Стандартний API — лише коли webkit-режиму немає.
+   Після виходу з PiP iOS ще ~1 с програє анімацію повернення — нове натискання в цей час ламало шар відео, тому є «охолодження». */
+const PIPWK = () => !!(V.webkitSetPresentationMode && V.webkitSupportsPresentationMode && V.webkitSupportsPresentationMode('picture-in-picture'));
+let PIPCOOL = 0;
+function pipHeal() {  // шар відео міг «зависнути» над сторінкою — перебудовуємо його
+  try {
+    if (pipOn() || V.webkitDisplayingFullscreen) return;
+    if (V.webkitPresentationMode && V.webkitPresentationMode !== 'inline' && V.webkitSetPresentationMode) V.webkitSetPresentationMode('inline');
+    V.style.transition = 'none'; V.style.transform = '';
+    const d = V.style.display; V.style.display = 'none'; void V.offsetWidth; V.style.display = d;
+    zmApply(false); vcIcon();
+  } catch (e) {}
+}
 $('#vpip').addEventListener('click', () => {
   if ((PIP.st === 'entering' || PIP.st === 'exiting') && Date.now() - PIP.t < 3500) return;
-  const std = document.pictureInPictureEnabled && V.requestPictureInPicture && !V.disablePictureInPicture;
+  if (Date.now() < PIPCOOL) return;  // iOS ще дограє анімацію переходу
+  const wk = PIPWK(), std = !wk && document.pictureInPictureEnabled && V.requestPictureInPicture && !V.disablePictureInPicture;
   try {
     if (pipOn()) {  // вихід
       pipSet('exiting'); pipWatch('out');
-      if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => pipSettled());
+      if (wk) V.webkitSetPresentationMode('inline');
+      else if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => pipSettled());
       else if (V.webkitSetPresentationMode) V.webkitSetPresentationMode('inline');
       return;
     }
+    if (V.webkitDisplayingFullscreen || (V.webkitPresentationMode && V.webkitPresentationMode !== 'inline')) { pipHeal(); toast('Спробуйте ще раз'); return; }
     pipSet('entering'); pipWatch('in');
     V.style.transition = 'none'; V.style.transform = '';       // зум-трансформація псує шар PiP
     if (V.paused) { const pr = V.play(); if (pr && pr.catch) pr.catch(() => {}); }  // синхронно, у межах жесту: на паузі PiP нестабільний
-    if (std) { V.requestPictureInPicture().catch(() => { try { if (V.webkitSetPresentationMode) V.webkitSetPresentationMode('picture-in-picture'); } catch (e) { pipSettled(); toast('Картинка в картинці недоступна для цього відео', true); } }); }
-    else if (V.webkitSetPresentationMode) V.webkitSetPresentationMode('picture-in-picture');
+    if (wk) V.webkitSetPresentationMode('picture-in-picture');
+    else if (std) { V.requestPictureInPicture().catch(() => { pipSettled(); toast('Картинка в картинці недоступна для цього відео', true); }); }
     else { pipSettled(); toast('Картинка в картинці недоступна для цього відео', true); }
-  } catch (e) { pipSettled(); toast('Картинка в картинці недоступна для цього відео', true); }
+  } catch (e) { pipSettled(); pipHeal(); toast('Картинка в картинці недоступна для цього відео', true); }
 });
-['enterpictureinpicture', 'leavepictureinpicture', 'webkitpresentationmodechanged'].forEach(ev => V.addEventListener(ev, () => setTimeout(pipSettled, 60)));
+['enterpictureinpicture', 'leavepictureinpicture', 'webkitpresentationmodechanged'].forEach(ev => V.addEventListener(ev, () => {
+  PIPCOOL = Date.now() + 1300;
+  setTimeout(pipSettled, 60);
+  setTimeout(() => { if (!pipOn()) pipHeal(); }, 1100);  // після завершення анімації повернення
+}));
 /* ---------- звук при перемотці / після згортання ---------- */
 let SMUT = 0, SMT = 0;  // на час перемотки глушимо звук: iOS ще секунду грає старий момент, хоча картинка вже нова
 function smuteOff() { clearTimeout(SMT); if (SMUT) { SMUT = 0; try { V.muted = false; } catch (e) {} } }
