@@ -9766,7 +9766,7 @@ body{padding-bottom:calc(84px + var(--bot))}
 #tabs a .i{width:24px;height:24px}
 #tabs a.on{color:var(--ac)}
 #rcbar{z-index:95!important;touch-action:manipulation;-webkit-tap-highlight-color:transparent;transition:width .25s,height .25s,border-radius .25s,padding .25s,bottom .3s cubic-bezier(.2,.9,.3,1),top .3s cubic-bezier(.2,.9,.3,1)}
-#rcbar.drag{transition:none!important;box-shadow:0 18px 50px #000c,0 0 0 2px var(--ac)}#rcbar.min{touch-action:none;cursor:grab}
+#rcbar.fl{transition:none!important}#rcbar.drag{transition:none!important;box-shadow:0 18px 50px #000c,0 0 0 2px var(--ac)}#rcbar.min{touch-action:none;cursor:grab}
 #rcbar .rcgrip{display:block;width:38px;height:4px;border-radius:2px;background:#ffffff2e;margin:-4px auto 8px}
 #rcbar:not(.min){touch-action:none}#rcbar input[type=range]{touch-action:pan-x}
 #rcbar .rcx{background:none;border:0;color:var(--mu);width:38px;height:38px;display:flex;align-items:center;justify-content:center}
@@ -9917,7 +9917,7 @@ body.shk #root,body.shk #tabs{animation:shkK .6s cubic-bezier(.3,.1,.2,1)}
 @keyframes shkK{0%,100%{transform:none}15%{transform:translate(-5px,3px) rotate(-.5deg)}30%{transform:translate(5px,-3px) rotate(.5deg)}45%{transform:translate(-4px,2px)}60%{transform:translate(3px,-2px)}80%{transform:translate(-1px,0)}}
 html{overflow-x:hidden}
 body{overflow-x:clip;max-width:100%}
-html,body{max-width:100%;overscroll-behavior-x:none}
+html,body{max-width:100%;overscroll-behavior:none}
 html:has(body.pl),html:has(body[style*="overflow: hidden"]){overflow:hidden!important}
 body.pl{overflow:hidden!important}
 #player{overscroll-behavior:none;touch-action:pan-x pan-y}
@@ -9988,6 +9988,8 @@ body.pl{overflow:hidden!important}
 .bar{position:sticky;top:0;z-index:20;transform:translateZ(0);-webkit-backface-visibility:hidden;backface-visibility:hidden;display:flex;align-items:center;gap:8px;
   padding:calc(10px + var(--top)) 14px 10px;background:rgba(13,14,19,.82);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d}
+#root .bar{position:fixed;top:0;left:0;right:0;padding-left:calc(14px + var(--lft));padding-right:calc(14px + var(--rgt));background:rgba(13,14,19,.94)}
+#root:has(.bar){padding-top:var(--barh,calc(58px + var(--top)))}
 html,body,#root{overflow-anchor:none}/* перемальовування списку (морфінг) не має зсувати прокрутку «якорем» браузера */
 .hdr2{position:sticky;top:var(--barh,58px);z-index:19;background:rgba(13,14,19,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d;max-height:55vh;overflow-y:auto;will-change:transform,opacity;transition:transform .55s cubic-bezier(.32,.72,0,1),opacity .45s ease}
 /* поки грає відео, сторінка під плеєром не малюється: менше шарів, розмиттів і анімацій у GPU-процесі WebKit (на iPhone 15 він падає разом із застосунком) */
@@ -10204,9 +10206,9 @@ body.pressing,body.pressing *{-webkit-user-select:none!important;user-select:non
 /* серії — звичайна частина сторінки (одна прокрутка на весь екран, без вкладеного скролу) */
 .epscr,.rmeps{position:relative;padding:8px 0 24px}
 /* блок серій має власну прокрутку; дотик по краях і проміжках між блоками (pointer-events:none) прокручує сторінку, по самих блоках — список */
-.epscr,.rmeps{max-height:calc(100vh - var(--barh,58px) - 190px);max-height:calc(100dvh - var(--barh,58px) - 190px);min-height:min(320px,60vh);overflow-y:auto;overflow-x:hidden;overscroll-behavior-y:auto;-webkit-overflow-scrolling:touch;pointer-events:none;scrollbar-width:none}
+.epscr,.rmeps{max-height:calc(100vh - var(--barh,58px) - 190px);max-height:calc(100dvh - var(--barh,58px) - 190px);min-height:min(320px,60vh);overflow-y:auto;overflow-x:hidden;overscroll-behavior-y:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;scrollbar-width:none}
 .epscr::-webkit-scrollbar,.rmeps::-webkit-scrollbar{display:none}
-.epscr [data-n],.rmeps>*{pointer-events:auto}
+.rmeps{min-height:0;align-content:start;grid-auto-rows:max-content}
 .epscr .eps{margin:0 14px}.epscr .epgrid{margin:0 14px}
 #root.detail .dr .epscr .eps,#root.detail .dr .epscr .epgrid{margin:0 8px}
 /* content-visibility прибрано: у WebKit рядки інколи лишались «пропущеними» (порожні блоки на 190px), а списки тепер обмежені 100 серіями */
@@ -10798,7 +10800,7 @@ body.rmpg #rcbar{display:none!important}
 .rmas{display:flex;gap:10px;overflow-x:auto;padding:6px 16px 8px;margin:-4px -16px 0;scroll-snap-type:x proximity;scroll-padding-left:16px;-webkit-overflow-scrolling:touch;scrollbar-width:none}.rmas::-webkit-scrollbar{display:none}
 .rmas.sub{margin-top:2px}.rmsubh{font-size:12.5px;color:var(--mu);margin:8px 2px 4px;animation:rmUp .25s both}
 .rmnone{color:var(--mu);padding:20px 4px;font-size:14px}
-.rma{flex:0 0 92px;width:92px;min-width:92px;max-width:92px;box-sizing:border-box;display:block;background:none;border:0;color:inherit;text-align:left;padding:0;scroll-snap-align:start}
+.rma{flex:0 0 92px;width:92px;min-width:92px;max-width:92px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:flex-start;align-self:flex-start;background:none;border:0;color:inherit;text-align:left;padding:0;scroll-snap-align:start}
 .rma i{width:92px;position:relative;display:grid;place-items:center;aspect-ratio:2/3;border-radius:12px;overflow:hidden;background-color:transparent;background-repeat:no-repeat;background-size:cover;background-position:center;background-origin:border-box;background-clip:border-box;font-style:normal;font-size:30px;font-weight:800;color:#ffffff30;border:0;transition:transform .15s}
 .rma i::before{content:"";position:absolute;inset:0;border-radius:inherit;border:2px solid transparent;pointer-events:none;z-index:2;transition:border-color .18s}
 .rma i em{position:absolute;z-index:1;right:5px;bottom:5px;max-width:calc(100% - 10px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-style:normal;font-size:11px;font-weight:700;color:#fff;background:#000b;border-radius:9px;padding:1px 7px}
@@ -10806,7 +10808,7 @@ body.rmpg #rcbar{display:none!important}
 .rma.on i::before{border-color:var(--ac)}.rma.on span{color:#fff}.rma.pl i{box-shadow:0 0 0 2px #0d0e13,0 0 0 4px var(--ac2,var(--ac))}.rma:active i{transform:scale(.95)}
 .rma.grp.open i::before{border-style:dashed}
 .rma.arch i{filter:grayscale(1) contrast(1.06) brightness(.86)}.rma.arch.on i,.rma.arch.pl i{filter:grayscale(1) contrast(1.06) brightness(.92)}
-.rmeps,.rmeps.in{background:none;box-shadow:none;border:0}.rmeps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 12px}
+.rmeps,.rmeps.in{background:none;box-shadow:none;border:0}.rmeps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 12px;align-content:start;grid-auto-rows:max-content;align-items:start}
 @media (min-width:560px){.rmeps{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (min-width:900px){.rmeps{grid-template-columns:repeat(4,minmax(0,1fr))}}
 .rmeps.in .rme{animation:rmUp .32s cubic-bezier(.2,.8,.2,1) backwards;animation-delay:calc(var(--i) * 28ms)}
@@ -13209,7 +13211,7 @@ const A = {
     try { S.sync = await api('/api/sync_cfg', {sync_settings: all}); paintSync(); } catch (e) { toast(e.message, true); }
   },
   dpx() { if (S.sheet) { S.sheet.px = !S.sheet.px; renderSheet(); } },
-  dvx(el) { S.dvOpen = S.dvOpen || {}; const k = el.dataset.k; S.dvOpen[k] = k === 'ho' ? S.dvOpen.ho === false : !S.dvOpen[k]; const b = $('#dvbox'); if (b) b.dataset.h = ''; paintSync(); },
+  dvx(el) { S.dvOpen = S.dvOpen || {}; const k = el.dataset.k; S.dvOpen[k] = !S.dvOpen[k]; const b = $('#dvbox'); if (b) b.dataset.h = ''; paintSync(); },
   dmenu(el) { const r = el.getBoundingClientRect(); openSheet('dmenu', {id: el.dataset.id, rect: r}); },
   async dsync(el) { closeSheet(); A.syncnow(); },
   async dremote(el) {
@@ -14130,7 +14132,7 @@ document.addEventListener('change', ev => {
   }
   if (ev.target.id === 'hosw') {
     const v = ev.target.checked;
-    api('/api/settings', {handoff: v}).then(() => { if (S.set) S.set.handoff = v; if (S.sync) S.sync.handoff_on = v; paintSync(); }).catch(e => toast(e.message, true));
+    api('/api/settings', {handoff: v}).then(() => { if (S.set) S.set.handoff = v; if (S.sync) S.sync.handoff_on = v; S.dvOpen = S.dvOpen || {}; S.dvOpen.ho = !!v; const b = $('#dvbox'); if (b) b.dataset.h = ''; paintSync(); }).catch(e => toast(e.message, true));
     return;
   }
   if (ev.target.id === 'sysw') {
@@ -14879,7 +14881,7 @@ function devBody() {
     const fs = fxStyle();
     hb += `<div class="dvsub">Анімація передачі</div><div class="fxtiles">${[['blocks', 'Блоки'], ['vortex', 'Вихор'], ['edge', 'Свічення']].map(([k, t]) => `<button class="fxt${fs === k ? ' on' : ''}" data-act="fxsel" data-s="${k}"><div class="fxm v-${k}">${fxMini(k)}</div><span>${t}</span></button>`).join('')}</div>
       <p class="dvhint">Торкніться, щоб вибрати й побачити приклад. Анімація однакова для надсилання й отримання і синхронізується на всіх ваших пристроях.</p>`;
-    const hoO = !(S.dvOpen && S.dvOpen.ho === false);
+    const hoO = !!(S.dvOpen && S.dvOpen.ho);
     h += `<div class="dvcard dvx ${hoO ? 'open' : ''}"><div class="dvxh"><div class="dvxl" data-act="dvx" data-k="ho"><div class="dvic ft">${ico('xfer')}</div><div class="tx"><b>Передача між пристроями</b><span class="d">Перекидайте вкладку, серію з поточного моменту, пошук і прокрутку на інший пристрій. Увімкніть на обох.</span></div></div>
       <button class="dvxc" data-act="dvx" data-k="ho" aria-label="Розгорнути">${ico('chev')}</button><label class="sw"><input type="checkbox" id="hosw" ${y.handoff_on ? 'checked' : ''}></label></div>
       <div class="dvxb ${y.handoff_on ? '' : 'off'}">${hb}</div></div>`;
@@ -15161,7 +15163,9 @@ function dockBounds() {  // межі, куди може стати острів�
     if (h > 0) low = Math.min(low, vh - bt - h);
   });
   const bar = document.querySelector('#root .bar'), br = bar ? bar.getBoundingClientRect() : null;
-  const top = br && br.height > 0 && br.bottom > 0 ? br.bottom : 54;
+  let top = br && br.height > 0 && br.bottom > 0 ? br.bottom : 54;
+  const h2 = document.querySelector('#root .hdr2:not(.hdr-off)');
+  if (h2) { const r = h2.getBoundingClientRect(); if (r.height > 0 && r.bottom > top && r.top < vh / 2) top = r.bottom; }
   return {top, low};
 }
 function dockLayout() {  // острівець пульта: кут екрана, не заходить під верхню/нижню панелі та стоїть над меню вибору (серій / бібліотеки)
@@ -15170,6 +15174,7 @@ function dockLayout() {  // острівець пульта: кут екрана
   const min = el.classList.contains('min'), h = el.offsetHeight;
   let v = RCP.v;
   if (v === 'b' && !min && h > low - topEdge - 20) v = 't';  // панель завелика, щоб стояти над меню вибору, — тимчасово вгорі
+  if (!min) { const mh = Math.max(120, Math.round(low - topEdge - 20)); el.style.maxHeight = mh + 'px'; el.style.overflowY = 'auto'; } else { el.style.maxHeight = ''; el.style.overflowY = ''; }
   if (v === 'b') { el.style.bottom = Math.round(vh - low + 10) + 'px'; el.style.top = 'auto'; }
   else { el.style.top = Math.round(topEdge + 10) + 'px'; el.style.bottom = 'auto'; }
   if (min) { el.style.left = RCP.h === 'l' ? 'calc(12px + var(--lft,0px))' : 'auto'; el.style.right = RCP.h === 'r' ? 'calc(12px + var(--rgt,0px))' : 'auto'; }
@@ -15180,7 +15185,12 @@ function rcFlip(el, fn, dur) {  // плавний перескок: показу
   const r0 = el.getBoundingClientRect(); fn(); dockLayout();
   const r1 = el.getBoundingClientRect(), dx = r0.left - r1.left, dy = r0.top - r1.top;
   if (!dx && !dy) return;
-  try { el.animate([{transform: `translate(${dx}px,${dy}px)`}, {transform: 'translate(0,0)'}], {duration: dur || 420, easing: 'cubic-bezier(.2,.9,.25,1.1)'}); } catch (e) {}
+  rcGlide(el, dx, dy, dur);
+}
+function rcGlide(el, dx, dy, dur) {  // один плавний рух без подвійної анімації top/bottom
+  el.classList.add('fl');
+  let done = false; const fin = () => { if (!done) { done = true; el.classList.remove('fl'); } };
+  try { const a = el.animate([{transform: `translate(${dx}px,${dy}px)`}, {transform: 'translate(0,0)'}], {duration: dur || 420, easing: 'cubic-bezier(.22,1,.36,1)'}); a.onfinish = fin; a.oncancel = fin; setTimeout(fin, (dur || 420) + 80); } catch (e) { fin(); }
 }
 window.addEventListener('resize', () => dockLayout());
 setInterval(dockLayout, 600);
@@ -15205,7 +15215,7 @@ setInterval(dockLayout, 600);
       }
     } else if (sw && ev.pointerId === sw.id && !sw.done) {
       const dy = ev.clientY - sw.y, dx = ev.clientX - sw.x;
-      if (Math.abs(dy) > 36 && Math.abs(dy) > Math.abs(dx) * 1.4) {
+      if (Math.abs(dy) > 80 && Math.abs(dy) > Math.abs(dx) * 1.6) {
         sw.done = true; RC.dragMoved = Date.now();
         const want = dy < 0 ? 't' : 'b';
         if (want !== RCP.v) { gpHaptic(); rcFlip(el, () => { RCP.v = want; rcPosSave(); }, 460); }
@@ -15221,15 +15231,17 @@ setInterval(dockLayout, 600);
     const r = el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
     // легке перекидання: достатньо потягнути на ~55px або різко «кинути» — не обов'язково тягнути до середини екрана
     const dt = Math.max(30, Date.now() - dd.t0), ddx = (dd.lx || 0), ddy = (dd.ly || 0), vx = ddx / dt, vy = ddy / dt;
-    const bdn = dockBounds(), midY = (bdn.top + bdn.low) / 2;
+    const bdn = dockBounds(), midY = (bdn.top + bdn.low) / 2, midX = innerWidth / 2, spanY = bdn.low - bdn.top;
     let nh = dd.sh, nv = dd.sv;
-    if (dd.sh === 'r' ? (ddx < -55 || (vx < -0.4 && ddx < -18)) : (ddx > 55 || (vx > 0.4 && ddx > 18))) nh = dd.sh === 'r' ? 'l' : 'r';
-    if (dd.sv === 'b' ? (ddy < -55 || (vy < -0.4 && ddy < -18)) : (ddy > 55 || (vy > 0.4 && ddy > 18))) nv = dd.sv === 'b' ? 't' : 'b';
+    // кут міняється лише за явним наміром: перетнули середину екрана з запасом або різкий кидок
+    if (dd.sh === 'r' ? (cx < midX - 24 || (vx < -0.7 && ddx < -50)) : (cx > midX + 24 || (vx > 0.7 && ddx > 50))) nh = dd.sh === 'r' ? 'l' : 'r';
+    if (dd.sv === 'b' ? (cy < midY - spanY * 0.08 || (vy < -1.1 && ddy < -90)) : (cy > midY + spanY * 0.08 || (vy > 1.1 && ddy > 90))) nv = dd.sv === 'b' ? 't' : 'b';
     RCP.h = nh; RCP.v = nv; rcPosSave();
+    el.classList.add('fl');
     el.style.left = r.left + 'px'; el.style.top = r.top + 'px';
     const f0 = {l: r.left, t: r.top};
     dockLayout(); const r1 = el.getBoundingClientRect();
-    try { el.animate([{transform: `translate(${f0.l - r1.left}px,${f0.t - r1.top}px)`}, {transform: 'translate(0,0)'}], {duration: 460, easing: 'cubic-bezier(.2,1.1,.3,1.05)'}); } catch (e) {}
+    rcGlide(el, f0.l - r1.left, f0.t - r1.top, 440);
   };
   el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
 })();
