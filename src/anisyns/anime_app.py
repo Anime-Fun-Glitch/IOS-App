@@ -6619,7 +6619,7 @@ def net_state():
 
 
 SETTINGS = {'mobile_download': False, 'auto_skip': False, 'auto_skip_opening': True, 'auto_skip_ending': True, 'auto_next': True,
-            'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': True, 'ios_player': False, 'ios_pl2': False, 'web_inapp': True, 'np_ep_cover': True, 'hide_psave': False, 'auto_arc': True, 'show_scrollbar': False,
+            'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': True, 'ios_player': False, 'ios_pl2': False, 'np_ep_cover': True, 'hide_psave': False, 'auto_arc': True, 'show_scrollbar': False,
             'bg_keep': True, 'bg_check': False, 'island': True, 'island_dl': True, 'island_check': False,
             'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'old_cards': False, 'dub_fav': [], 'dub_prio': [], 'dub_seen': [], 'fx_style': 'blocks', 'recent_min': 3, 'handoff': True, 'rc': True, 'rc_in': True, 'rc_out': True, 'dv2': False, 'xgest': 'both', 'client': {},
             'site_order': ['aniliberty', 'yummyani', 'animevost', 'animru'], 'view': {}}
@@ -8848,6 +8848,9 @@ def _sync_http(addr, port, path, body, peer=None, timeout=8):
       if not isinstance(ex, (urllib.error.URLError, OSError, TimeoutError)):
         raise
       last = ex
+  m = str(last)
+  if 'refused' in m or 'timed out' in m or 'unreachable' in m or 'No route' in m:
+    raise OSError('Пристрій не відповідає: відкрийте AniSyns на ньому (програма там у фоні або не запущена)')
   raise last
 
 
@@ -9215,11 +9218,10 @@ def _sync_loop():
     SYNC['wake'].clear()
     st = _sync_state()
     n += 1
-    if SYNC['srv'] is None:  # сервер не піднявся (порт був зайнятий після перезапуску) — пробуємо знову
-      try:
-        _sync_run()
-      except Exception:
-        pass
+    try:  # сервер не піднявся або iOS закрила сокет у фоні — перевіряємо й піднімаємо знову
+      _sync_selfcheck()
+    except Exception:
+      pass
     lost = any(not (SYNC['status'].get(pid) or {}).get('ok') or (SYNC['status'].get(pid) or {}).get('fails') for pid in st['peers'])
     if lost:  # пристрій зник (змінилась мережа/IP або він спить) — кричимо, щоб він нас знайшов за id
       _sync_send_beacon()
@@ -9271,6 +9273,21 @@ def _sync_run():
   SYNC['wake'].set()
 
 
+def _sync_selfcheck():
+  """iOS може закрити слухаючий сокет, поки програма була у фоні (тоді інші пристрої бачать «Connection refused»). Перевіряємо себе й перезапускаємо сервер."""
+  ok = False
+  try:
+    if SYNC['srv'] is not None:
+      import socket as _so
+      c = _so.create_connection(('127.0.0.1', SYNC_PORT), timeout=0.8); c.close(); ok = True
+  except Exception:
+    ok = False
+  if not ok:
+    _sync_stop()
+    _sync_run()
+  return ok
+
+
 def _sync_stop():
   with SYNC_LOCK:
     srv, SYNC['srv'] = SYNC['srv'], None
@@ -9289,6 +9306,12 @@ def _sync_boot():
 
 def api_sync_state():
   st = _sync_state()
+  if time.time() - SYNC.get('selfchk', 0) > 3:  # сторінка опитує стан одразу після повернення в програму — заодно перевіряємо слухаючий сокет
+    SYNC['selfchk'] = time.time()
+    try:
+      _sync_selfcheck()
+    except Exception:
+      pass
   now = time.time()
   peers = []
   for pid, p in st['peers'].items():
@@ -9620,7 +9643,7 @@ def bg_needed():
   if not SETTINGS.get('bg_keep', True):
     return False
   now = time.time()
-  if now - BG_LAST['open'] < 45 or now - BG_LAST['play'] < 90:
+  if now - BG_LAST['play'] < 90:  # лише коли справді грало відео; «просто відкрили програму» тишу не вмикає — вона перемикала AirPods на телефон
     return True
   try:
     with JOB_LOCK:
@@ -10801,7 +10824,7 @@ html:has(body.nosc){overflow:hidden!important}body.nosc{overflow:hidden!importan
 }
 
 body.rmpg #rcbar{display:none!important}
-.rmwrap{padding:4px 16px 120px;max-width:980px;margin:0 auto;animation:rmUp .35s cubic-bezier(.2,.8,.2,1) backwards}
+.rmwrap{padding:4px 16px 28px;max-width:980px;margin:0 auto;animation:rmUp .35s cubic-bezier(.2,.8,.2,1) backwards}
 @keyframes rmUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
 .rmwrap button,.rmwrap select{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 .rmnow{position:relative;border-radius:22px;background:linear-gradient(160deg,#20233a,#161827);border:1px solid #ffffff14;padding:16px;box-shadow:0 8px 22px #0007;transition:padding .22s ease,border-radius .22s ease}
@@ -10876,7 +10899,7 @@ body.rmpg #rcbar{display:none!important}
 .rcsbn{display:flex;align-items:center;justify-content:center;width:100%;border:1px solid #ffffff1a;border-radius:12px;background:#ffffff0d;color:#ffffffcc;font-weight:600;font-size:13px;height:38px}.rcsbn:active{transform:scale(.97)}
 .rcsb .cnt{font-style:normal;min-width:22px;height:22px;border-radius:99px;background:#ffffff26;display:inline-grid;place-items:center;font-size:12.5px;padding:0 6px}
 .rmpsw{max-height:0;opacity:0;overflow:hidden;transition:max-height .32s cubic-bezier(.2,.8,.2,1),opacity .2s ease,margin .3s ease}
-.rmpsw.on{max-height:560px;opacity:1;margin-top:14px}
+.rmpsw.on{max-height:min(640px,62vh);max-height:min(640px,62dvh);opacity:1;margin-top:14px;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y;scrollbar-width:none;border-radius:16px}.rmpsw.on::-webkit-scrollbar{display:none}
 .rmpsw .pssh{position:relative;left:auto;bottom:auto;width:auto;max-height:none;overflow:visible;animation:none;box-shadow:none;background:#ffffff0c;-webkit-backdrop-filter:none;backdrop-filter:none;border-radius:16px}
 .rmpsw .pssh .hd button{touch-action:manipulation}
 .rcsb[data-k=opening]{border-color:#ffb02080}.rcsb[data-k=opening] .i{color:#ffb020}.rcsb[data-k=ending]{border-color:#38c6ff80}.rcsb[data-k=ending] .i{color:#38c6ff}
@@ -11036,7 +11059,7 @@ const S = {
   sel: new Set(), q: ls.get('q', '720p'), descOpen: false,
   sheet: null, busy: new Set(), checking: false, lookup: null, addErr: '',
   cur: null, // що зараз грає: {id, n}
-  net: {state: 'unknown'}, set: {web_inapp: true, site_order: ['aniliberty', 'yummyani', 'animevost', 'animru'], mobile_download: false, auto_next: true, auto_check: true, auto_check_hours: 3, blur_thumbs: false, logging: false, multitask: true, ios_player: false, hide_psave: false, auto_arc: true, show_scrollbar: false}, st: {data: null, t: 0, loading: false},
+  net: {state: 'unknown'}, set: {site_order: ['aniliberty', 'yummyani', 'animevost', 'animru'], mobile_download: false, auto_next: true, auto_check: true, auto_check_hours: 3, blur_thumbs: false, logging: false, multitask: true, ios_player: false, hide_psave: false, auto_arc: true, show_scrollbar: false}, st: {data: null, t: 0, loading: false},
   epView: (function () { try { return localStorage.getItem('epv') || 'list'; } catch (e) { return 'list'; } })(), reorder: false, acOpen: false, ac: null,
 };
 
@@ -11055,7 +11078,7 @@ const S = {
 async function openSite(url) {
   if (IOS_APP) {  // у режимі «зовнішній браузер» теж відкриваємо через нативну частину: window.open без жесту користувача (ми чекаємо подвійний тап) WKWebView блокує
     try {
-      const r = await api('/api/open_web', {url, ext: S.set.web_inapp === false});
+      const r = await api('/api/open_web', {url, ext: false});
       if (r && r.ok) { if (r.err) toast('Відкрито в Safari (' + r.err + ')', true); return; }
       try { await navigator.clipboard.writeText(url); } catch (e) {}
       toast('Браузер не відкрився' + (r && r.err ? ': ' + r.err : '') + '. Посилання скопійовано', true);
@@ -11947,8 +11970,6 @@ function settingsHTML() {
         <label class="sw"><input type="checkbox" data-set="auto_arc" ${S.set.auto_arc !== false ? 'checked' : ''}></label></div>
       <div class="row"><div class="tx"><b>Обкладинка серії на екрані блокування</b><span class="d">Кадр серії замість обкладинки аніме.</span></div>
         <label class="sw"><input type="checkbox" data-set="np_ep_cover" ${S.set.np_ep_cover !== false ? 'checked' : ''}></label></div>
-      ${IOS_APP ? `<div class="row"><div class="tx"><b>Сайт аніме у програмі</b><span class="d">Кнопка «Сайт» відкриває вбудований браузер зі кнопкою «Закрити» й поверненням до цієї сторінки. Вимкнено — одразу відкривається Safari. Подвійний тап копіює посилання.</span></div>
-        <label class="sw"><input type="checkbox" data-set="web_inapp" ${S.set.web_inapp !== false ? 'checked' : ''}></label></div>` : ''}
       ${IOS_APP ? `<div class="row"><div class="tx"><b>Віддавати перевагу плеєру iOS</b><span class="d">Стандартний плеєр iOS: PiP, AirPlay, екран блокування.</span></div>
         <label class="sw"><input type="checkbox" data-set="ios_player" ${S.set.ios_player === true ? 'checked' : ''}></label></div>` : ''}
       <div class="skg ${S.skOpen === true && S.set.auto_skip ? 'open' : ''}" id="skg">
@@ -14342,6 +14363,7 @@ let PRET = 0;
 async function play(id, n, startT, _retry) {
   if (!V.parentNode && V.__par) { try { V.__par.insertBefore(V, V.__nx || null); } catch (e) {} }
   if (!_retry) PRET = 0;
+  if (!pipOn() && !(IOS_APP && S.set.ios_player === true) && (V.webkitDisplayingFullscreen || (V.webkitPresentationMode && V.webkitPresentationMode !== 'inline'))) { fsLeave(); vReseat(); }  // залишок попереднього системного плеєра
   clearTimeout(clrT);
   const it = item(id); if (!it) return;
   S.cur = {id, n}; PLAYS++;
@@ -14390,6 +14412,17 @@ async function play(id, n, startT, _retry) {
       if (s.type !== 'file' && PRET < 2) { PRET++; const keep = V.currentTime || P.good || resume || 0; msg.classList.remove('hide'); msg.innerHTML = ico('hourglass') + 'Повторюю спробу…'; setTimeout(() => { if (S.cur && S.cur.id === id && S.cur.n === n) play(id, n, keep, true); }, 700); return; }
       msg.classList.remove('hide'); msg.innerHTML = ico('error') + esc('Не вдалося відтворити відео.' + (s.type !== 'file' ? ' Спробуйте іншу якість або завантажте серію.' : '')); };
     const p = V.play(); if (p && p.catch) p.catch(() => {});
+    V.addEventListener('playing', () => {  // сторожа «чорного екрана»: звук іде, а кадри не декодуються — перебудовуємо відеошар, далі перезапускаємо серію
+      const tok = id + ':' + n, fc = () => (typeof V.webkitDecodedFrameCount === 'number' ? V.webkitDecodedFrameCount : -1);
+      setTimeout(() => {
+        if (!FSDIRTY || !S.cur || S.cur.id + ':' + S.cur.n !== tok || V.paused || V.seeking || pipOn() || V.webkitDisplayingFullscreen) return;
+        if (fc() > 0) { FSDIRTY = false; return; }
+        if (fc() === 0 && V.currentTime > 1.5 && V.videoWidth > 0 && FSFIXED !== tok) {
+          FSFIXED = tok; const t0 = V.currentTime; vReseat(); try { V.currentTime = t0; V.play().catch(() => {}); } catch (e) {}
+          setTimeout(() => { if (S.cur && S.cur.id + ':' + S.cur.n === tok && !V.paused && fc() === 0) { const t = V.currentTime || 0; play(id, n, t, true); } else if (fc() > 0) FSDIRTY = false; }, 2000);
+        }
+      }, 3000);
+    }, {once: true});
     if (IOS_APP && S.set.ios_player === true && !S.mirror && !S.awp && Math.min(screen.width, screen.height) >= 700) {  // iPad не відкриває системний плеєр сам (відео йде вбудовано) — просимо його при старті
       let fsTries = 0;  // системний плеєр інколи не відкривається з першого разу (немає «жесту»/відео ще не готове) — пробуємо на кількох подіях і з інтервалом
       const fsTry = () => { try { if (S.cur && S.cur.id === id && S.cur.n === n && !V.webkitDisplayingFullscreen && V.webkitEnterFullscreen && V.readyState >= 1) V.webkitEnterFullscreen(); } catch (er) {} };
@@ -14873,10 +14906,24 @@ function vDetach() {  // iOS тримає системну картку «Мої
     } catch (e) {}
   }, 700);
 }
+let FSDIRTY = false, FSFIXED = '';  // після закриття з системного плеєра наступний запуск може бути «без картинки» — тоді включається сторожа
+function fsLeave() {  // вихід із системного повноекранного плеєра всіма способами
+  try { if (V.webkitSetPresentationMode && V.webkitPresentationMode === 'fullscreen') V.webkitSetPresentationMode('inline'); } catch (e) {}
+  try { if (V.webkitDisplayingFullscreen && V.webkitExitFullscreen) V.webkitExitFullscreen(); } catch (e) {}
+}
+function vReseat() {  // виймаємо й повертаємо <video>: перебудовує відеошар (лікує «звук є, картинки немає») і закриває осиротілий системний плеєр
+  try { const par = V.parentNode, nx = V.nextSibling; if (!par) return; par.removeChild(V); par.insertBefore(V, nx && nx.parentNode === par ? nx : null); } catch (e) {}
+}
+function fsOrphanGuard() {  // після закриття (зокрема пультом) системний плеєр міг лишитись: перевіряємо й добиваємо
+  [350, 900, 1800].forEach((ms, i) => setTimeout(() => {
+    if (S.cur) return;
+    if (V.webkitDisplayingFullscreen || (V.webkitPresentationMode && V.webkitPresentationMode !== 'inline')) { fsLeave(); if (i >= 1) { try { V.pause(); V.removeAttribute('src'); V.load(); } catch (e) {} vReseat(); } }
+  }, ms));
+}
 function closePlayer() {
   nxCancel(); savePos(true);
   let wasFs = false;
-  try { if (V.webkitDisplayingFullscreen && V.webkitExitFullscreen) { wasFs = true; V.webkitExitFullscreen(); } } catch (e) {}
+  try { if (V.webkitDisplayingFullscreen || V.webkitPresentationMode === 'fullscreen') { wasFs = true; fsLeave(); } } catch (e) {}
   document.title = 'Мої аніме'; V.removeAttribute('poster');
   clearNowPlaying(); setTimeout(clearNowPlaying, 400);
   V.pause(); audSleep();
@@ -14885,6 +14932,8 @@ function closePlayer() {
   if (wasFs) clrT = setTimeout(() => { if (!S.cur) { V.removeAttribute('src'); V.load(); vDetach(); } }, 600); else { V.removeAttribute('src'); V.load(); vDetach(); }
   $('#player').classList.add('hide'); lockScroll(false); document.body.classList.remove('pl');
   S.cur = null; beat(true); loadLib('vis').catch(() => {});
+  if (wasFs) FSDIRTY = true;
+  fsOrphanGuard();
   // кожні 2 переглянуті серії WebView чиститься перезавантаженням: WebContent накопичує пам'ять, і iOS рано чи пізно вбиває його разом із застосунком
   if (S.set.wv_reload && PLAYS >= 2 && !RELOADING) { if (PLAYS >= 5) { PLAYS = 0; setTimeout(() => { if (!S.cur && !RELOADING) softReload(0); }, 900); } else RELOAD_PEND = true; }  // перезавантаження WebView видно як «блимання» — відкладаємо, доки додаток не згорнуть
 }
@@ -15391,7 +15440,7 @@ function rmPsPaint(st, force) {
   if (!open) return;
   const k = JSON.stringify(st.ps);
   if (!force && w.dataset.k === k) return;
-  w.dataset.k = k; w.innerHTML = rmPsHTML(st.ps);
+  const sy = w.scrollTop; w.dataset.k = k; w.innerHTML = rmPsHTML(st.ps); w.scrollTop = sy;
 }
 function rcPaintExtra(st) {
   rmPsPaint(st);  // позначки інтро/аутро на шкалі, кнопка пропуску і відлік наступної серії
@@ -15513,7 +15562,7 @@ async function rmDlSync(force) {
     const r = await rcTO(api('/api/sync_pdl', {peer: pid, kid})), j = JSON.stringify(r.eps || {}) + (r.have ? 1 : 0);
     const ch = RMDL.kid !== kid || RMDL.pid !== pid || RMDL.j !== j;
     Object.assign(RMDL, {kid, pid, j, eps: r.eps || {}, have: !!r.have, ts: Date.now()});
-    const e = $('#rmeps'); if (ch && e && route().name === 'remote' && rmKid() === kid && RC.pid === pid) e.innerHTML = rmEps();
+    const e = $('#rmeps'); if (ch && e && route().name === 'remote' && rmKid() === kid && RC.pid === pid) { e.classList.remove('in'); const nh = rmEps(); e._h = nh; e.innerHTML = nh; }  // оновлення стану завантажень — без повторної анімації появи
   } catch (e) { RMDL.ts = Date.now(); }
   RMDL.busy = false;
 }
@@ -15564,8 +15613,11 @@ function rmBody() {
 }
 function rmPaintEps() {
   const h = $('#rmeh'), e = $('#rmeps'); if (!h || !e) return;
-  RC.eKid = rmKid(); rmDlSync(); h.innerHTML = rmEpsHead(); e.classList.remove('in'); e.innerHTML = rmEps(); void e.offsetWidth; e.classList.add('in');
-  epAutoScroll(e, 'k' + rmKid() + '|' + Date.now(), true);
+  RC.eKid = rmKid(); rmDlSync(); const hh = rmEpsHead(), eh = rmEps(), kk = rmKid();
+  if (e._h === eh && e._hk === kk && Date.now() - (e._ht || 0) < 900) return;  // повторний виклик одразу після малювання — без другого «блимання»
+  e._h = eh; e._hk = kk; e._ht = Date.now();
+  h.innerHTML = hh; e.classList.remove('in'); e.innerHTML = eh; void e.offsetWidth; e.classList.add('in');
+  epAutoScroll(e, 'k' + kk + '|' + Date.now(), true);
 }
 function epAutoScroll(box, key, force) {  // відкрили список — показуємо місце, де зупинились: наступна непереглянута біля центру; усе переглянуто — хвіст списку
   if (!box || (!force && box._k === key)) return;
