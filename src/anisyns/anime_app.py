@@ -10681,6 +10681,10 @@ button:active,.card:active,.btn:active,.ib:active,#tabs a:active,.dchip:active{t
 html{-webkit-text-size-adjust:100%;overflow-x:hidden}
 html.lk{overflow:hidden!important}
 body{min-height:100vh;min-height:100dvh;-webkit-touch-callout:none}
+/* виділення тексту лише там, де це має сенс (опис, поля вводу, логи); у решті інтерфейсу довге натискання нічого не виділяє */
+body,body *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+input,textarea,[contenteditable],.desc,.desc *,pre,pre *,code,.sel-ok,.sel-ok *{-webkit-user-select:text!important;user-select:text!important;-webkit-touch-callout:default!important}
+body.thz .desc,body.thz .desc *,body.armed .desc,body.armed .desc *,body.pressing .desc,body.pressing .desc *,body.dragging .desc,body.dragging .desc *{-webkit-user-select:none!important;user-select:none!important}
 button,a,.card,.ep,.dchip,#tabs a{touch-action:manipulation;-webkit-user-select:none;user-select:none}
 input,select,textarea{font-size:16px}
 .ep .eye{width:44px;height:44px}
@@ -12723,7 +12727,7 @@ function addHTML() {
     const dubs = L.dubbings || [];
     res = `<div class="res"><div class="pic"${L.meta.poster ? ` style="background-image:url('/img?u=${encodeURIComponent(L.meta.poster)}')"` : ''}></div>
       <div class="tx"><b>${esc(L.title)}</b>${siteIcon(L.site)} ${esc((L.site || {}).name || '')} · серій: ${esc(L.count)}${L.meta.year ? ' · ' + esc(L.meta.year) : ''}
-      ${L.meta.description ? `<p>${esc(L.meta.description)}</p>` : ''}</div></div>
+      ${L.meta.description ? `<p class="sel-ok">${esc(L.meta.description)}</p>` : ''}</div></div>
       ${dubs.length ? addDubChips(dubs, L) : ''}
       ${L.can_add ? `<button class="btn pri" style="width:100%" data-act="doadd" ${S.busy.has('add') ? 'disabled' : ''}>${ico('book')} Додати в бібліотеку</button>
         <button class="btn" style="width:100%;margin-top:8px" data-act="addview">${ico('play')} Переглянути вкладку</button>`
@@ -13999,6 +14003,14 @@ function drEnd() {
   clearTimeout(moveItem.t);
   moveItem.t = setTimeout(() => api('/api/reorder', {ids: S.items.map(x => x.id)}).catch(e => toast(e.message, true)), 300);
 }
+function libEdgeGap(x) {  // довге натискання на вузькій смузі між стовпцями (частково на краях карток) та по краях сітки теж вмикає редагування
+  const cols = []; document.querySelectorAll('#root .card[data-id]').forEach(c => { const r = c.getBoundingClientRect(); if (r.width > 0 && !cols.some(k => Math.abs(k.l - r.left) < 3)) cols.push({l: r.left, r: r.right}); });
+  if (!cols.length) return false;
+  cols.sort((a, b) => a.l - b.l);
+  if (x < cols[0].l + 12 || x > cols[cols.length - 1].r - 12) return true;
+  for (let i = 0; i < cols.length - 1; i++) if (x > cols[i].r - 12 && x < cols[i + 1].l + 12) return true;
+  return false;
+}
 document.addEventListener('pointerdown', ev => {
   if (['home', 'group'].includes(route().name) && !S.cur && !S.sheet && !(ev.target.closest && ev.target.closest('input,textarea'))) document.body.classList.add('pressing');
   if (!['home', 'group'].includes(route().name) || S.cur || S.sheet) return;
@@ -14007,7 +14019,7 @@ document.addEventListener('pointerdown', ev => {
     if (ev.pointerId !== DR.pid && !DR.aux) DR.aux = {pid: ev.pointerId, y: ev.clientY, y0: ev.clientY, card: c, moved: false};
     return;
   }
-  const gap = !c && ev.target.classList && (ev.target.classList.contains('grid') || ev.target.id === 'root' || ev.target.classList.contains('empty'));  // порожнє місце між картками
+  const gap = (!c && ev.target.classList && (ev.target.classList.contains('grid') || ev.target.id === 'root' || ev.target.classList.contains('empty'))) || !!(c && !S.reorder && !ev.target.closest('.arw') && libEdgeGap(ev.clientX));  // порожнє місце між картками
   if ((!c && !gap) || (c && ev.target.closest('.arw'))) return;
   DR.pid = ev.pointerId;
   DR.sx = DR.px = ev.clientX; DR.sy = DR.py = ev.clientY; DR.id = c ? c.dataset.id : ''; clearTimeout(DR.timer);
@@ -15244,6 +15256,24 @@ setInterval(dockLayout, 600);
     rcGlide(el, f0.l - r1.left, f0.t - r1.top, 440);
   };
   el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end);
+})();
+(function epGapScroll() {  // у проміжках між серіями та по краях блоку крутиться сторінка, а не сам блок серій
+  const EDGE = 16;
+  let hot = null;
+  const rel = () => { if (hot) { hot.style.overflowY = ''; hot = null; } };
+  document.addEventListener('touchstart', ev => {
+    rel();
+    const t = ev.target, sc = t.closest && t.closest('.rmeps, .epscr'); if (!sc || !ev.touches[0]) return;
+    const x = ev.touches[0].clientX, r = sc.getBoundingClientRect();
+    const cards = [...sc.querySelectorAll('.rme, .erm, .ec')].slice(0, 60).map(c => c.getBoundingClientRect()).filter(c => c.width > 0);
+    // зона сторінки — лише вертикальні проміжки між стовпцями (частково заходить на краї карток) і краї блоку; під серією лишається прокрутка блоку
+    const cols = []; cards.forEach(c => { if (!cols.some(k => Math.abs(k.l - c.left) < 3)) cols.push({l: c.left, r: c.right}); });
+    cols.sort((a, b) => a.l - b.l);
+    let gap = !cols.length || x < cols[0].l + EDGE || x > cols[cols.length - 1].r - EDGE || x < r.left + EDGE || x > r.right - EDGE;
+    for (let i = 0; !gap && i < cols.length - 1; i++) if (x > cols[i].r - 12 && x < cols[i + 1].l + 12) gap = true;
+    if (gap) { hot = sc; sc.style.overflowY = 'hidden'; }
+  }, {capture: true, passive: true});
+  ['touchend', 'touchcancel'].forEach(n => document.addEventListener(n, () => setTimeout(rel, 60), {capture: true, passive: true}));
 })();
 (function rcInit() {
   const el = $('#rcbar'); if (!el) return;
