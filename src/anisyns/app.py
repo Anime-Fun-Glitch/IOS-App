@@ -79,6 +79,47 @@ def _audio_session():
         pass
 
 
+_WV = {}
+
+
+_MAIN_KEEP = []
+
+
+def _on_main(fn, loop=None):
+    """Виконує fn у ГОЛОВНОМУ потоці iOS через libdispatch (не залежить від asyncio-циклу Toga). Повертає True, якщо заплановано."""
+    try:
+        import ctypes
+        lib = ctypes.CDLL(None)
+        q = ctypes.c_void_p.in_dll(lib, '_dispatch_main_q')
+        CB = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
+
+        def _run(_ctx):
+            try:
+                fn()
+            except Exception:
+                traceback.print_exc()
+            finally:
+                try:
+                    _MAIN_KEEP.remove(cb)
+                except Exception:
+                    pass
+        cb = CB(_run)
+        _MAIN_KEEP.append(cb)
+        lib.dispatch_async_f.argtypes = [ctypes.c_void_p, ctypes.c_void_p, CB]
+        lib.dispatch_async_f(ctypes.addressof(q), None, cb)
+        return True
+    except Exception:
+        traceback.print_exc()
+    if loop is not None:
+        try:
+            loop.call_soon_threadsafe(fn)
+            return True
+        except Exception:
+            traceback.print_exc()
+    return False
+
+
+
 def _setup_native_info(anime_app):
     """Реальні дані iOS для «Пам'яті»: розмір програми й вільне місце так, як їх показують Налаштування."""
     try:
@@ -145,6 +186,82 @@ def _setup_native_info(anime_app):
             show()
     anime_app.SHARE_PROVIDER['fn'] = share
 
+    def web_browser(url, external=False):
+        """Вбудований системний браузер (SFSafariViewController): назад/вперед, адреса, «Поділитись»/копіювати, «Відкрити в Safari» і кнопка «Закрити».
+        Повертає {'ok': bool, 'err': str}: сторінка показує причину, якщо браузер не відкрився."""
+        import ctypes
+        import threading
+        res = {'ok': False, 'err': ''}
+        done = threading.Event()
+
+        def show():
+            try:
+                from rubicon.objc import ObjCClass
+                app = ObjCClass('UIApplication').sharedApplication
+                u = ObjCClass('NSURL').URLWithString(str(url))
+                if u is None:
+                    raise ValueError('Невірне посилання')
+
+                def ext_open():
+                    app.openURL_options_completionHandler_(u, ObjCClass('NSDictionary').dictionary(), None)
+                if external:  # одразу в Safari
+                    ext_open()
+                    res['ok'] = True
+                    return
+                try:
+                    try:  # iOS: ctypes.util.find_library для фреймворків не працює, тому вантажимо за повним шляхом
+                        ctypes.CDLL('/System/Library/Frameworks/SafariServices.framework/SafariServices')
+                    except Exception:
+                        from rubicon.objc.runtime import load_library
+                        load_library('SafariServices')
+                    win = app.keyWindow
+                    if win is None:
+                        ws = app.windows
+                        win = ws[0] if len(ws) else None
+                    top = win.rootViewController
+                    while top.presentedViewController is not None:
+                        top = top.presentedViewController
+                    vc = ObjCClass('SFSafariViewController').alloc().initWithURL(u)
+                    try:
+                        vc.dismissButtonStyle = 1  # «Закрити» замість «Готово»
+                    except Exception:
+                        pass
+                    top.presentViewController(vc, animated=True, completion=None)
+                    res['ok'] = True
+                except Exception as e1:  # вбудований браузер не відкрився — пробуємо Safari
+                    traceback.print_exc()
+                    res['err'] = 'SFSafari: ' + str(e1)[:120]
+                    ext_open()
+                    res['ok'] = True
+            except Exception as e:
+                traceback.print_exc()
+                res['err'] = (res['err'] + ' | ' if res['err'] else '') + str(e)[:160]
+            finally:
+                done.set()
+        if not _on_main(show, getattr(anime_app, 'UI_LOOP', None)):
+            res['err'] = 'не вдалося запланувати на головний потік'
+            done.set()
+        if not done.wait(6) and not res['err']:
+            res['err'] = 'головний потік не відповів'
+        return res
+    anime_app.BROWSER_PROVIDER['fn'] = web_browser
+
+    def set_scrollbar(on):
+        try:
+            loop = getattr(anime_app, 'UI_LOOP', None)
+            def _do():
+                wv = _WV.get('wv')
+                if wv is not None:
+                    wv.scrollView.showsVerticalScrollIndicator = bool(on)
+                    wv.scrollView.showsHorizontalScrollIndicator = bool(on)
+            if loop is not None:
+                loop.call_soon_threadsafe(_do)
+            else:
+                _do()
+        except Exception:
+            pass
+    anime_app.SB_PROVIDER['fn'] = set_scrollbar
+
     def net():
         """Wi-Fi / мобільні дані / немає мережі — через SCNetworkReachability (так само, як це бачить iOS)."""
         import ctypes
@@ -205,7 +322,8 @@ class _KeepAlive:
                 f.write(b'data' + struct.pack('<I', n * 2) + b'\x00' * (n * 2))
         return p
 
-    def _category(self, mix):
+    def _category(self, mix, activate=True):
+        """mix=True — «MixWithOthers»: така сесія не потрапляє в системну картку «Відтворюється» (екран блокування / Центр керування)."""
         if mix == self.mix:
             return
         self.mix = mix
@@ -213,17 +331,49 @@ class _KeepAlive:
             from rubicon.objc import ObjCClass
             sess = ObjCClass('AVAudioSession').sharedInstance()
             sess.setCategory('AVAudioSessionCategoryPlayback', withOptions=(1 if mix else 0), error=None)  # 1 = MixWithOthers
-            sess.setActive(True, error=None)
+            if activate:
+                sess.setActive(True, error=None)
+        except Exception:
+            pass
+
+    def _clear_info(self):
+        """Прибирає картку «Мої аніме» з екрана блокування (так само, як це робить YouTube, коли відео закрито)."""
+        try:
+            from rubicon.objc import ObjCClass
+            from rubicon.objc.runtime import load_library
+            load_library('MediaPlayer')
+            c = ObjCClass('MPNowPlayingInfoCenter').defaultCenter
+            c.nowPlayingInfo = None
+            try:
+                c.playbackState = 3  # MPNowPlayingPlaybackStateStopped
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _release(self):
+        """Звук нікому не потрібен: звільняємо аудіосесію й сповіщаємо інші застосунки (їхня музика може продовжитись)."""
+        try:
+            from rubicon.objc import ObjCClass
+            ObjCClass('AVAudioSession').sharedInstance().setActive(False, withOptions=1, error=None)  # 1 = NotifyOthersOnDeactivation
         except Exception:
             pass
 
     def set(self, want, video_playing=False):
-        """want — чи треба тримати програму; video_playing — тоді не міксуємо (потрібні елементи керування на екрані блокування)."""
+        """want — чи треба тримати програму; video_playing — відео саме тримає програму та показує елементи керування."""
         try:
             from rubicon.objc import ObjCClass
+            if video_playing:
+                # відео вже саме тримає програму; запуск «тихого» плеєра в момент старту відео перебиває його — не стартуємо.
+                # Якщо тиха доріжка вже йде (змішана) — лишаємо її (тримає програму й на паузі/в PiP), але повертаємо звичайну категорію: на екрані блокування мають бути елементи керування.
+                if self.mix:
+                    self._category(False)
+                return
+            import time as _t
+            if not self.on and _t.time() - getattr(self, 'cleared', 0) > 4:  # залишок системної картки після перегляду — прибираємо (не частіше раз на 4 с)
+                self.cleared = _t.time()
+                self._clear_info()
             if want:
-                if video_playing and not self.on:
-                    return  # відео вже саме тримає програму живою; запуск «тихого» плеєра в момент старту відео перебиває його (пауза через секунду на першому запуску)
                 if self.player is None:
                     NSURL = ObjCClass('NSURL')
                     self.path = self._wav()
@@ -232,14 +382,24 @@ class _KeepAlive:
                     pl.volume = 1.0
                     pl.prepareToPlay()
                     self.player = pl
+                if not self.mix:  # тиха «підтримка» без відео — лише змішувана сесія: без картки «Відтворюється»
+                    was = self.on
+                    if was:
+                        self.player.stop()
+                        self.on = False
+                    self._category(True)
                 if not self.on:
                     self.player.play()
                     self.on = True
+                    self._clear_info()
                 elif not bool(self.player.isPlaying):
                     self.player.play()  # iOS могла перервати (дзвінок тощо) — запускаємо знову
             elif self.on and self.player is not None:
                 self.player.stop()
                 self.on = False
+                self._category(False, activate=False)
+                self._clear_info()
+                self._release()
         except Exception:
             pass
 
@@ -321,6 +481,14 @@ def _native_webview(app, url):
         pass
     wv.scrollView.backgroundColor = dark
     wv.scrollView.contentInsetAdjustmentBehavior = 2  # Never: відступи робить сторінка за даними нижче
+    _WV['wv'] = wv
+    try:  # біла смуга прокрутки справа — прихована (повертається в Функціях розробника)
+        wv.scrollView.showsVerticalScrollIndicator = False
+        wv.scrollView.showsHorizontalScrollIndicator = False
+        wv.scrollView.bounces = False
+        wv.scrollView.alwaysBounceVertical = False
+    except Exception:
+        pass
     try:  # без щипка-зуму: сторінка не має «роз'їжджатись»
         wv.scrollView.pinchGestureRecognizer.enabled = False
         wv.scrollView.minimumZoomScale = 1.0
