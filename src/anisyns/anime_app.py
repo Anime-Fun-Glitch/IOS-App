@@ -6123,7 +6123,9 @@ def api_open_web(url, ext=False):
   fn = BROWSER_PROVIDER.get('fn')
   if not fn:
     return {'ok': False}
-  fn(url, bool(ext))
+  r = fn(url, bool(ext))
+  if isinstance(r, dict):
+    return {'ok': bool(r.get('ok')), 'err': r.get('err') or ''}
   return {'ok': True}
 
 
@@ -8353,7 +8355,7 @@ SYNC_PROTO = 1
 import copy as _copy
 SYNC_LOCK = threading.RLock()
 SYNC = {'st': None, 'srv': None, 'srv_err': '', 'started': False, 'found': {}, 'pending': None, 'pair_out': None, 'gen': 0,
-        'status': {}, 'wake': threading.Event(), 'scanning': 0.0, 'last_rescan': 0.0, 'pair_until': 0.0, 'last_scan': 0.0}
+        'status': {}, 'inb': {}, 'wake': threading.Event(), 'scanning': 0.0, 'last_rescan': 0.0, 'pair_until': 0.0, 'last_scan': 0.0}
 SYNC_SETTINGS_KEYS = ['view', 'auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'auto_check', 'auto_check_hours', 'blur_thumbs',
                       'np_ep_cover', 'hide_psave', 'auto_arc', 'skip_mode', 'vol_max', 'own_vol', 'recent_min', 'site_order', 'dub_fav', 'dub_prio', 'fx_style']
 SYNC_GROUPS = {'view': ['view'], 'player': ['auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'skip_mode', 'vol_max', 'own_vol', 'np_ep_cover', 'hide_psave', 'auto_arc']}
@@ -9016,6 +9018,10 @@ class _SyncHandler(BaseHTTPRequestHandler):
               not hmac.compare_digest(self.headers.get('X-Sync-Sig') or '', _sync_sign(peer['secret'], ts, path, raw)):
         return self._send({'error': 'Не авторизовано', 'gone': not peer}, 401)
       _peer_seen(peer, ip)
+      SYNC['inb'][pid] = time.time()  # цей пристрій щойно звернувся до нас — він точно в мережі (навіть якщо ми до нього ще не достукались)
+      if not (SYNC['status'].get(pid) or {}).get('ok'):
+        SYNC['status'][pid] = {'ok': True, 't': time.time(), 'sync': bool(st.get('sync')), 'inb': True}
+        SYNC['wake'].set()
       if path == '/sync/exchange':
         if not st.get('sync'):
           return self._send({'error': 'Синхронізація вимкнена', 'off': True}, 403)
@@ -9118,7 +9124,7 @@ def _sync_command(body, pid=None):
   if body.get('type') == 'pcmd':
     if not (SETTINGS.get('rc') and SETTINGS.get('rc_in')):
       return {'ok': False, 'error': 'На іншому пристрої вимкнено керування пультом'}
-    PLAYER['cmds'].append({'c': body.get('c'), 'v': body.get('v')})
+    PLAYER['cmds'].append({'c': body.get('c'), 'v': body.get('v'), 'ts': time.time()})
     del PLAYER['cmds'][:-20]
     return {'ok': True}
   return {'ok': False, 'error': 'unknown command'}
@@ -9209,6 +9215,11 @@ def _sync_loop():
     SYNC['wake'].clear()
     st = _sync_state()
     n += 1
+    if SYNC['srv'] is None:  # сервер не піднявся (порт був зайнятий після перезапуску) — пробуємо знову
+      try:
+        _sync_run()
+      except Exception:
+        pass
     lost = any(not (SYNC['status'].get(pid) or {}).get('ok') or (SYNC['status'].get(pid) or {}).get('fails') for pid in st['peers'])
     if lost:  # пристрій зник (змінилась мережа/IP або він спить) — кричимо, щоб він нас знайшов за id
       _sync_send_beacon()
@@ -9226,6 +9237,12 @@ def _sync_loop():
       except Exception as ex:
         prev = SYNC['status'].get(pid) or {}
         fails = int(prev.get('fails', 0)) + 1
+        if time.time() - SYNC['inb'].get(pid, 0) < 25:  # ми до нього не достукуємось, але він до нас так — бачимо його онлайн
+          SYNC['status'][pid] = {'ok': True, 't': time.time(), 'sync': bool(prev.get('sync')), 'inb': True, 'fails': fails, 'err': str(ex)[:90]}
+          if time.time() - SYNC['last_rescan'] > 20:
+            SYNC['last_rescan'] = time.time()
+            threading.Thread(target=_sync_scan_net, daemon=True).start()
+          continue
         if prev.get('ok') and fails < 3 and time.time() - prev.get('t', 0) < 25:
           SYNC['status'][pid] = {**prev, 'fails': fails, 'err': str(ex)[:90]}  # один-два збої підряд (VPN/Wi-Fi блимнули) — ще не «офлайн»
         else:
@@ -9473,7 +9490,9 @@ def api_pstate(b):
   PLAYER['state'] = {k: b.get(k) for k in ('on', 'id', 'n', 't', 'dur', 'paused', 'title', 'ep', 'vol', 'vmax', 'own', 'op', 'ed', 'sk', 'skm', 'skl', 'nx', 'ps')}
   PLAYER['ts'] = time.time()
   cmds, PLAYER['cmds'] = PLAYER['cmds'], []
-  return {'cmds': cmds}
+  now = time.time()  # застарілі команди (пульт натиснули, а плеєр був у фоні/заблокований) не виконуємо — інакше після розблокування вони ставили б паузу
+  cmds = [c for c in cmds if c.get('c') in ('close', 'vol', 'skip', 'skno') or now - c.get('ts', now) < 4]
+  return {'cmds': [{'c': c.get('c'), 'v': c.get('v')} for c in cmds]}
 
 
 def _peer_cmd(pid, body, timeout=12):
@@ -10353,7 +10372,8 @@ html.nosb ::-webkit-scrollbar,html.nosb::-webkit-scrollbar{display:none;width:0;
 .dlbar{display:flex!important;align-items:center;gap:8px;width:fit-content!important;min-width:min(330px,calc(100% - 20px));max-width:calc(100% - 20px);padding:8px!important;border-radius:20px!important;background:#1b1e2cf2!important;border:1px solid #ffffff1f!important;box-shadow:0 12px 34px #000b!important}
 .dlbar .dlx{width:42px;height:42px;border-radius:13px;background:#ffffff12;flex:none}
 .dlbar .dlt{display:flex;flex-direction:column;line-height:1.1;min-width:42px;padding:0 4px}.dlbar .dlt b{font-size:18px;font-variant-numeric:tabular-nums}.dlbar .dlt small{font-size:11px;color:var(--mu)}
-.dlbar .dlsp2{flex:1}
+.dlbar .dlsp2{flex:1;min-width:0}
+.dlbar{flex-wrap:nowrap!important}.dlbar.lbr{min-width:min(360px,calc(100% - 20px))}.dlbar .dlc{flex:0 1 46px;min-width:40px}
 .dlc{position:relative;width:46px;height:46px;border-radius:13px;border:0;background:#ffffff14;color:#fff;display:grid;place-items:center;flex:none;touch-action:manipulation;transition:transform .12s,background .15s}
 .dlc .i{width:21px;height:21px}.dlc:active{transform:scale(.92)}
 .dlc.ok{background:#1fa876;color:#fff}.dlc.dng{background:#ff4d5e2e;color:#ff8a94}.dlc.on{background:#ffffff30}.dlc:disabled{opacity:.4}
@@ -10810,7 +10830,7 @@ body.rmpg #rcbar{display:none!important}
 .rma i em{position:absolute;z-index:1;right:5px;bottom:5px;max-width:calc(100% - 10px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-style:normal;font-size:11px;font-weight:700;color:#fff;background:#000b;border-radius:9px;padding:1px 7px}
 .rma span{width:92px;max-width:92px;box-sizing:border-box;text-align:left;overflow-wrap:break-word;word-break:normal;hyphens:auto;display:block;margin-top:6px;font-size:12px;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;color:var(--mu)}
 .rma.on i::before{border-color:var(--ac)}.rma.on span{color:#fff}.rma.pl i{box-shadow:0 0 0 2px #0d0e13,0 0 0 4px var(--ac2,var(--ac))}.rma:active i{transform:scale(.95)}
-.rma.grp.open i::before{border-style:dashed}
+.rma.rmg.open i::before{border-style:dashed}
 .rma.arch i{filter:grayscale(1) contrast(1.06) brightness(.86)}.rma.arch.on i,.rma.arch.pl i{filter:grayscale(1) contrast(1.06) brightness(.92)}
 .rmeps,.rmeps.in{background:none;box-shadow:none;border:0}.rmeps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 12px;align-content:start;grid-auto-rows:max-content;align-items:start}
 @media (min-width:560px){.rmeps{grid-template-columns:repeat(3,minmax(0,1fr))}}
@@ -11034,7 +11054,13 @@ const S = {
 // «Сайт»: у вбудованому браузері iOS (з кнопками назад/вперед, «Закрити», «Відкрити в Safari») або одразу в зовнішньому — за налаштуванням
 async function openSite(url) {
   if (IOS_APP) {  // у режимі «зовнішній браузер» теж відкриваємо через нативну частину: window.open без жесту користувача (ми чекаємо подвійний тап) WKWebView блокує
-    try { const r = await api('/api/open_web', {url, ext: S.set.web_inapp === false}); if (r && r.ok) return; } catch (e) {}
+    try {
+      const r = await api('/api/open_web', {url, ext: S.set.web_inapp === false});
+      if (r && r.ok) { if (r.err) toast('Відкрито в Safari (' + r.err + ')', true); return; }
+      try { await navigator.clipboard.writeText(url); } catch (e) {}
+      toast('Браузер не відкрився' + (r && r.err ? ': ' + r.err : '') + '. Посилання скопійовано', true);
+      return;
+    } catch (e) { toast('Браузер не відкрився: ' + (e.message || e), true); return; }
   }
   window.open(url, '_blank', 'noopener');
 }
@@ -11452,6 +11478,7 @@ function render() {
   if (r.name === 'search') observeImgs();
   if (r.name === 'new') { observeImgs(); nwEnsure(); }
   rmSwitch(r.name === 'remote');
+  paintLibBar();
 }
 let ENTER = false;
 const ENTERED = new Set();
@@ -12102,16 +12129,33 @@ function notifsHTML() {
     ${items.some(x => x.read) ? `<div style="padding:0 0 8px"><button class="btn sm" data-act="nclear" style="width:100%">${ico('trash')} Очистити прочитані (${items.filter(x => x.read).length})</button></div>` : ''}
     ${items.length ? `<div class="nlist">${items.map(row).join('')}</div>` : '<div class="nempty">Поки нічого немає. Тут з\'являтимуться нові серії та підсумки завантажень.</div>'}`;
 }
-function libBarHTML() {
+function libBarInner() {
   const ids = [...S.libSel].filter(id => item(id)), n = ids.length;
   const toArc = ids.some(id => !item(id).archived) && !arcTab();
   const canGrp = n >= 2, canUn = ids.some(id => item(id).group);
-  return `<div class="dlbar lbr"><button class="dlx" data-act="libclr" aria-label="Зняти вибір">${ico('close')}</button>
-     <div class="dlt"><b>${n}</b><small>${n === 1 ? 'аніме' : 'аніме'}</small></div><i class="dlsp2"></i>
+  return `<button class="dlx" data-act="libclr" aria-label="Зняти вибір">${ico('close')}</button>
+     <div class="dlt"><b>${n}</b><small>аніме</small></div><i class="dlsp2"></i>
      ${canGrp ? `<button class="dlc" data-act="libgrp" aria-label="Згрупувати">${ico('grp')}</button>` : ''}
      ${canUn ? `<button class="dlc" data-act="libungrp" aria-label="Розгрупувати">${ico('ungrp')}</button>` : ''}
-     <button class="dlc ok" data-act="libarc" aria-label="${toArc ? 'У переглянуті' : 'У бібліотеку'}">${ico(toArc ? 'check' : 'refresh')}</button>
-     <button class="dlc dng" data-act="libdel" aria-label="Видалити">${ico('trash')}</button></div>`;
+     <button class="dlc" data-act="libarc" aria-label="${toArc ? 'У переглянуті' : 'З переглянутих у бібліотеку'}">${ico(toArc ? 'eye' : 'refresh')}</button>
+     <button class="dlc dng" data-act="libdel" aria-label="Видалити">${ico('trash')}</button>`;
+}
+function paintLibBar() {  // панель поза #root: оновлюється на місці, не блимає при кожному виборі
+  const on = S.reorder && S.libSel.size && ['home', 'group'].includes(route().name);
+  let bar = document.querySelector('body > .dlbar.lbr');
+  if (on) {
+    const h = libBarInner();
+    if (bar && !bar.classList.contains('out')) { if (bar._h !== h) { bar.innerHTML = h; bar._h = h; } }
+    else { if (bar) bar.remove(); bar = document.createElement('div'); bar.className = 'dlbar lbr'; bar.innerHTML = h; bar._h = h; document.body.appendChild(bar); }
+  } else if (bar && !bar.classList.contains('out')) { bar.classList.add('out'); setTimeout(() => { if (bar.classList.contains('out')) bar.remove(); }, 210); }
+  try { dockLayout(); } catch (e) {}
+}
+function paintLibSel() {  // вибір карток без перемальовування сторінки
+  document.querySelectorAll('#root .card[data-id].reo').forEach(c => {
+    const on = tileSel(c); c.classList.toggle('csel', on);
+    const ck = c.querySelector('.cks'); if (ck) { const h = on ? ico('check') : ''; if (ck.innerHTML !== h) ck.innerHTML = h; }
+  });
+  paintLibBar();
 }
 function homeHTML() {
   const dlBadge = S.jobs.filter(j => j.status === 'running' || j.status === 'queued').length;
@@ -12131,7 +12175,7 @@ function homeHTML() {
   <div class="empty"><div class="big">${ico('book')}</div><h2>Бібліотека порожня</h2>
     <p>Знайдіть аніме у вкладці «Пошук» — за назвою або вставивши посилання на його сторінку.</p>
     <p><button class="btn pri" data-act="gosearch">${ico('search')} Знайти аніме</button></p></div>`}
-  ${S.reorder ? '<div style="height:120px"></div>' : ''}${S.reorder && S.libSel.size ? libBarHTML() : ''}
+  ${S.reorder ? '<div style="height:120px"></div>' : ''}
   ${!S.ffmpeg && S.items.length ? '<p class="err" style="padding:0 16px">' + ico('alert') + 'ffmpeg не знайдено — завантаження не працюватимуть.</p>' : ''}`;
 }
 
@@ -12212,7 +12256,7 @@ function groupHTML(gid) {
     ${nm ? `<h1 class="gtl">${esc(nm)}</h1>` : ''}
     <div class="grow"><button class="btn sm" data-act="reorder">${ico('edit')} Редагувати</button><button class="btn sm dng" data-act="gungroup" data-g="${esc(gid)}">Розгрупувати</button></div>`}
   <div class="grid${S.view.cols === 3 ? ' c3' : ''}">${cards}</div>
-  ${S.reorder ? '<div style="height:120px"></div>' : ''}${S.reorder && S.libSel.size ? libBarHTML() : ''}`;
+  ${S.reorder ? '<div style="height:120px"></div>' : ''}`;
 }
 function groupSheetHTML(gid) {
   const m = groupMembers(gid);
@@ -13669,8 +13713,8 @@ const A = {
     } catch (e) { toast(e.message, true); }
     finally { S.busy.delete('sw'); S.chipFix = true; render(); }
   },
-  csel(el) { const c = el.closest('.card[data-id]'), ids = tileIds(c), all = ids.every(id => S.libSel.has(id)); ids.forEach(id => all ? S.libSel.delete(id) : S.libSel.add(id)); render(); },
-  libclr() { S.libSel.clear(); render(); },
+  csel(el) { const c = el.closest('.card[data-id]'), ids = tileIds(c), all = ids.every(id => S.libSel.has(id)); ids.forEach(id => all ? S.libSel.delete(id) : S.libSel.add(id)); paintLibSel(); },
+  libclr() { S.libSel.clear(); paintLibSel(); },
   async libarc() {
     const ids = [...S.libSel].filter(id => item(id)); if (!ids.length) return;
     const arc = ids.some(id => !item(id).archived) && !arcTab();
@@ -15443,7 +15487,7 @@ function rmStrip() {
   return tiles.map(t => {
     if (t.g) {
       const on = t.m.some(x => x.id === kid), pl = t.m.some(x => x.id === st.id), f = t.m.find(x => !x.archived) || t.m[0];
-      return `<button class="rma grp${on ? ' on' : ''}${pl ? ' pl' : ''}${S.rm.grp === t.g ? ' open' : ''}${t.m.every(x => x.archived) ? ' arch' : ''}" data-act="rmgrp" data-g="${esc(t.g)}"><i style="${rmPoster(f)}">${rmPoster(f) ? '' : esc((f.title || '?')[0])}<em>${t.m.length}</em></i><span>${esc(gname(t.m) || lname(f))}</span></button>`;
+      return `<button class="rma rmg${on ? ' on' : ''}${pl ? ' pl' : ''}${S.rm.grp === t.g ? ' open' : ''}${t.m.every(x => x.archived) ? ' arch' : ''}" data-act="rmgrp" data-g="${esc(t.g)}"><i style="${rmPoster(f)}">${rmPoster(f) ? '' : esc((f.title || '?')[0])}<em>${t.m.length}</em></i><span>${esc(gname(t.m) || lname(f))}</span></button>`;
     }
     const x = t.it;
     return `<button class="rma${x.id === kid ? ' on' : ''}${x.id === st.id ? ' pl' : ''}${x.archived ? ' arch' : ''}" data-act="rmanime" data-id="${esc(x.id)}"><i style="${rmPoster(x)}">${rmPoster(x) ? '' : esc((x.title || '?')[0])}</i><span>${esc(lname(x))}</span></button>`;
