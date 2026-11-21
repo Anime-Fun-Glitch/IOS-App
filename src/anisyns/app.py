@@ -73,8 +73,7 @@ def _audio_session():
         from rubicon.objc.runtime import load_library
         load_library('AVFoundation')
         sess = ObjCClass('AVAudioSession').sharedInstance()
-        sess.setCategory('AVAudioSessionCategoryPlayback', error=None)
-        sess.setActive(True, error=None)
+        sess.setCategory('AVAudioSessionCategoryPlayback', error=None)  # лише категорія; сесію не активуємо — інакше AirPods «перескакують» на цей телефон і ставлять паузу на іншому пристрої
     except Exception:
         pass
 
@@ -497,6 +496,30 @@ def _native_webview(app, url):
         pass
     child.view.addSubview(wv)
     _pin(wv, child.view)  # на весь екран, під статус-баром та індикатором «Home»
+    try:  # білий екран після фону: iOS може вбити процес сторінки (або сервер) — тоді перезавантажуємо сторінку
+        from rubicon.objc import NSObject, objc_method
+        _reload = lambda w: w.loadRequest(NSURLRequest.requestWithURL(NSURL.URLWithString(url)))
+
+        class AniNavDelegate(NSObject):
+            @objc_method
+            def webViewWebContentProcessDidTerminate_(self, webView):
+                try:
+                    _reload(webView)
+                except Exception:
+                    pass
+
+            @objc_method
+            def webView_didFailProvisionalNavigation_withError_(self, webView, nav, err):
+                try:
+                    import threading
+                    threading.Timer(1.5, lambda: _on_main(lambda: _reload(webView))).start()
+                except Exception:
+                    pass
+
+        _WV['nav'] = AniNavDelegate.alloc().init()
+        wv.navigationDelegate = _WV['nav']
+    except Exception:
+        pass
     wv.loadRequest(NSURLRequest.requestWithURL(NSURL.URLWithString(url)))
     app._native_child = child
     return wv, child.view
