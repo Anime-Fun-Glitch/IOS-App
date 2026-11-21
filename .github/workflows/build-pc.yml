@@ -29,7 +29,7 @@ jobs:
           pyinstaller --noconfirm --noconsole --onedir --name AniSynsServer \
             --icon pc/host/app.ico \
             --collect-all requests --hidden-import PIL \
-            --add-data "$PWD/src/anisyns/anime_app.py;." \
+            --paths src/anisyns --hidden-import anime_app \
             --distpath pc/server-dist --workpath pc/build \
             pc/server_main.py
 
