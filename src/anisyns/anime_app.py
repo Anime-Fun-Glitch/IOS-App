@@ -9575,11 +9575,20 @@ def api_sync_rc(pid, c, v=None):
 
 
 def api_sync_pjobs(pid):
-  return _peer_cmd(pid, {'type': 'pjobs'}, 6)
+  try:
+    return _peer_cmd(pid, {'type': 'pjobs'}, 6)
+  except Exception:
+    time.sleep(0.4)
+    return _peer_cmd(pid, {'type': 'pjobs'}, 6)
 
 
 def api_sync_pjobact(pid, act, kid):
-  return _peer_cmd(pid, {'type': 'pjobact', 'act': str(act or '')[:10], 'kid': str(kid or '')}, 8)
+  body = {'type': 'pjobact', 'act': str(act or '')[:10], 'kid': str(kid or '')}
+  try:
+    return _peer_cmd(pid, body, 8)
+  except Exception:  # дії безпечні при повторі (пауза/продовжити/скасувати/перезапуск), тож один повтор
+    time.sleep(0.6)
+    return _peer_cmd(pid, body, 8)
 
 
 def api_sync_pdl(pid, kid):
@@ -11586,7 +11595,14 @@ function tickCd() {
   });
 }
 setInterval(tickCd, 1000);
-function dlActiveN() { return S.jobs.filter(j => j.status === 'running' || j.status === 'queued').length; }
+function pjActiveN() {  // завантаження, що йдуть на інших пристроях у мережі (вони теж у лічильнику)
+  let n = 0; Object.entries(S.pj || {}).forEach(([pid, o]) => { const pe = peerOf(pid); if (pe && pe.online) n += (o.jobs || []).filter(j => j.status === 'running' || j.status === 'queued').length; }); return n;
+}
+function dlActiveN() { return S.jobs.filter(j => j.status === 'running' || j.status === 'queued').length + pjActiveN(); }
+function dlBadgeSync() {  // значок на кнопці черги оновлюється на місці, на будь-якій сторінці
+  const n = dlActiveN(); dlHdrSync();
+  document.querySelectorAll('#root .bar .ib[data-act=jobs]').forEach(b => { let d = b.querySelector('.dot'); if (n) { if (!d) { d = document.createElement('span'); d.className = 'dot'; b.appendChild(d); } if (d.textContent !== String(n)) d.textContent = n; } else if (d) d.remove(); });
+}
 function dlHdrBtn() { const n = dlActiveN(); return n ? `<button class="ib" data-act="jobs" aria-label="Завантаження">${ico('download')}<span class="dot">${n}</span></button>` : ''; }
 function dlHdrSync() {  // кнопка черги в шапці вкладок «Пошук/Новинки/Пристрої/Налаштування», поки щось качається
   const bar = $('#root .bar'); if (!bar || route().name === 'home' || route().name === 'detail') return;
@@ -12216,7 +12232,7 @@ function paintLibSel() {  // вибір карток без перемальов
   paintLibBar();
 }
 function homeHTML() {
-  const dlBadge = S.jobs.filter(j => j.status === 'running' || j.status === 'queued').length;
+  const dlBadge = dlActiveN();
   const vis = visibleItems();
   const tiles = visibleTiles();
   const cards = tiles.map((t, i) => t.g ? gcardHTML(t, i) : cardHTML(t.it, i)).join('');
@@ -12358,7 +12374,7 @@ function detailHTML(id) {
   const chips = `<span class="chip sitechip">${siteIcon(it.site)}${esc((it.site || {}).name || '')}</span>` + [m.year, ...(m.genres || []).slice(0, 5)].filter(Boolean)
     .map(c => `<span class="chip">${esc(c)}</span>`).join('');
   const sel = S.sel.size, sm = S.selMode;
-  const dlN = S.jobs.filter(j => j.status === 'running' || j.status === 'queued').length;
+  const dlN = dlActiveN();
   const cardsMode = epMode() === 'cards', rmMode = epMode() === 'rm';
     const rc = relCounts(it), hasRel = rc.ord + rc.sim > 0;
   const canCm = !!(it.site && ['yummyani', 'aniliberty', 'animru', 'animevost'].includes(it.site.id));
@@ -12890,14 +12906,23 @@ const JG_OPEN = {};  // що користувач відкрив/закрив в
 function jgOpen(kid, arr) { return kid in JG_OPEN ? JG_OPEN[kid] : arr.some(j => j.status === 'running'); }  // за замовчуванням відкрите лише те, що качається зараз
 const JG_CONF = {};
 S.pj = {};
-async function pjPoll() {  // черги інших пристроїв у мережі
+async function pjPoll() {  // черги інших пристроїв у мережі; короткий збій зв'язку не стирає їх (тримаємо останні дані до 15 с)
   const ps = ((S.sync && S.sync.peers) || []).filter(p => p.online);
-  await Promise.all(ps.map(async p => { try { const r = await rcTO(api('/api/sync_pjobs', {peer: p.id}), 4000); S.pj[p.id] = {jobs: r.jobs || [], t: Date.now()}; } catch (e) { delete S.pj[p.id]; } }));
+  await Promise.all(ps.map(async p => {
+    let r = null;
+    for (let k = 0; k < 2 && !r; k++) { try { r = await rcTO(api('/api/sync_pjobs', {peer: p.id}), 4000); } catch (e) { if (k === 0) await new Promise(f => setTimeout(f, 400)); } }
+    if (r) S.pj[p.id] = {jobs: r.jobs || [], t: Date.now()}; else if (S.pj[p.id] && Date.now() - S.pj[p.id].t > 15000) delete S.pj[p.id];
+  }));
   Object.keys(S.pj).forEach(id => { if (!ps.some(p => p.id === id)) delete S.pj[id]; });
   if ($('#joblist')) updateJobs();
+  dlBadgeSync();
 }
-setInterval(() => { if ($('#joblist') && !document.hidden) pjPoll(); }, 2500);
-async function pjAct(pid, act, kid) { await api('/api/sync_pjobact', {peer: pid, act, kid}); await pjPoll(); }
+setInterval(() => { if (!$('#joblist') && !document.hidden && ((S.sync && S.sync.peers) || []).some(p => p.online)) pjPoll(); }, 4000);  // лічильник на кнопці завантажень рахує й інші пристрої
+async function pjAct(pid, act, kid) {
+  try { await rcTO(api('/api/sync_pjobact', {peer: pid, act, kid}), 9000); }
+  catch (e) { await new Promise(f => setTimeout(f, 600)); await rcTO(api('/api/sync_pjobact', {peer: pid, act, kid}), 9000); }  // один повтор, якщо зв'язок на мить зник
+  await pjPoll();
+}
 const JG_SK = `<div class="jgh" data-act="jgtog"><div class="jgp" data-act="jgopen"></div><div class="jgt"><b></b><span></span></div><button class="btn sm jgpb" data-act="jgpause" hidden></button><span class="jga">${ico('chev')}</span></div><div class="jgb"><div><div class="jgi"></div><div class="jgf"></div></div></div>`;
 const JG_IMGS = {};  // обкладинки черги живуть між відкриттями шторки: уже завантажене й розкодоване зображення не вантажиться знову
 function jgImg(p) {
