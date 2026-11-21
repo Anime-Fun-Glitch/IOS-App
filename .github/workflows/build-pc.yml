@@ -40,7 +40,7 @@ jobs:
         with: { python-version: '3.12' }
       - name: Залежності
         if: steps.go.outputs.ok == 'true'
-        run: pip install pyinstaller pywebview
+        run: pip install pyinstaller pywebview requests pillow
       - name: Залежності Linux
         if: steps.go.outputs.ok == 'true' && runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y python3-gi gir1.2-webkit2-4.1 libgirepository1.0-dev || true
@@ -49,7 +49,7 @@ jobs:
         shell: bash
         run: |
           SEP=':'; [ "$RUNNER_OS" = Windows ] && SEP=';'
-          pyinstaller --noconfirm --windowed --name AniSyns --add-data "src/anisyns/anime_app.py${SEP}." pc/anisyns_pc.py
+          pyinstaller --noconfirm --windowed --name AniSyns --collect-all requests --hidden-import requests --hidden-import PIL --add-data "src/anisyns/anime_app.py${SEP}." pc/anisyns_pc.py
       - uses: actions/upload-artifact@v4
         if: steps.go.outputs.ok == 'true'
         with:
