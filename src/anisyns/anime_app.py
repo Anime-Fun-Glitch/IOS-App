@@ -37,6 +37,7 @@ HOST = '127.0.0.1'
 INDEX_SERVED = [0.0]
 READY = [0.0]  # коли сторінка вперше намалювалась (сигнал для iPhone-обгортки)
 IOS_APP = False  # true, коли працює всередині iPhone-застосунку (див. app.py): тоді сторінка сама враховує вирізи екрана
+PC_APP = False  # true, коли працює всередині ПК-застосунку (вікно WebView2, див. pc/): сторінка вмикає режим ПК (data-pc)
 
 
 def log(msg):
@@ -7167,6 +7168,8 @@ class Handler(BaseHTTPRequestHandler):
       p = u.path
       if p in ('/', '/index.html'):
         html = INDEX_HTML.replace('<html ', '<html data-ios="1" ', 1) if IOS_APP else INDEX_HTML
+        if PC_APP:
+          html = html.replace('<html ', '<html data-pc="1" ', 1)
         INDEX_SERVED[0] = time.time()  # для iPhone-обгортки: сторінку віддано — темне «покривало» можна знімати
         return self._bytes(html.encode('utf8'), 'text/html; charset=utf-8', extra={'Cache-Control': 'no-store'})
       if p == '/api/library':
@@ -10953,6 +10956,25 @@ body.rmpg #rcbar{display:none!important}
 .rmei{width:72px;height:72px;border-radius:50%;background:#ffffff10;display:grid;place-items:center;color:var(--ac)}.rmei .i{width:34px;height:34px}
 .rmpk{display:flex;flex-direction:column;gap:10px;margin-top:12px;width:min(320px,100%)}
 @media (prefers-reduced-motion:reduce){.rmwrap,.rmeps.in .rme,.rmsubh{animation:none}}
+
+/* ---------- Режим ПК (лише data-pc; на iPhone/iPad не діє) ---------- */
+html[data-pc]{color-scheme:dark}
+html[data-pc] a,html[data-pc] img,html[data-pc] svg{-webkit-user-drag:none;user-drag:none}
+html[data-pc] ::-webkit-scrollbar{width:10px;height:10px}
+html[data-pc] ::-webkit-scrollbar-track{background:transparent}
+html[data-pc] ::-webkit-scrollbar-thumb{background:#ffffff22;border-radius:8px;border:2px solid transparent;background-clip:content-box}
+html[data-pc] ::-webkit-scrollbar-thumb:hover{background:#ffffff3d;background-clip:content-box;border:2px solid transparent}
+html[data-pc] select option{background:#171923;color:#eef0f7}
+html[data-pc] #root .bar{padding-right:calc(14px + 138px)}
+html[data-pc] #bkbox .bkc{margin-left:0;margin-right:0}
+html[data-pc] #bkbox{max-width:760px;margin-left:auto;margin-right:auto}
+.wc{position:fixed;top:0;right:0;height:40px;display:flex;z-index:99999;transition:opacity .2s}
+.wc button{width:46px;height:40px;border:0;background:none;color:#c9cce0;display:grid;place-items:center;padding:0;cursor:default}
+.wc button svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.wc button:hover{background:#ffffff14;color:#fff}
+.wc button.cl:hover{background:#e5484d;color:#fff}
+html[data-pc]:has(#player:not(.hide)) .wc{opacity:0}
+html[data-pc]:has(#player:not(.hide)) .wc:hover{opacity:1}
 </style>
 <script>
 /* Безпечні зони (виріз / Dynamic Island / індикатор «Home»). Якщо WebView розтягнутий на весь екран, а env() віддає 0 —
@@ -11083,6 +11105,7 @@ const $ = (s, el = document) => el.querySelector(s);
   }
   setTimeout(chk, 0);  // не синхронно: S (const) ще не створено — це ламало весь скрипт, і заставка крутилась вічно
 })();  // заставку лишаємо на екрані, поки програється анімація
+const PC_APP = document.documentElement.dataset.pc === '1';  // ПК-застосунок (Windows)
 const IOS_APP = document.documentElement.dataset.ios === '1';  // працюємо всередині iPhone-застосунку
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const ls = {
@@ -14811,6 +14834,7 @@ function setNowPlaying(it, e, n) {
   } catch (er) {}
 }
 $('#vfs').addEventListener('click', () => {
+  if (PC_APP) { try { if (document.fullscreenElement) document.exitFullscreen(); else $('#player').requestFullscreen(); } catch (e) {} return; }  // ПК: на весь екран іде наш плеєр, а не стандартний елемент відео
   try { if (V.webkitEnterFullscreen) V.webkitEnterFullscreen(); else if (V.requestFullscreen) V.requestFullscreen(); } catch (e) { toast('Не вдалося відкрити на весь екран', true); }
 });
 (function () {
@@ -15029,7 +15053,7 @@ function syAgo(t) {
   return d < 10 ? 'щойно' : d < 90 ? d + ' с тому' : d < 5400 ? Math.round(d / 60) + ' хв тому' : Math.round(d / 3600) + ' год тому';
 }
 const DKIND = {phone: 'iPhone', tablet: 'iPad', pc: 'Комп’ютер'};
-const myKind = () => (/iPad/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent)) || (navigator.maxTouchPoints > 1 && Math.min(screen.width, screen.height) >= 700)) ? 'tablet' : 'phone';
+const myKind = () => PC_APP ? 'pc' : (/iPad/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent)) || (navigator.maxTouchPoints > 1 && Math.min(screen.width, screen.height) >= 700)) ? 'tablet' : 'phone';
 const dico = k => ico(k === 'tablet' ? 'tablet' : k === 'pc' ? 'pc' : 'phone');
 const peerOf = id => ((S.sync && S.sync.peers) || []).find(p => p.id === id);
 function dvxHTML(k, icon, title, desc, id, on, subs) {
@@ -16222,6 +16246,31 @@ try {
 loadLib(_bootCached ? 'vis' : false).then(() => { pollJobs(); pollNotifs(); checkInterrupted(); }).catch(e => {
   $('#root').innerHTML = `<div class="empty"><div class="big">${ico('plug')}</div><h2>Зв'язок з Python втрачено</h2><p>${esc(e.message)}</p></div>`;
 });
+
+/* ПК-застосунок: кнопки вікна у шапці, перетягування вікна за шапку, без перетягування елементів і меню браузера */
+if (PC_APP) (function () {
+  const wvh = window.chrome && window.chrome.webview, post = m => { try { wvh.postMessage(m); } catch (e) {} };
+  document.addEventListener('dragstart', e => e.preventDefault(), true);
+  document.addEventListener('dragover', e => e.preventDefault(), true);
+  document.addEventListener('drop', e => e.preventDefault(), true);
+  document.addEventListener('contextmenu', e => { if (!(e.target.closest && e.target.closest('input,textarea,[contenteditable="true"]'))) e.preventDefault(); }, true);
+  document.addEventListener('keydown', e => {
+    const pl = $('#player'); if (!pl || pl.classList.contains('hide') || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (/INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '')) return;
+    if ('fFаА'.indexOf(e.key) >= 0 && e.key.length === 1) { e.preventDefault(); $('#vfs').click(); }
+  });
+  if (!wvh) return;
+  const SVG_MAX = '<svg viewBox="0 0 14 14"><rect x="2.5" y="2.5" width="9" height="9" rx="1.2"/></svg>';
+  const SVG_RES = '<svg viewBox="0 0 14 14"><rect x="2.5" y="4.5" width="7" height="7" rx="1"/><path d="M4.5 4.5v-1a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-1"/></svg>';
+  const w = document.createElement('div'); w.className = 'wc';
+  w.innerHTML = '<button data-w="min" aria-label="Згорнути"><svg viewBox="0 0 14 14"><path d="M2 7h10"/></svg></button><button data-w="max" aria-label="Розгорнути">' + SVG_MAX + '</button><button class="cl" data-w="close" aria-label="Закрити"><svg viewBox="0 0 14 14"><path d="M2.5 2.5l9 9M11.5 2.5l-9 9"/></svg></button>';
+  document.body.appendChild(w);
+  w.addEventListener('click', e => { const b = e.target.closest('button'); if (b) post(b.dataset.w); });
+  window.__wmax = on => { const b = w.querySelector('[data-w=max]'); if (b) b.innerHTML = on ? SVG_RES : SVG_MAX; };
+  const onBar = e => { const bar = e.target.closest && e.target.closest('#root .bar'); return bar && !e.target.closest('button,a,input,select,textarea,.ib,[data-act]'); };
+  document.addEventListener('mousedown', e => { if (e.button === 0 && onBar(e)) post('drag'); }, true);
+  document.addEventListener('dblclick', e => { if (onBar(e)) post('max'); }, true);
+})();
 </script>
 </body>
 </html>

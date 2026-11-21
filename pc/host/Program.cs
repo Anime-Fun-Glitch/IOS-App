@@ -32,47 +32,139 @@ namespace AniSyns
     class MainForm : Form
     {
         const string Url = "http://127.0.0.1:8765/";
+        const int Edge = 6;  // смуга по краях для зміни розміру
         static readonly Color Bg = Color.FromArgb(13, 14, 19);
         readonly WebView2 wv = new WebView2();
         Process server;
         bool full;
-        FormBorderStyle prevStyle;
         FormWindowState prevState;
         Rectangle prevBounds;
+        bool startMax;
 
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int val, int size);
+        [DllImport("dwmapi.dll")] static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS m);
+        [DllImport("user32.dll")] static extern bool ReleaseCapture();
+        [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr w, IntPtr l);
+
+        [StructLayout(LayoutKind.Sequential)] struct MARGINS { public int l, r, t, b; }
+        [StructLayout(LayoutKind.Sequential)] struct RECT { public int left, top, right, bottom; }
+        [StructLayout(LayoutKind.Sequential)] struct NCCALCSIZE_PARAMS { public RECT r0, r1, r2; public IntPtr pos; }
+
+        static string StateFile()
+        {
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AniSyns", "window.txt");
+        }
 
         public MainForm()
         {
             Text = "AniSyns";
+            FormBorderStyle = FormBorderStyle.None;
             BackColor = Bg;
-            StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(1280, 800);
-            MinimumSize = new Size(480, 640);
+            MinimumSize = new Size(560, 640);
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
             wv.Dock = DockStyle.Fill;
             wv.DefaultBackgroundColor = Bg;
+            wv.AllowExternalDrop = false;
             Controls.Add(wv);
-            Shown += async (s, e) => await Start();
+            Padding = new Padding(Edge);
+
+            // розмір і місце: з минулого разу, інакше 82% робочої області екрана по центру
+            var wa = Screen.PrimaryScreen.WorkingArea;
+            Rectangle b = new Rectangle(wa.Left + wa.Width / 12, wa.Top + wa.Height / 12, wa.Width * 5 / 6, wa.Height * 5 / 6);
+            try
+            {
+                var p = File.ReadAllText(StateFile()).Split(',');
+                var r = new Rectangle(int.Parse(p[0]), int.Parse(p[1]), int.Parse(p[2]), int.Parse(p[3]));
+                bool visible = false;
+                foreach (var sc in Screen.AllScreens) if (sc.WorkingArea.IntersectsWith(r) && r.Width >= 560 && r.Height >= 640) visible = true;
+                if (visible) b = r;
+                startMax = p.Length > 4 && p[4] == "1";
+            }
+            catch { }
+            StartPosition = FormStartPosition.Manual;
+            Bounds = b;
+
+            Shown += async (s, e) => { if (startMax) WindowState = FormWindowState.Maximized; await Start(); };
+            FormClosing += (s, e) => SaveState();
             FormClosed += (s, e) => StopServer();
+            Resize += (s, e) => OnState();
         }
 
-        // Заголовок вікна у кольори програми, без світлої рамки (Windows 11; на Windows 10 — хоча б темний заголовок)
+        void SaveState()
+        {
+            try
+            {
+                var r = full ? prevBounds : (WindowState == FormWindowState.Normal ? Bounds : RestoreBounds);
+                bool mx = full ? prevState == FormWindowState.Maximized : WindowState == FormWindowState.Maximized;
+                Directory.CreateDirectory(Path.GetDirectoryName(StateFile()));
+                File.WriteAllText(StateFile(), r.X + "," + r.Y + "," + r.Width + "," + r.Height + "," + (mx ? "1" : "0"));
+            }
+            catch { }
+        }
+
+        // Без системного заголовка: клієнтська область = усе вікно (зберігаємо тінь, заокруглення, прилипання до країв)
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                var cp = base.CreateParams;
+                cp.Style |= 0x40000 | 0x20000 | 0x10000;  // WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX
+                return cp;
+            }
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            const int WM_NCCALCSIZE = 0x83, WM_NCHITTEST = 0x84;
+            if (m.Msg == WM_NCCALCSIZE && m.WParam != IntPtr.Zero)
+            {
+                if (WindowState == FormWindowState.Maximized && !full)
+                {
+                    var p = (NCCALCSIZE_PARAMS)Marshal.PtrToStructure(m.LParam, typeof(NCCALCSIZE_PARAMS));
+                    var wa = Screen.FromHandle(Handle).WorkingArea;
+                    p.r0.left = wa.Left; p.r0.top = wa.Top; p.r0.right = wa.Right; p.r0.bottom = wa.Bottom;
+                    Marshal.StructureToPtr(p, m.LParam, false);
+                }
+                m.Result = IntPtr.Zero;
+                return;
+            }
+            if (m.Msg == WM_NCHITTEST && WindowState == FormWindowState.Normal && !full)
+            {
+                long l = m.LParam.ToInt64();
+                int x = (short)(l & 0xFFFF), y = (short)((l >> 16) & 0xFFFF);
+                var r = Bounds;
+                bool L = x < r.Left + Edge, R = x >= r.Right - Edge, T = y < r.Top + Edge, B = y >= r.Bottom - Edge;
+                int ht = 0;
+                if (T && L) ht = 13; else if (T && R) ht = 14; else if (B && L) ht = 16; else if (B && R) ht = 17;
+                else if (L) ht = 10; else if (R) ht = 11; else if (T) ht = 12; else if (B) ht = 15;
+                if (ht != 0) { m.Result = (IntPtr)ht; return; }
+            }
+            base.WndProc(ref m);
+        }
+
         void Style()
         {
             try
             {
-                int one = 1, bg = 0x130E0D, txt = 0xF0EAE6;  // COLORREF = 0x00BBGGRR
+                int one = 1, round = 2, bg = 0x130E0D;
                 DwmSetWindowAttribute(Handle, 19, ref one, 4);
                 DwmSetWindowAttribute(Handle, 20, ref one, 4);
-                DwmSetWindowAttribute(Handle, 35, ref bg, 4);   // колір заголовка
-                DwmSetWindowAttribute(Handle, 34, ref bg, 4);   // колір рамки
-                DwmSetWindowAttribute(Handle, 36, ref txt, 4);  // колір тексту
+                DwmSetWindowAttribute(Handle, 33, ref round, 4);  // заокруглені кути (Windows 11)
+                DwmSetWindowAttribute(Handle, 34, ref bg, 4);
+                var mg = new MARGINS { l = 1, r = 1, t = 1, b = 1 };
+                DwmExtendFrameIntoClientArea(Handle, ref mg);      // тінь навколо безрамкового вікна
             }
             catch { }
         }
 
         protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); Style(); }
+
+        void OnState()
+        {
+            bool mx = WindowState == FormWindowState.Maximized;
+            Padding = (mx || full) ? Padding.Empty : new Padding(Edge);
+            try { if (wv.CoreWebView2 != null) wv.CoreWebView2.ExecuteScriptAsync("window.__wmax&&window.__wmax(" + (mx ? "true" : "false") + ")"); } catch { }
+        }
 
         static string DataDir()
         {
@@ -128,7 +220,26 @@ namespace AniSyns
                 };
                 c.ContainsFullScreenElementChanged += (s, e) => SetFull(c.ContainsFullScreenElement);
                 c.PermissionRequested += (s, e) => e.State = CoreWebView2PermissionState.Allow;
-                c.DocumentTitleChanged += (s, e) => { };
+                // меню браузера не потрібне: лишаємо тільки вирізати/копіювати/вставити в полях введення
+                c.ContextMenuRequested += (s, e) =>
+                {
+                    if (!e.ContextMenuTarget.IsEditable) { e.Handled = true; return; }
+                    for (int i = e.MenuItems.Count - 1; i >= 0; i--)
+                    {
+                        string n = e.MenuItems[i].Name;
+                        if (n != "cut" && n != "copy" && n != "paste" && n != "selectAll" && n != "undo" && n != "redo") e.MenuItems.RemoveAt(i);
+                    }
+                };
+                // кнопки вікна та перетягування шапки приходять зі сторінки
+                c.WebMessageReceived += (s, e) =>
+                {
+                    string msg = e.TryGetWebMessageAsString();
+                    if (msg == "min") WindowState = FormWindowState.Minimized;
+                    else if (msg == "max") { if (!full) WindowState = WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized; }
+                    else if (msg == "close") Close();
+                    else if (msg == "drag" && !full) { ReleaseCapture(); SendMessage(Handle, 0xA1, (IntPtr)2, IntPtr.Zero); }  // WM_NCLBUTTONDOWN, HTCAPTION
+                };
+                c.NavigationCompleted += (s, e) => OnState();
                 c.Navigate(Url);
             }
             catch (Exception ex)
@@ -141,24 +252,24 @@ namespace AniSyns
             }
         }
 
-        // Повний екран відео: ховаємо рамку вікна, і навпаки
+        // Повний екран відео (наш плеєр): вікно на весь екран без відступів, і навпаки
         void SetFull(bool on)
         {
             if (on == full) return;
-            full = on;
             if (on)
             {
-                prevStyle = FormBorderStyle; prevState = WindowState; prevBounds = Bounds;
-                FormBorderStyle = FormBorderStyle.None;
+                prevState = WindowState; prevBounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+                full = true;
+                Padding = Padding.Empty;
                 WindowState = FormWindowState.Normal;
                 Bounds = Screen.FromControl(this).Bounds;
             }
             else
             {
-                FormBorderStyle = prevStyle;
+                full = false;
                 Bounds = prevBounds;
                 WindowState = prevState;
-                Style();
+                OnState();
             }
         }
 

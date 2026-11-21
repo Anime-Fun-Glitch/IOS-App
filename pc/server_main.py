@@ -44,6 +44,13 @@ def watch_parent(pid):
 def main():
     d = data_dir()
     setup_log(d)
+    try:  # залишок від ранньої версії (профіль браузера Edge, 700+ МБ) — нашій програмі більше не потрібен
+        import shutil
+        old = os.path.join(d, 'window')
+        if os.path.isdir(old) and os.path.isdir(os.path.join(old, 'Default')):
+            shutil.rmtree(old, ignore_errors=True)
+    except Exception:
+        pass
     pid = 0
     if '--parent' in sys.argv:
         try:
@@ -58,6 +65,7 @@ def main():
             break
     import anime_app
     anime_app.BASE_DIR = d
+    anime_app.PC_APP = True
     anime_app.BROWSER_PROVIDER['fn'] = lambda url, ext=False: (webbrowser.open(url), {'ok': True})[1]  # зовнішні сайти — у браузері за замовчуванням
     anime_app.start()
     threading.Event().wait()
