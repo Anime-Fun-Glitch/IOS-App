@@ -14,9 +14,12 @@ namespace AniSyns
 {
     static class Program
     {
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern int SetCurrentProcessExplicitAppUserModelID(string id);
+
         [STAThread]
         static void Main()
         {
+            try { SetCurrentProcessExplicitAppUserModelID("AniSyns.App"); } catch { }  // один «додаток» для Windows: група на панелі завдань і в диспетчері
             bool created;
             using (var mx = new Mutex(true, "AniSyns.Host", out created))
             {
@@ -61,7 +64,8 @@ namespace AniSyns
             FormBorderStyle = FormBorderStyle.None;
             BackColor = Bg;
             MinimumSize = new Size(560, 640);
-            try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+            try { Icon = new Icon(Path.Combine(AppContext.BaseDirectory, "app.ico")); }
+            catch { try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { } }
             wv.Dock = DockStyle.Fill;
             wv.DefaultBackgroundColor = Bg;
             wv.AllowExternalDrop = false;
@@ -70,7 +74,8 @@ namespace AniSyns
 
             // розмір і місце: з минулого разу, інакше 82% робочої області екрана по центру
             var wa = Screen.PrimaryScreen.WorkingArea;
-            Rectangle b = new Rectangle(wa.Left + wa.Width / 12, wa.Top + wa.Height / 12, wa.Width * 5 / 6, wa.Height * 5 / 6);
+            int bw = Math.Max(900, wa.Width * 63 / 100), bh = Math.Max(640, wa.Height * 70 / 100);
+            Rectangle b = new Rectangle(wa.Left + (wa.Width - bw) / 2, wa.Top + (wa.Height - bh) / 2, bw, bh);
             try
             {
                 var p = File.ReadAllText(StateFile()).Split(',');
@@ -146,11 +151,11 @@ namespace AniSyns
         {
             try
             {
-                int one = 1, round = 2, bg = 0x130E0D;
+                int one = 1, round = 2, none = unchecked((int)0xFFFFFFFE);
                 DwmSetWindowAttribute(Handle, 19, ref one, 4);
                 DwmSetWindowAttribute(Handle, 20, ref one, 4);
                 DwmSetWindowAttribute(Handle, 33, ref round, 4);  // заокруглені кути (Windows 11)
-                DwmSetWindowAttribute(Handle, 34, ref bg, 4);
+                DwmSetWindowAttribute(Handle, 34, ref none, 4);  // без кольорової рамки навколо вікна
                 var mg = new MARGINS { l = 1, r = 1, t = 1, b = 1 };
                 DwmExtendFrameIntoClientArea(Handle, ref mg);      // тінь навколо безрамкового вікна
             }
@@ -200,7 +205,7 @@ namespace AniSyns
                     }
                     if (!ok) throw new Exception("Сервер не відповів. Журнал: " + Path.Combine(DataDir(), "server.log"));
                 }
-                var opts = new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required --disable-features=msSmartScreenProtection");
+                var opts = new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required --disable-features=msSmartScreenProtection --in-process-gpu --renderer-process-limit=1");
                 string ud = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AniSyns", "webview");
                 var env = await CoreWebView2Environment.CreateAsync(null, ud, opts);
                 await wv.EnsureCoreWebView2Async(env);
@@ -270,6 +275,23 @@ namespace AniSyns
                 Bounds = prevBounds;
                 WindowState = prevState;
                 OnState();
+                Nudge();
+            }
+        }
+
+        // WebView2 після виходу з повного екрана може лишити старий розмір сторінки — підштовхуємо розмір
+        async void Nudge()
+        {
+            foreach (int d in new[] { 120, 450 })
+            {
+                await Task.Delay(d);
+                try
+                {
+                    var p0 = Padding;
+                    Padding = new Padding(p0.Left + 1, p0.Top, p0.Right, p0.Bottom);
+                    Padding = p0;
+                }
+                catch { }
             }
         }
 

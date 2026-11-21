@@ -42,6 +42,11 @@ def watch_parent(pid):
 
 
 def main():
+    try:  # той самий ідентифікатор додатка, що й у вікна: Windows має показувати їх разом
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('AniSyns.App')
+    except Exception:
+        pass
     d = data_dir()
     setup_log(d)
     try:  # залишок від ранньої версії (профіль браузера Edge, 700+ МБ) — нашій програмі більше не потрібен

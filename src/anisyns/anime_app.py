@@ -10965,16 +10965,21 @@ html[data-pc] ::-webkit-scrollbar-track{background:transparent}
 html[data-pc] ::-webkit-scrollbar-thumb{background:#ffffff22;border-radius:8px;border:2px solid transparent;background-clip:content-box}
 html[data-pc] ::-webkit-scrollbar-thumb:hover{background:#ffffff3d;background-clip:content-box;border:2px solid transparent}
 html[data-pc] select option{background:#171923;color:#eef0f7}
-html[data-pc] #root .bar{padding-right:calc(14px + 138px)}
+html[data-pc] #root .bar{padding-right:calc(14px + 159px)}
 html[data-pc] #bkbox .bkc{margin-left:0;margin-right:0}
 html[data-pc] #bkbox{max-width:760px;margin-left:auto;margin-right:auto}
-.wc{position:fixed;top:0;right:0;height:40px;display:flex;z-index:99999;transition:opacity .2s}
-.wc button{width:46px;height:40px;border:0;background:none;color:#c9cce0;display:grid;place-items:center;padding:0;cursor:default}
-.wc button svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
-.wc button:hover{background:#ffffff14;color:#fff}
+.wc{position:fixed;top:10px;right:14px;display:flex;gap:8px;z-index:99999;transition:opacity .2s}
+.wc::before{content:'';width:1px;height:26px;align-self:center;border-radius:1px;background:#ffffff26;margin-right:0}
+.wc button{width:42px;height:42px;border:0;border-radius:13px;background:var(--s2,#1f2230);color:#c9cce0;display:grid;place-items:center;padding:0;cursor:default;transition:background .15s,color .15s,transform .1s}
+.wc button svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.wc button:hover{background:var(--s3,#2a2e41);color:#fff}
+.wc button:active{transform:scale(.94)}
 .wc button.cl:hover{background:#e5484d;color:#fff}
-html[data-pc]:has(#player:not(.hide)) .wc{opacity:0}
-html[data-pc]:has(#player:not(.hide)) .wc:hover{opacity:1}
+html[data-pc] #player .vc .top{padding-right:178px}
+html[data-pc]:not(.pcfs):has(#player:not(.hide)) .wc{opacity:0;pointer-events:none}
+html[data-pc]:not(.pcfs):has(#player:not(.hide) #vc:not(.off)) .wc{opacity:1;pointer-events:auto}
+html[data-pc].pcfs .wc{display:none}
+html[data-pc].pcfs #player .vc .top{padding-right:0}
 </style>
 <script>
 /* Безпечні зони (виріз / Dynamic Island / індикатор «Home»). Якщо WebView розтягнутий на весь екран, а env() віддає 0 —
@@ -16260,6 +16265,7 @@ if (PC_APP) (function () {
     if ('fFаА'.indexOf(e.key) >= 0 && e.key.length === 1) { e.preventDefault(); $('#vfs').click(); }
   });
   if (!wvh) return;
+  document.addEventListener('fullscreenchange', () => document.documentElement.classList.toggle('pcfs', !!document.fullscreenElement));
   const SVG_MAX = '<svg viewBox="0 0 14 14"><rect x="2.5" y="2.5" width="9" height="9" rx="1.2"/></svg>';
   const SVG_RES = '<svg viewBox="0 0 14 14"><rect x="2.5" y="4.5" width="7" height="7" rx="1"/><path d="M4.5 4.5v-1a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-1"/></svg>';
   const w = document.createElement('div'); w.className = 'wc';

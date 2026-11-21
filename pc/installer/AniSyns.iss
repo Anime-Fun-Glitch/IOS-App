@@ -11,6 +11,7 @@ AppPublisher=AniSyns
 DefaultDirName={autopf}\AniSyns
 DefaultGroupName=AniSyns
 UsePreviousAppDir=yes
+DisableDirPage=no
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
@@ -52,6 +53,8 @@ Type: filesandordirs; Name: "{app}\server"
 [Code]
 var
   DataPage: TInputDirWizardPage;
+  ModePage: TInputOptionWizardPage;
+  Existing, SameVer: Boolean;
 
 function CfgDir: String;
 begin
@@ -82,18 +85,41 @@ begin
   if (not Result) and RegQueryStringValue(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', v) then Result := (v <> '') and (v <> '0.0.0.0');
 end;
 
+function UpdateMode: Boolean;
+begin
+  Result := Existing and (ModePage <> nil) and ModePage.Values[0];
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+  if UpdateMode and ((PageID = wpSelectDir) or (PageID = DataPage.ID)) then Result := True;
+end;
+
 procedure InitializeWizard;
 var d, pv: String;
 begin
   pv := PrevVersion;
-  if pv <> '' then
-    WizardForm.WelcomeLabel2.Caption := 'AniSyns уже встановлено (версія ' + pv + '). Інсталятор оновить програму до версії {#AppVersion}; бібліотека, завантаження та налаштування залишаться на місці.' + #13#10#13#10 + 'Натисніть «Далі», щоб продовжити.';
+  Existing := pv <> '';
+  SameVer := Existing and (pv = '{#AppVersion}');
   DataPage := CreateInputDirPage(wpSelectDir, 'Папка даних', 'Де зберігати бібліотеку, відео та налаштування?',
     'Тут житимуть завантажені серії та база програми. Її можна розмістити на іншому диску. Оновлення програми цю папку не змінює.', False, '');
   DataPage.Add('');
   d := OldDataDir;
   if d = '' then d := CfgDir;
   DataPage.Values[0] := d;
+  if Existing then
+  begin
+    if SameVer then
+      ModePage := CreateInputOptionPage(wpWelcome, 'AniSyns уже встановлено', 'У вас уже встановлена ця версія (' + pv + ').',
+        'Перевстановити файли програми? Бібліотека, завантажені серії та налаштування не зачіпаються.', True, False)
+    else
+      ModePage := CreateInputOptionPage(wpWelcome, 'Знайдено встановлену версію ' + pv, 'Оновити AniSyns до версії {#AppVersion}?',
+        'Бібліотека, завантажені серії та налаштування залишаться на місці.', True, False);
+    if SameVer then ModePage.Add('Перевстановити файли програми (рекомендовано)') else ModePage.Add('Оновити програму (рекомендовано)');
+    ModePage.Add('Нове встановлення: обрати папку програми та папку даних');
+    ModePage.Values[0] := True;
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -102,8 +128,8 @@ begin
   if CurStep = ssPostInstall then
   begin
     ForceDirectories(CfgDir);
-    ForceDirectories(DataPage.Values[0]);
-    SaveStringToFile(CfgDir + '\location.txt', DataPage.Values[0], False);
+    if not UpdateMode then ForceDirectories(DataPage.Values[0]);
+    if (not UpdateMode) or (OldDataDir = '') then SaveStringToFile(CfgDir + '\location.txt', DataPage.Values[0], False);
     if not HasWebView2 then
     begin
       // компонент Windows для відображення інтерфейсу; на Windows 11 та свіжій Windows 10 він уже є

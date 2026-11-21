@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 600 600">
+  <defs>
+    <style>
+      .cls-1{fill:url(#linear-gradient-1)}
+      .cls-2{fill:url(#pattern-1)}
+      .cls-3{fill:#ffffff;stroke:#ffffff;stroke-miterlimit:10}
+      .cls-4{fill:url(#linear-gradient-2);stroke:url(#linear-gradient-2);stroke-miterlimit:10}
+      .cls-5{fill:url(#linear-gradient-3)}
+    </style>
+    <clipPath id="clip-path-1">
+      <path d="M0 0 L600 0 L600 600 L0 600 Z"/>
+    </clipPath>
+    <clipPath id="clip-path-2">
+      <path d="M0 0 L600 0 L600 600 L0 600 Z"/>
+    </clipPath>
+    <clipPath id="clip-path-3">
+      <path d="M0 0 L600 0 L600 600 L0 600 Z"/>
+    </clipPath>
+    <linearGradient id="linear-gradient-1" x1="300" y1="0" x2="300" y2="600" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2b1e59"/>
+      <stop offset="0.44" stop-color="#211548"/>
+      <stop offset="1" stop-color="#111032"/>
+    </linearGradient>
+    <pattern id="pattern-1" patternUnits="userSpaceOnUse" width="600" height="600" patternTransform="matrix(1 0 0 1 0 0)">
+      <g clip-path="url(#clip-path-1)">
+        <g clip-path="url(#clip-path-2)">
+          <g clip-path="url(#clip-path-3)">
+            <rect x="0" y="0" width="600" height="600" class="cls-1"/>
+          </g>
+        </g>
+      </g>
+    </pattern>
+    <linearGradient id="linear-gradient-2" x1="526.197" y1="370.214" x2="162.466" y2="457.868" gradientUnits="userSpaceOnUse">
+      <stop offset="0.4957" stop-color="#ffffff"/>
+      <stop offset="0.8537" stop-color="#47367d"/>
+      <stop offset="0.9399" stop-color="#4e3780" data-vc-midpoint="0.5894"/>
+      <stop offset="1" stop-color="#543883"/>
+    </linearGradient>
+    <linearGradient id="linear-gradient-3" x1="257.045" y1="366.763" x2="310.929" y2="270.053" gradientUnits="userSpaceOnUse">
+      <stop offset="0.11" stop-color="#7a3bcb"/>
+      <stop offset="1" stop-color="#66a2d3"/>
+    </linearGradient>
+  </defs>
+  <title>AniSyns.svg</title>
+  <g id="shape-1df87772-e9a2-8092-8008-ebfc077f2cb8">
+    <path d="M150 0 L450 0 C532.843 0 600 67.157 600 150 L600 450 C600 532.843 532.843 600 450 600 L150 600 C67.157 600 0 532.843 0 450 L0 150 C0 67.157 67.157 0 150 0 Z" class="cls-2"/>
+    <polygon points="391.839,405.47 461.94,365.881 520.616,502.616 438.959,505.665" class="cls-3"/>
+    <path d="M83 499 L262.338 101 L293.156 101 L297.302 180.97 L278.825 225.892 L257.739 213.547 C255.134 212.025 252.361 211.326 249.665 211.326 L249.656 211.326 L249.651 211.326 C247.22 211.326 244.843 211.892 242.699 212.923 C237.45 215.448 233.573 220.759 233.573 227.422 L233.573 233.183 L233.573 326.319 L155.763 499 Z" class="cls-3"/>
+    <path d="M297.302 180.97 L293.156 101 L316.231 101 L337.662 101 L397.098 234.559 C398.274 237.216 400.26 239.437 402.77 240.901 L471.915 281.271 C492.229 293.133 491.904 322.618 471.333 334.026 L271.188 447.056 C247.882 460.208 219.855 447.465 207.269 435.903 L233.441 377.821 C233.426 382.229 233.562 386.678 234.233 389.11 C237.034 399.275 249.552 403.717 260.05 398.273 C270.657 392.768 286.363 383.452 307.155 370.984 C334.35 354.677 370.246 332.977 414.814 307.358 C415.528 306.946 415.532 305.914 414.818 305.494 L337.876 260.459 C336.883 259.876 336.094 258.999 335.619 257.947 L298.824 177.271 Z" class="cls-4"/>
+    <path d="M360.709 299.135 L269.126 245.527 C263.774 242.395 257.045 246.259 257.045 252.461 L257.045 358.719 C257.045 364.891 263.719 368.76 269.068 365.682 L360.655 313.035 C366.003 309.961 366.033 302.25 360.709 299.135 Z" class="cls-5"/>
+  </g>
+</svg>
