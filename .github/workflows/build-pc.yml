@@ -2,10 +2,6 @@ name: Build PC
 
 on:
   workflow_dispatch:
-    inputs:
-      windows: { description: 'Windows', type: boolean, default: true }
-      macos: { description: 'macOS', type: boolean, default: false }
-      linux: { description: 'Linux', type: boolean, default: false }
   push:
     branches: [main, master]
     paths: ['src/anisyns/anime_app.py', 'pc/**', '.github/workflows/build-pc.yml']
@@ -15,43 +11,40 @@ on:
 jobs:
   build:
     if: github.event_name == 'workflow_dispatch' || vars.BUILD_PC != 'false'
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
+    timeout-minutes: 40
     steps:
-      - name: Пропустити зайву систему
-        id: go
-        shell: bash
-        run: |
-          W='${{ github.event.inputs.windows }}'; M='${{ github.event.inputs.macos }}'; L='${{ github.event.inputs.linux }}'
-          ok=true
-          if [ '${{ github.event_name }}' = workflow_dispatch ]; then
-            case '${{ matrix.os }}' in windows-latest) [ "$W" = true ] || ok=false;; macos-latest) [ "$M" = true ] || ok=false;; *) [ "$L" = true ] || ok=false;; esac
-          else
-            [ '${{ matrix.os }}' = windows-latest ] || ok=false   # після push збирається лише Windows
-          fi
-          echo "ok=$ok" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
-        if: steps.go.outputs.ok == 'true'
+
       - uses: actions/setup-python@v5
-        if: steps.go.outputs.ok == 'true'
         with: { python-version: '3.12' }
-      - name: Залежності
-        if: steps.go.outputs.ok == 'true'
-        run: pip install pyinstaller pywebview requests pillow
-      - name: Залежності Linux
-        if: steps.go.outputs.ok == 'true' && runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y python3-gi gir1.2-webkit2-4.1 libgirepository1.0-dev || true
-      - name: Збірка
-        if: steps.go.outputs.ok == 'true'
+
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '8.0.x' }
+
+      - name: Сервер (Python → AniSynsServer.exe)
         shell: bash
         run: |
-          SEP=':'; [ "$RUNNER_OS" = Windows ] && SEP=';'
-          pyinstaller --noconfirm --windowed --name AniSyns --collect-all requests --hidden-import requests --hidden-import PIL --add-data "src/anisyns/anime_app.py${SEP}." pc/anisyns_pc.py
+          pip install pyinstaller requests pillow
+          pyinstaller --noconfirm --noconsole --onedir --name AniSynsServer \
+            --icon pc/host/app.ico \
+            --collect-all requests --hidden-import PIL \
+            --add-data "$PWD/src/anisyns/anime_app.py;." \
+            --distpath pc/server-dist --workpath pc/build \
+            pc/server_main.py
+
+      - name: Вікно (C# + WebView2 → AniSyns.exe)
+        run: dotnet publish pc/host/AniSynsHost.csproj -c Release -r win-x64 --self-contained true -o pc/host/publish
+
+      - name: Інсталятор (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc "/DAppVersion=1.0.${{ github.run_number }}" pc/installer/AniSyns.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - uses: actions/upload-artifact@v4
-        if: steps.go.outputs.ok == 'true'
         with:
-          name: AniSyns-${{ matrix.os }}
-          path: dist/
+          name: AniSyns-Setup
+          path: pc/installer/out/AniSyns-Setup.exe
