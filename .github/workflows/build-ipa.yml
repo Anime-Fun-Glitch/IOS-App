@@ -9,9 +9,13 @@ on:
         default: true
   push:
     branches: [main, master]
+    paths: ['src/**', 'LiveIsland/**', 'resources/**', 'pyproject.toml', '.github/workflows/build-ipa.yml']
 
+# Вимикач: GitHub → Settings → Secrets and variables → Actions → Variables → BUILD_IOS = false
+# (ручний запуск «Run workflow» працює завжди, вимикач стосується лише автозапуску після push)
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch' || vars.BUILD_IOS != 'false'
     runs-on: macos-26
     timeout-minutes: 60
     steps:
