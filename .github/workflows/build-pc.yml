@@ -27,7 +27,7 @@ jobs:
         run: |
           pip install pyinstaller requests pillow
           pyinstaller --noconfirm --noconsole --onedir --name AniSynsServer \
-            --icon pc/host/app.ico \
+            --icon pc/host/app.ico --version-file pc/version.txt \
             --collect-all requests --hidden-import PIL \
             --paths src/anisyns --hidden-import anime_app \
             --distpath pc/server-dist --workpath pc/build \
