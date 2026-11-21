@@ -41,17 +41,55 @@ def main():
     if '--no-window' in sys.argv:
         threading.Event().wait()
         return
-    try:
-        import webview  # pip install pywebview
+    try:  # основний варіант: вбудоване вікно (WebView2 на Windows) — справді окрема програма
+        import webview
         webview.create_window('AniSyns', url, width=1280, height=820, min_size=(420, 600), background_color='#0d0e13')
         webview.start()  # блокує, доки вікно відкрите
-    except ImportError:
-        webbrowser.open(url)
-        print('Вікно закрити не можна (відкрито в браузері). Ctrl+C — вимкнути.')
-        try:
+        return
+    except BaseException:  # не запустилось — запасний: вікно Edge/Chrome без адресного рядка
+        pass
+    if open_app_window(url):
+        return
+    webbrowser.open(url)
+    try:
+        threading.Event().wait()
+    except KeyboardInterrupt:
+        pass
+
+
+def find_browser():
+    cands = []
+    if sys.platform == 'win32':
+        for env in ('PROGRAMFILES(X86)', 'PROGRAMFILES', 'LOCALAPPDATA'):
+            b = os.environ.get(env)
+            if b:
+                cands += [os.path.join(b, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+                          os.path.join(b, 'Google', 'Chrome', 'Application', 'chrome.exe')]
+    elif sys.platform == 'darwin':
+        cands = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+                 '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge']
+    else:
+        import shutil
+        cands = [shutil.which(n) or '' for n in ('google-chrome', 'chromium', 'chromium-browser', 'microsoft-edge')]
+    return next((c for c in cands if c and os.path.exists(c)), None)
+
+
+def open_app_window(url):
+    """Вікно без адресного рядка через Edge/Chrome (--app): без зайвих бібліотек. Закрив вікно — програма вимикається."""
+    exe = find_browser()
+    if not exe:
+        return False
+    try:
+        import subprocess
+        prof = os.path.join(data_dir(), 'window')
+        t0 = time.time()
+        p = subprocess.Popen([exe, f'--app={url}', f'--user-data-dir={prof}', '--window-size=1280,820', '--no-first-run'])
+        p.wait()
+        if time.time() - t0 < 4:  # браузер передав вікно іншому процесу — просто тримаємо сервер
             threading.Event().wait()
-        except KeyboardInterrupt:
-            pass
+        return True
+    except Exception:
+        return False
 
 
 if __name__ == '__main__':
