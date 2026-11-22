@@ -101,6 +101,9 @@ body.show .sk,body.paused .sk{transform:none}
 .skb.nx{border-color:#8b7bff99}
 .skb em{font-style:normal;min-width:18px;height:18px;border-radius:99px;background:#ffffff26;display:inline-grid;place-items:center;font-size:11.5px;padding:0 5px}
 .skb.hide,.hide{display:none!important}
+.tpv{position:absolute;bottom:26px;left:0;transform:translateX(-50%);z-index:6;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:5px;opacity:0;transition:opacity .14s}.tpv.on{opacity:1}
+.tpf{width:136px;aspect-ratio:16/9;border-radius:10px;overflow:hidden;background:#05060a;border:1px solid #ffffff3a;box-shadow:0 10px 26px #000c}.tpf video{width:100%;height:100%;object-fit:cover;display:block}.tpf.nov{display:none}
+#tpt{font-size:11.5px;font-weight:700;font-variant-numeric:tabular-nums;background:linear-gradient(135deg,#2a2e46f2,#171a29f2);border:1px solid #ffffff2e;border-radius:99px;padding:2px 9px}
 @keyframes pop{0%{opacity:0;transform:translateY(8px) scale(.94)}100%{opacity:1;transform:none}}
 .ld{position:absolute;left:50%;top:50%;width:38px;height:38px;margin:-19px 0 0 -19px;border-radius:50%;border:3px solid #ffffff22;border-top-color:var(--ac);animation:sp .8s linear infinite;opacity:0;transition:opacity .25s .35s;pointer-events:none}
 body.wait .ld{opacity:1}
@@ -129,7 +132,7 @@ body.wait .mid .cb.big{opacity:0}
   <div class="pills" id="pills"></div>
   <div class="sk" id="sk">
     <span id="cur">0:00</span>
-    <div class="tr" id="tr"><div class="tbar"><div class="tfill" id="fill"></div></div><div class="knob" id="knob"></div></div>
+    <div class="tr" id="tr"><div class="tbar"><div class="tfill" id="fill"></div></div><div class="knob" id="knob"></div><div class="tpv" id="tpv"><div class="tpf"><video id="tpvv" muted playsinline preload="metadata"></video></div><span id="tpt">0:00</span></div></div>
     <span id="rem">0:00</span>
     <button class="xb" id="vb" title="Гучність"><span data-i="vol"></span></button>
   </div>
@@ -140,7 +143,7 @@ body.wait .mid .cb.big{opacity:0}
   const $ = s => document.querySelector(s), V = $('#v'), root = document.documentElement;
   const wv = window.chrome && window.chrome.webview;
   const send = o => { try { wv.postMessage('main>' + JSON.stringify(o)); } catch (e) {} };
-  const D = {skips: {}, hasPrev: false, hasNext: false, nx: null}; let icons = {}, hand = false, loading = true, hideT = 0, start = null, shownKey = '', nxHold = false;
+  const D = {skips: {}, hasPrev: false, hasNext: false, nx: null, sk: null}; let icons = {}, hand = false, loading = true, hideT = 0, start = null, shownKey = '', nxHold = false;
   const fmt = t => { t = Math.max(0, Math.floor(t || 0)); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = t % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0'); };
   const ico = n => icons[n] || '';
   function paintIcons() { document.querySelectorAll('[data-i]').forEach(e => { e.innerHTML = ico(e.dataset.i); }); ppIcon(); }
@@ -161,22 +164,25 @@ body.wait .mid .cb.big{opacity:0}
     $('#cur').textContent = fmt(t); $('#rem').textContent = d && isFinite(d) ? '-' + fmt(d - t) : '0:00';
   }
   function paintPills() {
-    const d = V.duration || 0, t = V.currentTime || 0; let key = '', html = '';
-    if (loading || nxHold) { if (shownKey) { shownKey = ''; $('#pills').innerHTML = ''; } return; }  // нова серія стартує — кнопки «наступна серія» зникають
+    if (loading || nxHold) { if (shownKey) { shownKey = ''; $('#pills').innerHTML = ''; } return; }  // нова серія стартує — кнопки зникають
+    const d = V.duration || 0, t = V.currentTime || 0; let key = '', html = '', cnt = null;
     if (D.nx) {
-      key = 'nx' + D.nx.n + ':' + D.nx.left;
+      key = 'nx' + D.nx.n; cnt = D.nx.left;
       html = `<button class="skb nx" data-a="next">${ico('next')}<span>Наступна серія ${D.nx.n}</span><em>${D.nx.left}</em></button><button class="skb alt" data-a="nxc"><span>Скасувати</span></button>`;
-    } else {
-      let hit = null;
-      for (const k of ['opening', 'ending']) { const w = win(k); if (w && t >= w[0] - 0.2 && t < w[1] - 1) { hit = k; break; } }
-      if (hit) { key = 'sk' + hit; html = `<button class="skb" data-k="${hit}" data-a="skip">${ico('next')}<span>Пропустити ${hit === 'opening' ? 'інтро' : 'аутро'}</span></button>`; }
-      else if (D.hasNext && d && isFinite(d) && d - t <= 20 && d - t > 0.5) { key = 'nxs'; html = `<button class="skb nx" data-a="next">${ico('next')}<span>Наступна серія</span></button>`; }
-    }
-    if (key === shownKey) return; shownKey = key; $('#pills').innerHTML = html;
+    } else if (D.sk) {  // кнопки інтро/аутро повторюють стан головного плеєра: пропустити / дивитись / лагідний відлік
+      const s = D.sk, nm = s.k === 'opening' ? 'інтро' : 'аутро'; cnt = s.left;
+      key = 'sk' + s.k + s.m + (s.left != null ? 'c' : '');
+      html = s.m === 'back' ? `<button class="skb" data-k="${s.k}" data-a="skback">${ico('undo')}<span>Дивитись ${nm}</span></button>`
+        : `<button class="skb" data-k="${s.k}" data-a="skip">${ico('next')}<span>Пропустити ${nm}</span>${s.left != null ? `<em>${s.left}</em>` : ''}</button>${s.left != null ? '<button class="skb alt" data-k="' + s.k + '" data-a="skno"><span>Не пропускати</span></button>' : ''}`;
+    } else if (D.hasNext && d && isFinite(d) && d - t <= 20 && d - t > 0.5) { key = 'nxs'; html = `<button class="skb nx" data-a="next">${ico('next')}<span>Наступна серія</span></button>`; }
+    if (key !== shownKey) { shownKey = key; $('#pills').innerHTML = html; return; }
+    const em = $('#pills .skb em'); if (em && cnt != null && em.textContent !== String(cnt)) em.textContent = cnt;  // міняємо лише цифру — без перемальовування й блимання
   }
   $('#pills').addEventListener('click', ev => {
     const b = ev.target.closest('[data-a]'); if (!b) return; const a = b.dataset.a;
-    if (a === 'skip') { send({t: 'skip', k: b.dataset.k}); shownKey = ''; $('#pills').innerHTML = ''; }
+    if (a === 'skip') { send({t: 'skip', k: b.dataset.k}); shownKey = ''; D.sk = null; $('#pills').innerHTML = ''; }
+    else if (a === 'skback') { send({t: 'skback', k: b.dataset.k}); shownKey = ''; D.sk = null; $('#pills').innerHTML = ''; }
+    else if (a === 'skno') { send({t: 'skno', k: b.dataset.k}); shownKey = ''; D.sk = null; $('#pills').innerHTML = ''; }
     else if (a === 'next') { nxHold = true; D.nx = null; send({t: 'cmd', c: 'next'}); setTimeout(() => { nxHold = false; }, 6000); }
     else if (a === 'nxc') send({t: 'cmd', c: 'nxcancel'});
   });
@@ -229,8 +235,20 @@ body.wait .mid .cb.big{opacity:0}
   const tr = $('#tr'); let drag = false;
   const trSeek = e => { const r = tr.getBoundingClientRect(); seekTo((V.duration || 0) * Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))); };
   tr.addEventListener('pointerdown', e => { drag = true; tr.setPointerCapture(e.pointerId); trSeek(e); });
-  tr.addEventListener('pointermove', e => { if (drag) trSeek(e); });
-  tr.addEventListener('pointerup', () => { drag = false; });
+  const TP = {v: $('#tpvv'), box: $('#tpv'), want: null, busy: false, src: '', bt: 0};
+  function tpGo() { if (TP.want == null) return; const t = TP.want; TP.want = null; TP.busy = true; clearTimeout(TP.bt); TP.bt = setTimeout(() => { TP.busy = false; if (TP.want != null) tpGo(); }, 600); try { TP.v.currentTime = t; } catch (e) { TP.busy = false; } }
+  TP.v.addEventListener('seeked', () => { clearTimeout(TP.bt); TP.busy = false; if (TP.want != null) tpGo(); });
+  TP.v.addEventListener('error', () => { $('.tpf').classList.add('nov'); });
+  function tpShow(e) {  // кадр і час під курсором на шкалі
+    const d = V.duration; if (!d || !isFinite(d)) return;
+    const r = tr.getBoundingClientRect(), fr = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), s = V.currentSrc || V.src;
+    if (s && s !== TP.src) { TP.src = s; $('.tpf').classList.remove('nov'); try { TP.v.src = s; TP.v.load(); } catch (x) {} }
+    const bw = TP.box.offsetWidth || 136, x = Math.max(bw / 2 + 6 - r.left, Math.min(fr * r.width, innerWidth - r.left - bw / 2 - 6));
+    TP.box.style.left = x + 'px'; $('#tpt').textContent = fmt(fr * d); TP.box.classList.add('on'); TP.want = fr * d; if (!TP.busy) tpGo();
+  }
+  tr.addEventListener('pointermove', e => { if (drag) trSeek(e); tpShow(e); });
+  tr.addEventListener('pointerleave', () => { if (!drag) TP.box.classList.remove('on'); });
+  tr.addEventListener('pointerup', () => { drag = false; setTimeout(() => TP.box.classList.remove('on'), 120); });
   document.addEventListener('keydown', e => {
     if (e.key === ' ') { e.preventDefault(); V.paused ? V.play().catch(() => {}) : V.pause(); }
     else if (e.key === 'ArrowLeft') seekTo(V.currentTime - 5); else if (e.key === 'ArrowRight') seekTo(V.currentTime + 5);
@@ -252,7 +270,7 @@ body.wait .mid .cb.big{opacity:0}
     if (m.icons) { icons = m.icons; }
     if (m.ac) root.style.setProperty('--ac', m.ac);
     paintIcons();
-    D.skips = m.skips || {}; D.hasPrev = !!m.hasPrev; D.hasNext = !!m.hasNext; D.nx = null; shownKey = ''; nxHold = false; $('#pills').innerHTML = '';
+    D.skips = m.skips || {}; D.hasPrev = !!m.hasPrev; D.hasNext = !!m.hasNext; D.nx = null; D.sk = null; shownKey = ''; nxHold = false; $('#pills').innerHTML = '';
     $('#tt').innerHTML = '<span></span><small></small>'; $('#tt span').textContent = m.title || ''; $('#tt small').textContent = m.sub || '';
     $('#pv').classList.toggle('off', !D.hasPrev); $('#nt').classList.toggle('off', !D.hasNext);
     VM = m.vmax >= 200 ? 200 : 100; own = !!m.own; V.playbackRate = m.rate || 1; $('#vb').classList.toggle('hide', false); applyP(m.p == null ? 100 : m.p, false);
@@ -263,7 +281,7 @@ body.wait .mid .cb.big{opacity:0}
     if (!m) return;
     switch (m.t) {
       case 'init': case 'src': load(m); break;
-      case 'loading': D.nx = null; loading = true; hand = false; start = null; wait(true); V.pause(); break;
+      case 'loading': D.nx = null; D.sk = null; loading = true; hand = false; start = null; wait(true); V.pause(); break;
       case 'go':  // головний плеєр передав відео: той самий момент і той самий стан (пауза / відтворення)
         hand = false; loading = false; wait(false);
         if (start) { start = null; }
@@ -278,6 +296,7 @@ body.wait .mid .cb.big{opacity:0}
       case 'skips': D.skips = m.skips || {}; paintMarks(); shownKey = ''; break;
       case 'nav': D.hasPrev = !!m.hasPrev; D.hasNext = !!m.hasNext; $('#pv').classList.toggle('off', !D.hasPrev); $('#nt').classList.toggle('off', !D.hasNext); break;
       case 'nx': D.nx = m.nx || null; break;
+      case 'sk': D.sk = m.sk || null; break;
     }
   };
   send({t: 'ready'});
@@ -4852,7 +4871,7 @@ def img_get(url, force=False):
 
 _IMG_REQ_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=8)
 _IMG_FLIGHT = {}
-_IMG_FLIGHT_LOCK = threading.Lock()
+_IMG_FLIGHT_LOCK = threading.RLock()  # RLock: колбек завершеного future викликається в тому ж потоці під замком (інакше — мертве блокування, обкладинки зникають)
 
 
 _REL_FLIGHT = {}
@@ -11133,7 +11152,7 @@ input,select,textarea{font-size:16px}
 .gst .gl.l2{transform:translate(12px,-12px)}
 .gst .gl.arch::after{background:#1a214260;-webkit-backdrop-filter:grayscale(1) brightness(.86);backdrop-filter:grayscale(1) brightness(.86)}
 .gcard .poster{box-shadow:0 0 0 1.5px #ffffff30}
-.gcard.csel .poster{box-shadow:none}
+.gcard.csel .poster{box-shadow:0 0 0 3px var(--ac2)}.gcard.csel .gl{box-shadow:0 0 0 2.5px var(--ac2),0 3px 10px #0007}
 .gh2{padding:0 0 10px}.gh2 h3{margin:0}.gh2 span{font-size:13px;color:var(--mu)}
 .grid.gsh{padding:6px 0;max-height:62vh;overflow:auto;grid-template-columns:repeat(2,1fr)}.grid.gsh.c3{grid-template-columns:repeat(3,1fr)}
 .strow.go{cursor:pointer}.strow .gochev{display:inline-flex;transform:rotate(-90deg);opacity:.5}
@@ -11304,6 +11323,22 @@ html[data-pc] .skwrap:not(.ui):not(.vol){bottom:calc(14px + var(--pcl) - 8px)}
 @media (orientation:landscape){.skwrap.ui{bottom:calc(64px + min(var(--bot),6px))}.skwrap.vol{bottom:calc(104px + min(var(--bot),6px))}}
 html[data-pc] .skwrap.ui{bottom:calc(70px + var(--pcl))}html[data-pc] .skwrap.vol{bottom:calc(108px + var(--pcl))}
 
+
+/* ===== кадр-превʼю над шкалою часу ===== */
+.tpv{position:absolute;bottom:30px;left:0;transform:translateX(-50%);z-index:6;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:6px;opacity:0;transition:opacity .15s}
+.tpv.on{opacity:1}
+.tpf{width:164px;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#05060a;border:1px solid #ffffff3a;box-shadow:0 12px 30px #000c;position:relative}
+.tpf video{width:100%;height:100%;object-fit:cover;display:block;background:#05060a}
+.tpf::after{content:'';position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 -24px 20px -14px #000b,inset 0 0 0 1px #0008}
+.tpf.nov{display:none}
+#tpt{font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;color:#fff;background:linear-gradient(135deg,#2a2e46f2,#171a29f2);border:1px solid #ffffff2e;border-radius:99px;padding:3px 11px;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+.tph{position:absolute;top:7px;bottom:7px;width:2px;margin-left:-1px;border-radius:2px;background:#ffffffd0;box-shadow:0 0 8px #fff6;opacity:0;pointer-events:none;transition:opacity .12s}
+.tph.on{opacity:1}
+@media (max-width:430px){.tpf{width:140px}}
+html[data-pc] .tpf{width:200px;border-radius:13px}
+html[data-pc] #stage:has(#vc.off){cursor:none}
+.osd{position:absolute;left:50%;top:18%;transform:translate(-50%,-6px) scale(.96);z-index:9;display:flex;align-items:center;gap:9px;padding:9px 16px;border-radius:14px;background:linear-gradient(135deg,#2a2e46ee,#171a29ee);border:1px solid #ffffff2a;color:#fff;font-weight:700;font-size:15px;opacity:0;pointer-events:none;transition:opacity .16s,transform .16s;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+.osd.on{opacity:1;transform:translate(-50%,0) scale(1)}.osd .i{width:20px;height:20px}
 /* ===== ПК: наведення миші, великі вікна, прокрутка озвучок ===== */
 @media (hover:hover){
 html[data-pc] .card .poster{transition:transform .22s cubic-bezier(.2,.8,.2,1),box-shadow .22s,filter .22s}
@@ -11484,7 +11519,7 @@ html[data-pc].pcfs .vc .sk{left:28px;right:28px}
         <button class="cb sm" data-act="pnext" aria-label="Наступна серія"><i data-ico="next"></i></button>
       </div>
       <div class="vvp hide" id="vvp"><button class="vmb" id="vmb" aria-label="Вимкнути або увімкнути звук"><i data-ico="vol"></i></button><div class="vsl" id="vsl"><input type="range" id="vvr" min="0" max="100" step="1" value="100" aria-label="Гучність"><span class="v100" id="v100"></span></div><b id="vvn">100%</b></div>
-      <div class="sk"><span id="vcur">0:00</span><div class="tr" id="vtr"><div class="tbar"><div class="tfill" id="vfill"></div></div><div class="knob" id="vknob"></div><input type="range" id="vseek" min="0" max="1000" value="0" step="1"></div><span id="vrem">0:00</span>
+      <div class="sk"><span id="vcur">0:00</span><div class="tr" id="vtr"><div class="tbar"><div class="tfill" id="vfill"></div></div><div class="knob" id="vknob"></div><i class="tph" id="tph"></i><div class="tpv" id="tpv"><div class="tpf"><video id="tpvv" muted playsinline preload="metadata" disablepictureinpicture></video></div><span id="tpt">0:00</span></div><input type="range" id="vseek" min="0" max="1000" value="0" step="1"></div><span id="vrem">0:00</span>
         <button class="xb" id="psbtn" data-act="pset" aria-label="Налаштування плеєра"><i data-ico="cog"></i></button>
         <button class="xb" id="vvol" aria-label="Гучність"><i data-ico="vol"></i></button>
         <button class="xb" id="vpip" aria-label="Картинка в картинці"><i data-ico="pip"></i></button>
@@ -14496,14 +14531,14 @@ function drMove() {
     if (DR.mc !== over) { drClearMerge(); DR.mc = over; DR.mtime = Date.now(); clearTimeout(DR.mt); DR.mt = setTimeout(drMove, mdw + 40); }
     else if (!DR.mg && Date.now() - DR.mtime >= mdw) { DR.mg = over; over.classList.add('mrg'); c.classList.add('mrgd'); if (navigator.vibrate) try { navigator.vibrate(14); } catch (e) {} }
   } else if (DR.mc && !(over && DR.mc === over)) drClearMerge();
-  if (over !== DR.sw) { DR.sw = over; DR.stime = Date.now(); clearTimeout(DR.st); if (over) DR.st = setTimeout(drMove, 280); }
-  const hit = over && !inner && Date.now() - DR.stime >= 260 ? over : null;
+  if (over !== DR.sw) { DR.sw = over; DR.stime = Date.now(); clearTimeout(DR.st); if (over) DR.st = setTimeout(drMove, DR.pc ? 90 : 280); }
+  const hit = over && !inner && Date.now() - DR.stime >= (DR.pc ? 70 : 260) ? over : null;
   if (hit) DR.sw = null;
   if (hit) {
     const rects = new Map(cards.map(o => [o, o.getBoundingClientRect()]));
     const after = c.compareDocumentPosition(hit) & Node.DOCUMENT_POSITION_FOLLOWING;
     if (after) hit.after(c); else hit.before(c);
-    DR.lock = Date.now() + 280;
+    DR.lock = Date.now() + (DR.pc ? 150 : 280);
     cards.forEach(o => {
       if (o === c) return;
       const a = rects.get(o), b = o.getBoundingClientRect(), dx = a.left - b.left, dy = a.top - b.top;
@@ -14615,7 +14650,7 @@ document.addEventListener('pointerdown', ev => {
 function pcEnterEdit(c, drag) {  // ПК: вхід у редагування з картки (виділяє її); drag — одразу починаємо перетягування
   const id = c.dataset.id, gid = c.dataset.gid;
   LP.t = Date.now(); try { getSelection().removeAllRanges(); } catch (e) {}
-  if (!gid && id) S.libSel.add(id);
+  tileIds(c).forEach(x => S.libSel.add(x));
   S.reorder = true; keepAnchor(render);
   if (drag) {
     const nc = document.querySelector(gid ? `#root .card[data-gid="${CSS.escape(gid)}"]` : `#root .card[data-id="${CSS.escape(id)}"]`);
@@ -14630,10 +14665,10 @@ document.addEventListener('pointermove', ev => {
   }
   if (DR.pid !== null && ev.pointerId !== DR.pid) return;
   DR.px = ev.clientX; DR.py = ev.clientY;
-  if (DR.pc && DR.timer && !S.reorder && !DR.on && DR.id !== undefined && Date.now() - DR.t0 >= 110 && Math.hypot(ev.clientX - DR.sx, ev.clientY - DR.sy) > 7) {
+  if (DR.pc && DR.timer && !DR.on && DR.id !== undefined && Math.hypot(ev.clientX - DR.sx, ev.clientY - DR.sy) > 5) {
     const c0 = document.elementFromPoint(DR.sx, DR.sy), cc = c0 && c0.closest && c0.closest('.card[data-id]');  // ПК: затиснув і потягнув — редагування + перетягування
     clearTimeout(DR.timer); DR.timer = null;
-    if (cc) { pcEnterEdit(cc, true); return; }
+    if (cc) { try { getSelection().removeAllRanges(); } catch (e) {} drStart(cc); drMove(); return; }  // просто перенесення: без виділення й без режиму редагування
   }
   if (DR.timer && Math.hypot(ev.clientX - DR.sx, ev.clientY - DR.sy) > 9) { clearTimeout(DR.timer); DR.timer = null; }
   if (DR.on) drMove();
@@ -14644,6 +14679,7 @@ document.addEventListener('pointermove', ev => {
   if (DR.on) drEnd(); else { clearTimeout(DR.timer); DR.timer = null; DR.pid = null; }
 }, true));
 document.addEventListener('touchmove', ev => { if (DR.on) ev.preventDefault(); }, {passive: false});
+document.addEventListener('dragstart', ev => { if (PC_APP && ev.target.closest && ev.target.closest('.card[data-id]')) ev.preventDefault(); });
 document.addEventListener('contextmenu', ev => {
   const t = ev.target; if (!t || !t.closest) return;
   if (t.closest('.card[data-id]')) ev.preventDefault();
@@ -14833,10 +14869,11 @@ const PCPIP_CT = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'cu
 const pcWv = () => (PC_APP && window.chrome && window.chrome.webview) || null;
 function pcPost(m) { try { pcWv().postMessage(m); } catch (e) {} }
 function pcPipSend(o) { if (PCPIP.on) pcPost('pip>' + JSON.stringify(o)); }
-function pipUi() { try { $('#player').classList.toggle('pipon', !!(PCPIP.hooked || pipOn())); } catch (e) {} }
+function pipUi() { try { const on = !!(PCPIP.hooked || pipOn()); $('#player').classList.toggle('pipon', on); if (on) { VC.classList.remove('off'); clearTimeout(vcT); } } catch (e) {} }
 function pcPipPayload(t, cur, paused, src, hand) {
   const it = S.cur && item(S.cur.id), i = it ? it.episodes.findIndex(x => x.n === S.cur.n) : -1, ic = {};
-  ['play', 'pause', 'prev', 'next', 'back10', 'fwd10', 'vol', 'close', 'fs'].forEach(n => { ic[n] = ico(n); });
+  ['play', 'pause', 'prev', 'next', 'back10', 'fwd10', 'vol', 'close', 'fs', 'undo'].forEach(n => { ic[n] = ico(n); });
+  PCPIP.nxk = PCPIP.skk = '';
   return {t, src, cur, paused, hand: !!hand, own: ownVol(), vmax: volMax(), p: volGet(), rate: V.playbackRate, skips, icons: ic, ac: getComputedStyle(document.documentElement).getPropertyValue('--ac').trim(),
     title: S.cur ? 'Серія ' + S.cur.n : '', sub: it ? it.title : '', hasPrev: i > 0, hasNext: !!(it && i >= 0 && it.episodes[i + 1])};
 }
@@ -14902,7 +14939,9 @@ setInterval(() => {
   if (!PCPIP.on || PCPIP.loading || PCPIP.hand) return;
   const k = NXS ? NXS.n + ':' + NXS.left : '';
   if (k !== PCPIP.nxk) { PCPIP.nxk = k; pcPipSend({t: 'nx', nx: NXS ? {n: NXS.n, left: NXS.left} : null}); }
-}, 400);
+  const sk = skShown ? {k: skShown, m: SKM, left: SKL} : null, sj = sk ? sk.k + '|' + sk.m + '|' + sk.left : '';
+  if (sj !== PCPIP.skk) { PCPIP.skk = sj; pcPipSend({t: 'sk', sk}); }
+}, 250);
 window.__pipMsg = m => {
   if (!m || !PCPIP.on) return;
   if (m.t === 'ready') { PCPIP.ready = true; if (PCPIP.hand) pcPipStart(); return; }
@@ -14919,6 +14958,8 @@ window.__pipMsg = m => {
     PCPIP.paused = true; V.dispatchEvent(new Event('pause')); V.dispatchEvent(new Event('ended'));
   } else if (m.t === 'vol') {
     PCPIP.vol = true; try { volApply(m.p); volPaint(); } catch (e) {} PCPIP.vol = false;
+  } else if (m.t === 'skback') { skBackGo(m.k); skipBtn(null);
+  } else if (m.t === 'skno') { skDone[m.k] = true; skSoft = null; skipBtn(null);
   } else if (m.t === 'skip') { skDone[m.k] = true; doSkip(m.k, false); skipBtn(null);
   } else if (m.t === 'error') { toast('Не вдалося відтворити відео у PiP', true); pcPost('pipclose'); pcPipEnd(true, false);
   } else if (m.t === 'cmd') {
@@ -15292,7 +15333,7 @@ function doSkip(kind, auto) {
   if (kind === 'ending' && endTail(w) <= TAIL_MIN) skEnded = true;  // аутро в кінці серії: спершу пропускаємо його, а на наступну серію переходимо через пару секунд (після кінця відео)
   const to = Math.min(w[1], (V.duration || 1e9) - 0.3);
   P.extra += Math.max(0, to - V.currentTime); P.credit += Math.max(0, to - V.currentTime); P.good = to; P.prog = true; setTimeout(() => { P.prog = false; }, 800);
-  skBack = {k: kind, from: w[0], until: Date.now() + (skEnded && kind === 'ending' ? 6e7 : 9000)};  // кнопка «Дивитись …»: можна повернутись і глянути пропущене
+  skBack = {k: kind, from: w[0], to, born: Date.now(), until: Date.now() + (skEnded && kind === 'ending' ? 6e7 : 9000)};  // кнопка «Дивитись …»: можна повернутись і глянути пропущене
   V.currentTime = to;
 }
 function skBackGo(k) {  // повернутись на початок пропущеного інтро/аутро й не пропускати його знову
@@ -15305,7 +15346,7 @@ function skBackGo(k) {  // повернутись на початок пропу
 function skipTick() {
   const t = V.currentTime; if (!S.cur || !skips) return;
   if (NXS) { skipBtn(null); return; }
-  if (skBack && Date.now() > skBack.until) skBack = null;
+  if (skBack && (Date.now() > skBack.until || (Date.now() - skBack.born > 1500 && t < skBack.to - 2))) skBack = null;  // перемотали далеко назад — «Дивитись …» вже не актуальне
   let hit = null;
   for (const k of ['opening', 'ending']) {
     const w = win(k); if (w && t >= w[0] - 0.2 && t < w[1] - 1) { hit = [k, w]; break; }
@@ -15330,7 +15371,7 @@ V.addEventListener('seeking', () => {
   if (P.prog) { P.prog = false; P.lastT = t; return; }  // програмний пропуск інтро/аутро або продовження з місця
   const a = Math.min(t, P.lastT), b = Math.max(t, P.lastT);  // ручна перемотка: вікна, куди потрапили або через які повернулись назад, не пропускаємо автоматично
   for (const k of ['opening', 'ending']) { const w = win(k); if (w && ((t >= w[0] - 0.2 && t < w[1]) || (t < P.lastT && w[1] > a && w[0] < b))) skDone[k] = true; }
-  P.sinceSeek = 0; P.lastT = t; nxCancel(); skSoft = null;
+  P.sinceSeek = 0; P.lastT = t; nxCancel(); skSoft = null; skBack = null;  // ручна перемотка прибирає «Дивитись інтро/аутро»
 });
 /* ---------- режим плеєра (iOS), Now Playing, повний екран, PiP ---------- */
 const ZM = {fill: false, on: false, d0: 0, base: 1, cur: 1, t: 0, f: 1};
@@ -15525,7 +15566,11 @@ V.addEventListener('webkitendfullscreen', () => { vcShow(); setTimeout(() => { z
 const VC = $('#vc'), VS = $('#vseek'); let vcT = 0, seeking = false;
 function vcShow() {
   VC.classList.remove('off'); clearTimeout(vcT);
-  if (!V.paused && !seeking) vcT = setTimeout(() => VC.classList.add('off'), 3000);
+  if (PCPIP.hooked || pipOn()) return;  // поки працює PiP, інтерфейс плеєра не ховаємо
+  if (!V.paused && !seeking) vcT = setTimeout(() => {
+    if (PC_APP && document.querySelector('#vc .cb:hover,#vc .sk:hover,#vc .top:hover,#vvp:hover,#vc .nxbox:hover')) { vcShow(); return; }  // на ПК не ховаємо, поки миша над елементами керування
+    VC.classList.add('off');
+  }, 3000);
 }
 function vcSync() {
   const d = V.duration || 0, t = V.currentTime || 0;
@@ -15541,6 +15586,7 @@ $('#stage').addEventListener('click', ev => {
   if (ev.target.closest('.skwrap')) return;
   if (ev.target.closest('#pset')) { if (ev.target.id === 'pset') A.psclose(); return; }
   if (ev.target.closest('.cb, .sk, .top, .nxbox, .vsl, #vvp')) { vcShow(); return; }
+  if (PC_APP) { clearTimeout(DT.t); if (ev.detail >= 2) return; DT.t = setTimeout(() => { if (V.paused) V.play().catch(() => {}); else V.pause(); vcShow(); }, 230); return; }  // ПК: клік по відео — пауза/відтворення (як на YouTube), інтерфейс керується мишею
   const toggle = () => { if (VC.classList.contains('off')) vcShow(); else { VC.classList.add('off'); clearTimeout(vcT); } };
   // подвійний тап по лівому/правому боку: −/+10 с без показу меню плеєра; наступні швидкі тапи в той самий бік продовжують перемотку
   const r = $('#stage').getBoundingClientRect(), fx = (ev.clientX - r.left) / (r.width || 1), side = fx < 0.35 ? -1 : fx > 0.65 ? 1 : 0;
@@ -15556,6 +15602,34 @@ $('#stage').addEventListener('click', ev => {
   clearTimeout(DT.t); DT.t = setTimeout(toggle, 300);  // одиночний тап збоку — як і раніше показує/ховає меню (з короткою затримкою)
 });
 const DT = {side: 0, at: 0, n: 0, acc: 0, t: 0};
+let osdT = 0;
+function osd(text, icon) {
+  let b = $('#osd'); if (!b) { b = document.createElement('div'); b.id = 'osd'; b.className = 'osd'; $('#stage').appendChild(b); }
+  b.innerHTML = (icon ? ico(icon) : '') + '<span>' + esc(text) + '</span>'; void b.offsetWidth; b.classList.add('on'); clearTimeout(osdT); osdT = setTimeout(() => b.classList.remove('on'), 850);
+}
+if (PC_APP) {
+  let mmT = 0;
+  $('#stage').addEventListener('mousemove', () => { const n = Date.now(); if (n - mmT < 70 || !S.cur) return; mmT = n; vcShow(); });  // ПК: інтерфейс з'являється від руху миші й гасне через кілька секунд спокою
+  $('#stage').addEventListener('dblclick', ev => { if (ev.target.closest('.cb, .sk, .top, .nxbox, .vsl, #vvp, .skwrap, #pset')) return; clearTimeout(DT.t); $('#vfs').click(); });
+  document.addEventListener('keydown', ev => {  // гарячі клавіші плеєра (як на YouTube); працюють, лише коли вікно програми в фокусі
+    const pl = $('#player'); if (!S.cur || !pl || pl.classList.contains('hide') || ev.ctrlKey || ev.metaKey || ev.altKey || !document.hasFocus()) return;
+    const ae = document.activeElement;
+    if (ae && ae.type === 'range') ae.blur(); else if (ae && /INPUT|TEXTAREA|SELECT/.test(ae.tagName)) return; else if (ae && ae.tagName === 'BUTTON') ae.blur();
+    if (!$('#pset').classList.contains('hide') && ev.key !== ' ') return;
+    const k = ev.key, seek = d => { V.currentTime = Math.max(0, Math.min((V.duration || 1e9) - 0.3, V.currentTime + d)); vcSync(); osd((d < 0 ? '−' : '+') + Math.abs(d) + ' с', d < 0 ? 'back10' : 'fwd10'); };
+    let used = true;
+    if (k === ' ' || k === 'k' || k === 'K' || k === 'л' || k === 'Л') { if (V.paused) V.play().catch(() => {}); else V.pause(); osd(V.paused ? 'Пауза' : 'Відтворення', V.paused ? 'pause' : 'play'); }
+    else if (k === 'ArrowLeft') seek(-5); else if (k === 'ArrowRight') seek(5);
+    else if (k === 'j' || k === 'J' || k === 'о' || k === 'О') seek(-10); else if (k === 'l' || k === 'L' || k === 'д' || k === 'Д') seek(10);
+    else if (k === 'ArrowUp' || k === 'ArrowDown') { const p = Math.max(0, Math.min(volMax(), volGet() + (k === 'ArrowUp' ? 5 : -5))); volApply(p); volPaint(); osd('Гучність ' + p + '%', 'vol'); }
+    else if (k === 'm' || k === 'M' || k === 'ь' || k === 'Ь') { const p = volGet(); if (p > 0) { VOLPREV = p; volApply(0); } else volApply(VOLPREV || 100); volPaint(); osd(volGet() ? 'Звук увімкнено' : 'Звук вимкнено', 'vol'); }
+    else if (/^[0-9]$/.test(k) && V.duration) { V.currentTime = V.duration * Number(k) / 10; vcSync(); osd(k + '0%'); }
+    else if (k === 'Home') { V.currentTime = 0; vcSync(); }
+    else if ((k === 'N' || k === 'Т') && ev.shiftKey) stepPlayer(1); else if ((k === 'P' || k === 'З') && ev.shiftKey) stepPlayer(-1);
+    else used = false;
+    if (used) { ev.preventDefault(); ev.stopPropagation(); vcShow(); }
+  }, true);
+}
 let dtFT = 0;
 function dtFlash(side, acc) {
   let b = $('#dtf'); if (!b) { b = document.createElement('div'); b.id = 'dtf'; $('#stage').appendChild(b); }
@@ -15572,6 +15646,41 @@ V.addEventListener('timeupdate', () => { vcSync(); skipTick(); });
 ['playing', 'seeked', 'loadeddata', 'canplay'].forEach(e => V.addEventListener(e, skipTick));
 setInterval(() => { if (S.cur && !V.paused) skipTick(); }, 400);
 V.addEventListener('loadedmetadata', vcSync);
+
+/* ---------- кадр-превʼю при перемотці / наведенні (друге відео без звуку) ---------- */
+const TP = {v: $('#tpvv'), box: $('#tpv'), t: $('#tpt'), f: document.querySelector('.tpf'), h: $('#tph'), want: null, busy: false, src: '', bad: false, rel: 0, bt: 0};
+function tpSrc() {
+  const s = V.currentSrc || V.src || ''; clearTimeout(TP.rel); if (!s) return;
+  if (s !== TP.src) { TP.src = s; TP.bad = false; TP.f.classList.remove('nov'); try { TP.v.src = s; TP.v.load(); } catch (e) {} }
+}
+function tpFrame(t) { TP.want = t; if (!TP.busy && !TP.bad) tpGo(); }
+function tpGo() {
+  if (TP.want == null) return; const t = TP.want; TP.want = null; TP.busy = true; clearTimeout(TP.bt);
+  TP.bt = setTimeout(() => { TP.busy = false; if (TP.want != null) tpGo(); }, 600);
+  try { TP.v.currentTime = t; } catch (e) { TP.busy = false; }
+}
+TP.v.addEventListener('seeked', () => { clearTimeout(TP.bt); TP.busy = false; if (TP.want != null) tpGo(); });
+TP.v.addEventListener('error', () => { if (TP.src) { TP.bad = true; TP.f.classList.add('nov'); } });
+function tpShow(frac, hover) {
+  const d = V.duration; if (!d || !isFinite(d)) return;
+  const tr = $('#vtr'), r = tr.getBoundingClientRect(), w = r.width || 1; frac = Math.max(0, Math.min(1, frac)); tpSrc();
+  const bw = TP.box.offsetWidth || 164, x = Math.max(bw / 2 + 8 - r.left, Math.min(frac * w, innerWidth - r.left - bw / 2 - 8));
+  TP.box.style.left = x + 'px'; TP.t.textContent = fmtT(frac * d); TP.box.classList.add('on');
+  TP.h.style.left = (frac * 100) + '%'; TP.h.classList.toggle('on', !!hover);
+  tpFrame(frac * d);
+}
+function tpHide() {
+  TP.box.classList.remove('on'); TP.h.classList.remove('on');
+  clearTimeout(TP.rel); TP.rel = setTimeout(() => { TP.src = ''; try { TP.v.removeAttribute('src'); TP.v.load(); } catch (e) {} }, 25000);  // звільняємо друге відео, коли не користуються
+}
+VS.addEventListener('input', () => tpShow(VS.value / 1000, false));
+['change', 'pointerup', 'pointercancel', 'blur'].forEach(e => VS.addEventListener(e, () => { if (!seeking || e !== 'pointerup') tpHide(); }));
+VS.addEventListener('pointerup', () => setTimeout(tpHide, 30));
+$('#vtr').addEventListener('pointermove', ev => {  // наведення мишею (ПК, iPad з мишею): час і кадр моменту під курсором
+  if (ev.pointerType !== 'mouse' || seeking) return;
+  const r = $('#vtr').getBoundingClientRect(); tpShow((ev.clientX - r.left) / (r.width || 1), true);
+});
+$('#vtr').addEventListener('pointerleave', () => { if (!seeking) tpHide(); });
 function clearNowPlaying() {  // прибираємо картку «Мої аніме» з екрана блокування/Центру керування
   try {
     const ms = navigator.mediaSession; if (!ms) return;
@@ -15942,8 +16051,8 @@ function rcAct(b) {
   if (b.dataset.rc === 'exp') { location.hash = '#/remote'; return; }
   const a = b.dataset.rc, wasPaused = !!(RC.st && RC.st.paused);
   rcOpt(a);
-  if (a === 'min') { RC.min = true; $('#rcbar').classList.add('min'); dockLayout(); }
-  else if (a === 'open') { RC.min = false; $('#rcbar').classList.remove('min'); dockLayout(); }
+  if (a === 'min') { RC.min = true; $('#rcbar').classList.add('min'); dockLayout(); setTimeout(rcRefresh, 30); }
+  else if (a === 'open') { RC.min = false; $('#rcbar').classList.remove('min'); dockLayout(); setTimeout(rcRefresh, 30); }
   else if (a === 'stop') { rcCmd('close'); rcStop(); }
   else if (a === 'pp') rcCmd(wasPaused ? 'play' : 'pause');
   else if (a === 'prev') rcCmd('prev'); else if (a === 'next') rcCmd('next');
@@ -16430,6 +16539,13 @@ Object.assign(A, {
 });
 // автоматично: якщо на іншому пристрої зараз грає серія — пропонуємо пульт
 const rcTO = (pr, ms) => Promise.race([pr, new Promise((_, rj) => setTimeout(() => rj(new Error('timeout')), ms || 5000))]);  // після сну iOS запит міг «повисти» назавжди — не чекаємо його
+function rcRefresh() {  // перемкнули вигляд пульта (вкладка ↔ згорнута панель): скидаємо «затримки», одразу опитуємо й перемальовуємо свіжими даними
+  RC.hold = 0; RC.seekT = RC.volT = null; RC.drag = RC.vdrag = false; RC.busy = false;
+  if (!RC.pid) return;
+  if (RC.st) { try { rcPaint(RC.st, true); } catch (e) {} }
+  rcPoll().then(() => { if (RC.st) rcPaint(RC.st, true); if (route().name === 'remote') rmSoft(); }).catch(() => {});
+}
+window.addEventListener('hashchange', () => { if (RC.pid) setTimeout(rcRefresh, 60); });
 function rcWake() {  // повернулись у додаток: скидаємо все застаріле й одразу опитуємо
   RC.busy = false; RC.drag = RC.vdrag = false; RC.hold = 0; RC.seekT = RC.volT = null; RC.rkey = ''; RC.eKid = null;
   if (RC.pid) { rcPoll().then(() => { if (route().name === 'remote') rmSoft(); }).catch(() => {}); }
@@ -16442,6 +16558,7 @@ async function rcPoll() {
   try {
     if (RC.pid && !(S.sync && S.sync.rc_out_on)) { rcStop(); return; }
     if (RC.pid) {
+      if ((RC.drag || RC.vdrag) && Date.now() - (RC.dragT || 0) > 2500) RC.drag = RC.vdrag = false;  // прапорець міг «застрягти», якщо елемент перемалювався під час тягнення — тоді дані пульта замерзали
       if (RC.drag || RC.vdrag) return;
       let st = {};
       try { st = (await rcTO(api('/api/sync_pstate', {peer: RC.pid}))).state || {}; } catch (e) { st = null; }
@@ -16479,9 +16596,9 @@ function rcHot() {
 }
 let RCVT = 0;
 document.addEventListener('input', ev => {
-  if (ev.target.id === 'rcseek') { RC.drag = true; const d = (RC.st && RC.st.dur) || 0; $('#rcc').textContent = fmtT(d * ev.target.value / 1000); }
+  if (ev.target.id === 'rcseek') { RC.drag = true; RC.dragT = Date.now(); const d = (RC.st && RC.st.dur) || 0; $('#rcc').textContent = fmtT(d * ev.target.value / 1000); }
   if (ev.target.id === 'rcvol') {
-    RC.vdrag = true; let v = Number(ev.target.value); if (Number(ev.target.max) > 100 && Math.abs(v - 100) <= 3) { v = 100; ev.target.value = 100; } $('#rcvn').textContent = Math.round(v); rcSl();
+    RC.vdrag = true; RC.dragT = Date.now(); let v = Number(ev.target.value); if (Number(ev.target.max) > 100 && Math.abs(v - 100) <= 3) { v = 100; ev.target.value = 100; } $('#rcvn').textContent = Math.round(v); rcSl();
     if (Date.now() - RCVT > 160) { RCVT = Date.now(); rcCmd('vol', v); }  // гучність лине на пристрій одразу під час тягнення
   }
 });
