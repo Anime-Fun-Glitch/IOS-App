@@ -38,8 +38,9 @@ namespace AniSyns
         const int Edge = 6;  // смуга по краях для зміни розміру
         static readonly Color Bg = Color.FromArgb(13, 14, 19);
         readonly WebView2 wv = new WebView2();
-        Splash splash;
         Process server;
+        PipForm pip;
+        CoreWebView2Environment env;
         bool full;
         FormWindowState prevState;
         Rectangle prevBounds;
@@ -48,6 +49,7 @@ namespace AniSyns
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int val, int size);
         [DllImport("dwmapi.dll")] static extern int DwmExtendFrameIntoClientArea(IntPtr hwnd, ref MARGINS m);
         [DllImport("user32.dll")] static extern bool ReleaseCapture();
+        [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd, int cmd);
         [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr w, IntPtr l);
 
         [StructLayout(LayoutKind.Sequential)] struct MARGINS { public int l, r, t, b; }
@@ -71,9 +73,6 @@ namespace AniSyns
             wv.DefaultBackgroundColor = Bg;
             wv.AllowExternalDrop = false;
             Controls.Add(wv);
-            splash = new Splash { Dock = DockStyle.Fill };
-            Controls.Add(splash);  // екран завантаження поверх сторінки, поки сервер і вікно не готові
-            splash.BringToFront();
             Padding = new Padding(Edge);
             SetStyle(ControlStyles.ResizeRedraw | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
 
@@ -95,7 +94,7 @@ namespace AniSyns
             Bounds = b;
 
             Shown += async (s, e) => { if (startMax) WindowState = FormWindowState.Maximized; await Start(); };
-            FormClosing += (s, e) => SaveState();
+            FormClosing += (s, e) => { try { if (pip != null && !pip.IsDisposed) { pip.Silent = true; pip.Close(); } } catch { } SaveState(); };
             FormClosed += (s, e) => StopServer();
             Resize += (s, e) => OnState();
         }
@@ -215,22 +214,9 @@ namespace AniSyns
         {
             try
             {
-                if (!await Ping())
-                {
-                    string exe = Path.Combine(AppContext.BaseDirectory, "server", "AniSynsServer.exe");
-                    server = Process.Start(new ProcessStartInfo(exe, "--parent " + Process.GetCurrentProcess().Id)
-                    { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(exe) });
-                    bool ok = false;
-                    for (int i = 0; i < 80 && !ok; i++)
-                    {
-                        ok = await Ping();
-                        if (!ok) await Task.Delay(300);
-                    }
-                    if (!ok) throw new Exception("Сервер не відповів. Журнал: " + Path.Combine(DataDir(), "server.log"));
-                }
                 var opts = new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required --disable-features=msSmartScreenProtection --ignore-gpu-blocklist --enable-gpu-rasterization --renderer-process-limit=1");
                 string ud = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AniSyns", "webview");
-                var env = await CoreWebView2Environment.CreateAsync(null, ud, opts);
+                env = await CoreWebView2Environment.CreateAsync(null, ud, opts);
                 await wv.EnsureCoreWebView2Async(env);
                 var c = wv.CoreWebView2;
                 var st = c.Settings;
@@ -267,17 +253,35 @@ namespace AniSyns
                     else if (msg == "close") Close();
                     else if (msg == "fs") SetFull(!full);
                     else if (msg == "fsoff") { if (full) SetFull(false); }
+                    else if (msg == "pipopen") OpenPip();
+                    else if (msg == "pipclose") { if (pip != null && !pip.IsDisposed) { pip.Silent = true; pip.Close(); } }
+                    else if (msg == "front") { if (WindowState == FormWindowState.Minimized) ShowWindow(Handle, 9); Activate(); }
+                    else if (msg != null && msg.StartsWith("pip>")) { try { if (pip != null && !pip.IsDisposed && pip.wv.CoreWebView2 != null) pip.wv.CoreWebView2.ExecuteScriptAsync("window.__pipIn&&window.__pipIn(" + msg.Substring(4) + ")"); } catch { } }
                     else if (msg == "drag" && !full) { ReleaseCapture(); SendMessage(Handle, 0xA1, (IntPtr)2, IntPtr.Zero); }  // WM_NCLBUTTONDOWN, HTCAPTION
                 };
                 c.NavigationCompleted += (s, e) =>
                 {
                     OnState();
-                    if (splash != null)
-                    {
-                        var sp = splash; splash = null;
-                        Controls.Remove(sp); sp.Dispose();  // далі показує свою заставку сама сторінка
-                    }
                 };
+                // Одразу показуємо ту саму заставку, що й на iOS, поки стартує сервер
+                var t0 = DateTime.UtcNow;
+                try { c.NavigateToString(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "splash.html"))); } catch { }
+                if (!await Ping())
+                {
+                    string exe = Path.Combine(AppContext.BaseDirectory, "server", "AniSynsServer.exe");
+                    server = Process.Start(new ProcessStartInfo(exe, "--parent " + Process.GetCurrentProcess().Id)
+                    { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(exe) });
+                    bool ok = false;
+                    for (int i = 0; i < 80 && !ok; i++)
+                    {
+                        ok = await Ping();
+                        if (!ok) await Task.Delay(300);
+                    }
+                    if (!ok) throw new Exception("Сервер не відповів. Журнал: " + Path.Combine(DataDir(), "server.log"));
+                }
+                var left = 1900 - (int)(DateTime.UtcNow - t0).TotalMilliseconds;  // даємо заставці програти вступ
+                if (left > 0) await Task.Delay(left);
+                await c.AddScriptToExecuteOnDocumentCreatedAsync("window.__hostsplash=1");
                 c.Navigate(Url);
             }
             catch (Exception ex)
@@ -288,6 +292,24 @@ namespace AniSyns
                 MessageBox.Show(m, "AniSyns", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 Close();
             }
+        }
+
+        // Власне вікно «картинка в картинці» у стилі програми (без адреси та іконки сайту)
+        void OpenPip()
+        {
+            if (pip != null && !pip.IsDisposed) return;
+            var p = new PipForm(env, Screen.FromControl(this).WorkingArea, Url + "pip");
+            pip = p;
+            p.Msg = m =>
+            {
+                try { if (wv.CoreWebView2 != null) wv.CoreWebView2.ExecuteScriptAsync("window.__pipMsg&&window.__pipMsg(" + m + ")"); } catch { }
+            };
+            p.FormClosed += (s, e) =>
+            {
+                if (pip == p) pip = null;
+                if (!p.Silent) { try { if (wv.CoreWebView2 != null) wv.CoreWebView2.ExecuteScriptAsync("window.__pipMsg&&window.__pipMsg({\"t\":\"closed\"})"); } catch { } }
+            };
+            p.Show();
         }
 
         // Повний екран відео (наш плеєр): вікно на весь екран без відступів, і навпаки
@@ -341,94 +363,152 @@ namespace AniSyns
         }
     }
 
-    // Екран завантаження: темний фон, логотип, назва та рухома смужка (як заставка на iOS)
-    class Splash : Control
+    // Вікно PiP: безрамкове, поверх усіх вікон, зі збереженням пропорцій відео
+    class PipForm : Form
     {
-        readonly System.Windows.Forms.Timer tm = new System.Windows.Forms.Timer { Interval = 16 };
-        readonly Stopwatch sw = Stopwatch.StartNew();
-        Image logo;
+        const int Edge = 5;
+        public readonly WebView2 wv = new WebView2();
+        public Action<string> Msg;
+        public bool Silent;
+        double ratio = 16.0 / 9;
+        readonly CoreWebView2Environment env;
+        readonly string url;
+        static readonly string Cfg = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AniSyns", "pip.txt");
 
-        public Splash()
+        [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int val, int size);
+        [DllImport("user32.dll")] static extern bool ReleaseCapture();
+        [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr w, IntPtr l);
+        [StructLayout(LayoutKind.Sequential)] struct RECT { public int left, top, right, bottom; }
+
+        public PipForm(CoreWebView2Environment env, Rectangle area, string url)
         {
-            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-            BackColor = Color.FromArgb(13, 14, 19);
-            try { logo = Image.FromFile(Path.Combine(AppContext.BaseDirectory, "splash.png")); } catch { }
-            tm.Tick += (s, e) => Invalidate();
-            tm.Start();
+            this.env = env; this.url = url;
+            FormBorderStyle = FormBorderStyle.None;
+            StartPosition = FormStartPosition.Manual;
+            ShowInTaskbar = false;
+            TopMost = true;
+            BackColor = Color.Black;
+            Padding = new Padding(Edge);
+            Text = "AniSyns";
+            MinimumSize = new Size(280, 170);
+            int w = 480 + 2 * Edge, h = 270 + 2 * Edge;
+            var r = new Rectangle(area.Right - w - 24, area.Bottom - h - 24, w, h);
+            try
+            {
+                var p = File.ReadAllText(Cfg).Trim().Split(',');
+                var s = new Rectangle(int.Parse(p[0]), int.Parse(p[1]), int.Parse(p[2]), int.Parse(p[3]));
+                foreach (var sc in Screen.AllScreens) if (sc.WorkingArea.IntersectsWith(s)) { r = s; break; }
+            }
+            catch { }
+            Bounds = r;
+            wv.Dock = DockStyle.Fill;
+            wv.DefaultBackgroundColor = Color.Black;
+            Controls.Add(wv);
+            FormClosing += (s, e) => { try { Directory.CreateDirectory(Path.GetDirectoryName(Cfg)); File.WriteAllText(Cfg, Bounds.X + "," + Bounds.Y + "," + Bounds.Width + "," + Bounds.Height); } catch { } };
+            Shown += async (s, e) => await Init();
         }
 
-        protected override void Dispose(bool d)
+        protected override bool ShowWithoutActivation { get { return true; } }
+
+        protected override CreateParams CreateParams
         {
-            if (d) { tm.Stop(); tm.Dispose(); if (logo != null) logo.Dispose(); }
-            base.Dispose(d);
+            get
+            {
+                var cp = base.CreateParams;
+                cp.Style |= 0x40000;  // WS_THICKFRAME
+                cp.ExStyle |= 0x80;   // WS_EX_TOOLWINDOW: без запису в Alt+Tab
+                return cp;
+            }
+        }
+
+        async Task Init()
+        {
+            try
+            {
+                await wv.EnsureCoreWebView2Async(env);
+                var c = wv.CoreWebView2;
+                c.Settings.AreDevToolsEnabled = false;
+                c.Settings.IsStatusBarEnabled = false;
+                c.Settings.IsZoomControlEnabled = false;
+                c.Settings.AreBrowserAcceleratorKeysEnabled = false;
+                c.PermissionRequested += (s, e) => e.State = CoreWebView2PermissionState.Allow;
+                c.NewWindowRequested += (s, e) => e.Handled = true;
+                c.ContextMenuRequested += (s, e) => e.Handled = true;
+                c.WebMessageReceived += (s, e) =>
+                {
+                    string m = e.TryGetWebMessageAsString();
+                    if (m == null) return;
+                    if (m == "pipdrag") { ReleaseCapture(); SendMessage(Handle, 0xA1, (IntPtr)2, IntPtr.Zero); }
+                    else if (m.StartsWith("ar:"))
+                    {
+                        double r;
+                        if (double.TryParse(m.Substring(3), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out r) && r > 0.3 && r < 4)
+                        {
+                            ratio = r;
+                            Height = (int)((Width - 2 * Edge) / ratio) + 2 * Edge;
+                        }
+                    }
+                    else if (m.StartsWith("main>") && Msg != null) Msg(m.Substring(5));
+                };
+                c.Navigate(url);
+            }
+            catch { Close(); }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            try
+            {
+                int one = 1, round = 2, none = unchecked((int)0xFFFFFFFE);
+                DwmSetWindowAttribute(Handle, 19, ref one, 4);
+                DwmSetWindowAttribute(Handle, 20, ref one, 4);
+                DwmSetWindowAttribute(Handle, 33, ref round, 4);
+                DwmSetWindowAttribute(Handle, 34, ref none, 4);
+            }
+            catch { }
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            var g = e.Graphics;
-            g.Clear(BackColor);
-            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
-            float t = (float)sw.Elapsed.TotalSeconds;
-            float cx = Width / 2f, cy = Height / 2f - 30;
+            base.OnPaint(e);
+            using (var pen = new Pen(Color.FromArgb(255, 44, 46, 60)))
+                e.Graphics.DrawRectangle(pen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
+        }
 
-            // м'яке фіолетове сяйво
-            float gr = 230 + 10 * (float)Math.Sin(t * 2);
-            using (var path = new System.Drawing.Drawing2D.GraphicsPath())
+        protected override void WndProc(ref Message m)
+        {
+            const int WM_NCCALCSIZE = 0x83, WM_NCHITTEST = 0x84, WM_NCACTIVATE = 0x86, WM_NCPAINT = 0x85, WM_SIZING = 0x214;
+            if (m.Msg == WM_NCACTIVATE) { m.LParam = (IntPtr)(-1); base.WndProc(ref m); return; }
+            if (m.Msg == WM_NCPAINT) { m.Result = IntPtr.Zero; return; }
+            if (m.Msg == WM_NCCALCSIZE && m.WParam != IntPtr.Zero) { m.Result = IntPtr.Zero; return; }
+            if (m.Msg == WM_SIZING)
             {
-                path.AddEllipse(cx - gr, cy - gr, gr * 2, gr * 2);
-                using (var pb = new System.Drawing.Drawing2D.PathGradientBrush(path))
+                var r = (RECT)Marshal.PtrToStructure(m.LParam, typeof(RECT));
+                int edge = m.WParam.ToInt32();
+                int cw = r.right - r.left - 2 * Edge, ch = r.bottom - r.top - 2 * Edge;
+                if (edge == 3 || edge == 6) { cw = (int)(ch * ratio); r.right = r.left + cw + 2 * Edge; }
+                else
                 {
-                    pb.CenterColor = Color.FromArgb(70, 109, 76, 255);
-                    pb.SurroundColors = new[] { Color.FromArgb(0, 109, 76, 255) };
-                    g.FillPath(pb, path);
+                    ch = (int)(cw / ratio);
+                    if (edge == 4 || edge == 5) r.top = r.bottom - ch - 2 * Edge; else r.bottom = r.top + ch + 2 * Edge;
                 }
+                Marshal.StructureToPtr(r, m.LParam, false);
+                m.Result = (IntPtr)1;
+                return;
             }
-
-            // логотип: поява + легке «биття»
-            float appear = Math.Min(1f, t / 0.7f);
-            float k = (0.8f + 0.2f * (1 - (float)Math.Pow(1 - appear, 3))) * (1 + 0.025f * (float)Math.Sin(t * 4.2));
-            float sz = 150 * k;
-            if (logo != null)
+            if (m.Msg == WM_NCHITTEST)
             {
-                var cm = new System.Drawing.Imaging.ColorMatrix { Matrix33 = appear };
-                using (var ia = new System.Drawing.Imaging.ImageAttributes())
-                {
-                    ia.SetColorMatrix(cm);
-                    g.DrawImage(logo, new Rectangle((int)(cx - sz / 2), (int)(cy - sz / 2), (int)sz, (int)sz), 0, 0, logo.Width, logo.Height, GraphicsUnit.Pixel, ia);
-                }
+                long l = m.LParam.ToInt64();
+                int x = (short)(l & 0xFFFF), y = (short)((l >> 16) & 0xFFFF);
+                var b = Bounds;
+                bool L = x < b.Left + Edge, R = x >= b.Right - Edge, T = y < b.Top + Edge, B = y >= b.Bottom - Edge;
+                int ht = 0;
+                if (T && L) ht = 13; else if (T && R) ht = 14; else if (B && L) ht = 16; else if (B && R) ht = 17;
+                else if (L) ht = 10; else if (R) ht = 11; else if (T) ht = 12; else if (B) ht = 15;
+                if (ht != 0) { m.Result = (IntPtr)ht; return; }
             }
-
-            // назва
-            float na = Math.Max(0f, Math.Min(1f, (t - 0.5f) / 0.6f));
-            using (var f = new Font("Segoe UI", 26f, FontStyle.Bold, GraphicsUnit.Point))
-            {
-                var s1 = g.MeasureString("Ani", f, 0, StringFormat.GenericTypographic);
-                var s2 = g.MeasureString("Syns", f, 0, StringFormat.GenericTypographic);
-                float x = cx - (s1.Width + s2.Width) / 2, y = cy + 100;
-                using (var b1 = new SolidBrush(Color.FromArgb((int)(255 * na), 255, 255, 255)))
-                    g.DrawString("Ani", f, b1, x, y, StringFormat.GenericTypographic);
-                using (var b2 = new System.Drawing.Drawing2D.LinearGradientBrush(new RectangleF(x + s1.Width, y, s2.Width, s2.Height), Color.FromArgb((int)(255 * na), 155, 107, 255), Color.FromArgb((int)(255 * na), 95, 176, 255), 0f))
-                    g.DrawString("Syns", f, b2, x + s1.Width, y, StringFormat.GenericTypographic);
-            }
-            using (var f = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point))
-            using (var b = new SolidBrush(Color.FromArgb((int)(255 * na), 154, 160, 184)))
-            {
-                var sf = new StringFormat { Alignment = StringAlignment.Center };
-                g.DrawString("The way to watch Anime with comfort!", f, b, cx, cy + 148, sf);
-            }
-
-            // рухома смужка завантаження
-            float bw = 120, bh = 3, bx = cx - bw / 2, by = Height - 64;
-            using (var bg = new SolidBrush(Color.FromArgb(20, 255, 255, 255)))
-                g.FillRectangle(bg, bx, by, bw, bh);
-            float ph = (t % 1.2f) / 1.2f, seg = bw * 0.45f;
-            float sx = bx - seg + (bw + seg) * (ph * ph * (3 - 2 * ph));
-            float x0 = Math.Max(bx, sx), x1 = Math.Min(bx + bw, sx + seg);
-            if (x1 > x0)
-                using (var lb = new System.Drawing.Drawing2D.LinearGradientBrush(new RectangleF(x0 - 1, by, x1 - x0 + 2, bh), Color.FromArgb(122, 59, 203), Color.FromArgb(102, 162, 211), 0f))
-                    g.FillRectangle(lb, x0, by, x1 - x0, bh);
+            base.WndProc(ref m);
         }
     }
 }

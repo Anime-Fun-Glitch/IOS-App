@@ -18,6 +18,6 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2792.45" />
     <Content Include="app.ico" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="splash.png" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="splash.html" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
