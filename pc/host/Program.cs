@@ -253,6 +253,7 @@ namespace AniSyns
                     else if (msg == "close") Close();
                     else if (msg == "fs") SetFull(!full);
                     else if (msg == "fsoff") { if (full) SetFull(false); }
+                    else if (msg == "fson") { if (!full) SetFull(true); }
                     else if (msg == "pipopen") OpenPip();
                     else if (msg == "pipclose") { if (pip != null && !pip.IsDisposed) { pip.Silent = true; pip.Close(); } }
                     else if (msg == "front") { if (WindowState == FormWindowState.Minimized) ShowWindow(Handle, 9); Activate(); }

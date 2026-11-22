@@ -78,12 +78,18 @@ body.show .sk,body.paused .sk{transform:none}
 .mk.op{background:var(--op)}.mk.ed{background:var(--ed)}
 .knob{position:absolute;top:6px;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:#fff;pointer-events:none;z-index:2;transition:transform .15s}
 .tr:hover .knob{transform:scale(1.25)}
-.vw{display:flex;align-items:center;flex:none}
-.vsl{width:0;overflow:hidden;transition:width .26s cubic-bezier(.2,.8,.2,1);display:flex;align-items:center}
-.vw:hover .vsl,.vw.open .vsl{width:76px}
-.vsl input{-webkit-appearance:none;appearance:none;width:68px;height:24px;margin:0 4px 0 6px;background:transparent;cursor:pointer;--p:100%}
-.vsl input::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(90deg,var(--ac) var(--p),#ffffff2e var(--p))}
-.vsl input::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;margin-top:-4px;border-radius:50%;background:#fff;box-shadow:0 2px 8px #0008}
+.vpop{position:absolute;right:10px;bottom:54px;display:flex;align-items:center;gap:9px;width:min(232px,calc(100% - 20px));padding:4px 12px;border-radius:15px;background:#000d;-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);color:#fff;animation:pop .2s cubic-bezier(.2,.9,.25,1.15);pointer-events:auto!important}
+.vpop.hide{display:none}
+.vmb{width:26px;height:26px;display:grid;place-items:center;border-radius:9px;flex:none;transition:opacity .15s,transform .15s}.vmb:active{transform:scale(.9)}.vmb .i{width:18px;height:18px}
+.vpop.mut .vmb{opacity:.45}
+.vsl{position:relative;flex:1;height:30px;--p:100%;--bs:100%}
+.vsl:before{content:'';position:absolute;left:0;right:0;top:11px;height:8px;border-radius:4px;background:linear-gradient(90deg,var(--ac) var(--bs),var(--op) var(--bs) var(--p),#ffffff2e var(--p))}
+.vsl input{-webkit-appearance:none;appearance:none;width:100%;height:30px;margin:0;background:transparent;position:relative;z-index:2;cursor:pointer}
+.vsl input::-webkit-slider-runnable-track{height:30px;background:transparent}
+.vsl input::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;margin-top:5px;border-radius:50%;background:#fff;box-shadow:0 2px 8px #0008}
+.vsl .m100{position:absolute;top:6px;width:3px;height:18px;border-radius:2px;background:#ffffffaa;z-index:1;pointer-events:none;display:none}
+.vpop b{flex:none;width:40px;text-align:right;font-size:12.5px;font-variant-numeric:tabular-nums}
+.vpop.boost b{color:var(--op)}.vpop.at100 b{color:var(--ac)}
 .xb{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;background:#ffffff1a;color:#fff;flex:none;transition:background .15s}
 .xb .i{width:16px;height:16px}.xb:hover{background:#ffffff30}.xb.muted{opacity:.55}
 .pills{position:absolute;right:10px;bottom:56px;display:flex;flex-direction:column;align-items:flex-end;gap:7px}
@@ -100,8 +106,8 @@ body.show .sk,body.paused .sk{transform:none}
 body.wait .ld{opacity:1}
 body.wait .mid .cb.big{opacity:0}
 @keyframes sp{to{transform:rotate(360deg)}}
-@media (max-width:430px){.cb.s2{display:none}.mid{gap:12px}}
-@media (max-width:330px){.vw{display:none}}
+@media (max-width:420px){.cb{width:38px;height:38px}.cb.big{width:50px;height:50px}.cb.sm{width:30px;height:30px}.mid{gap:10px}.cb .i{width:18px;height:18px}.cb.big .i{width:24px;height:24px}}
+@media (max-width:330px){.cb{width:34px;height:34px}.cb.big{width:44px;height:44px}.cb.sm{width:28px;height:28px}.mid{gap:6px}}
 @media (max-height:170px){.cb.big{width:44px;height:44px}.mid{top:48%}.pills{bottom:46px}}
 </style></head><body class="wait">
 <video id="v" playsinline preload="auto"></video>
@@ -110,7 +116,7 @@ body.wait .mid .cb.big{opacity:0}
   <div class="shade"></div><div class="shadeb"></div>
   <div class="top" id="top">
     <div class="tt" id="tt"></div>
-    <button class="ib" id="ret" title="Повернути в програму"><span data-i="fs"></span></button>
+    <button class="ib" id="ret" title="На весь екран"><span data-i="fs"></span></button>
     <button class="ib x" id="cls" title="Закрити"><span data-i="close"></span></button>
   </div>
   <div class="mid">
@@ -125,15 +131,16 @@ body.wait .mid .cb.big{opacity:0}
     <span id="cur">0:00</span>
     <div class="tr" id="tr"><div class="tbar"><div class="tfill" id="fill"></div></div><div class="knob" id="knob"></div></div>
     <span id="rem">0:00</span>
-    <div class="vw" id="vw"><div class="vsl"><input type="range" id="vr" min="0" max="100" step="1" value="100"></div><button class="xb" id="vb"><span data-i="vol"></span></button></div>
+    <button class="xb" id="vb" title="Гучність"><span data-i="vol"></span></button>
   </div>
+  <div class="vpop hide" id="vpop"><button class="vmb" id="vmb" title="Вимкнути / увімкнути звук"><span data-i="vol"></span></button><div class="vsl" id="vsl"><input type="range" id="vr" min="0" max="100" step="1" value="100"><span class="m100" id="m100"></span></div><b id="vn">100%</b></div>
 </div>
 <script>
 (function () {
   const $ = s => document.querySelector(s), V = $('#v'), root = document.documentElement;
   const wv = window.chrome && window.chrome.webview;
   const send = o => { try { wv.postMessage('main>' + JSON.stringify(o)); } catch (e) {} };
-  const D = {skips: {}, hasPrev: false, hasNext: false, nx: null}; let icons = {}, fromMain = 0, loading = true, hideT = 0, start = null, shownKey = '';
+  const D = {skips: {}, hasPrev: false, hasNext: false, nx: null}; let icons = {}, hand = false, loading = true, hideT = 0, start = null, shownKey = '', nxHold = false;
   const fmt = t => { t = Math.max(0, Math.floor(t || 0)); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = t % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0'); };
   const ico = n => icons[n] || '';
   function paintIcons() { document.querySelectorAll('[data-i]').forEach(e => { e.innerHTML = ico(e.dataset.i); }); ppIcon(); }
@@ -155,6 +162,7 @@ body.wait .mid .cb.big{opacity:0}
   }
   function paintPills() {
     const d = V.duration || 0, t = V.currentTime || 0; let key = '', html = '';
+    if (loading || nxHold) { if (shownKey) { shownKey = ''; $('#pills').innerHTML = ''; } return; }  // нова серія стартує — кнопки «наступна серія» зникають
     if (D.nx) {
       key = 'nx' + D.nx.n + ':' + D.nx.left;
       html = `<button class="skb nx" data-a="next">${ico('next')}<span>Наступна серія ${D.nx.n}</span><em>${D.nx.left}</em></button><button class="skb alt" data-a="nxc"><span>Скасувати</span></button>`;
@@ -169,11 +177,33 @@ body.wait .mid .cb.big{opacity:0}
   $('#pills').addEventListener('click', ev => {
     const b = ev.target.closest('[data-a]'); if (!b) return; const a = b.dataset.a;
     if (a === 'skip') { send({t: 'skip', k: b.dataset.k}); shownKey = ''; $('#pills').innerHTML = ''; }
-    else if (a === 'next') send({t: 'cmd', c: 'next'});
+    else if (a === 'next') { nxHold = true; D.nx = null; send({t: 'cmd', c: 'next'}); setTimeout(() => { nxHold = false; }, 6000); }
     else if (a === 'nxc') send({t: 'cmd', c: 'nxcancel'});
   });
-  function vol() { const r = $('#vr'); r.style.setProperty('--p', r.value + '%'); $('#vb').classList.toggle('muted', V.muted || V.volume === 0); }
-  function tick() { if (loading) return; send({t: 'tick', cur: V.currentTime, dur: V.duration, paused: V.paused}); }
+  // гучність: як у плеєрі програми — у відсотках, до 100% або до 200% (Web Audio)
+  let VM = 100, own = false, PV = 100, prevV = 100, AUD = null;
+  function applyP(p, notify) {
+    p = Math.max(0, Math.min(VM, Math.round(p))); PV = p;
+    if (own) {
+      if (!AUD && p === 100) { V.volume = 1; V.muted = false; }
+      else {
+        try {
+          if (!AUD) { const C = window.AudioContext || window.webkitAudioContext, ctx = new C(), src = ctx.createMediaElementSource(V), g = ctx.createGain(); src.connect(g); g.connect(ctx.destination); AUD = {ctx, g}; }
+          V.volume = 1; V.muted = false; AUD.g.gain.value = p / 100; if (AUD.ctx.state !== 'running') AUD.ctx.resume().catch(() => {});
+        } catch (e) { V.volume = Math.min(1, p / 100); }
+      }
+    } else { V.volume = Math.min(1, p / 100); V.muted = false; }
+    paintVol(); if (notify) send({t: 'vol', p});
+  }
+  function paintVol() {
+    const r = $('#vr'), pop = $('#vpop'), sl = $('#vsl'); r.max = VM; r.value = PV;
+    sl.style.setProperty('--p', (PV / VM * 100) + '%'); sl.style.setProperty('--bs', (PV > 100 ? 100 / PV * PV / VM * 100 : PV / VM * 100) + '%');
+    const mk = $('#m100'); mk.style.display = VM > 100 ? 'block' : 'none'; mk.style.left = 'calc(' + (100 / VM * 100) + '% - 1px)';
+    $('#vn').textContent = PV + '%'; pop.classList.toggle('boost', PV > 100); pop.classList.toggle('at100', VM > 100 && PV === 100); pop.classList.toggle('mut', PV === 0);
+    $('#vb').classList.toggle('muted', PV === 0);
+  }
+  function muteToggle() { if (PV > 0) { prevV = PV; applyP(0, true); } else applyP(prevV || 100, true); }
+  function tick() { if (loading || hand) return; send({t: 'tick', cur: V.currentTime, dur: V.duration, paused: V.paused}); }
   setInterval(() => { tick(); paintTime(); paintPills(); }, 250);
   function showUi() { document.body.classList.add('show'); clearTimeout(hideT); hideT = setTimeout(() => { if (!document.querySelector('.ov :hover') || true) document.body.classList.remove('show'); }, 2800); }
   ['mousemove', 'pointerdown', 'wheel'].forEach(e => document.addEventListener(e, showUi, {passive: true}));
@@ -191,10 +221,11 @@ body.wait .mid .cb.big{opacity:0}
   $('#pp').onclick = () => { V.paused ? V.play().catch(() => {}) : V.pause(); };
   $('#bk').onclick = () => seekTo(V.currentTime - 10); $('#fw').onclick = () => seekTo(V.currentTime + 10);
   $('#pv').onclick = () => send({t: 'cmd', c: 'prev'}); $('#nt').onclick = () => send({t: 'cmd', c: 'next'});
-  $('#cls').onclick = () => send({t: 'cmd', c: 'close'}); $('#ret').onclick = () => send({t: 'cmd', c: 'return'});
-  $('#vb').onclick = () => { V.muted = !V.muted; if (!V.muted && V.volume === 0) V.volume = .5; };
-  $('#vr').addEventListener('input', () => { V.muted = false; V.volume = $('#vr').value / 100; });
-  V.addEventListener('volumechange', () => { const r = $('#vr'); r.value = Math.round(V.volume * 100); vol(); if (!fromMain) send({t: 'vol', v: V.volume, m: V.muted}); });
+  $('#cls').onclick = () => send({t: 'cmd', c: 'close'}); $('#ret').onclick = () => send({t: 'cmd', c: 'fs'});
+  $('#vb').onclick = ev => { ev.stopPropagation(); if (!own) { V.muted = !V.muted; return; } $('#vpop').classList.toggle('hide'); paintVol(); showUi(); };
+  $('#vmb').onclick = ev => { ev.stopPropagation(); muteToggle(); };
+  $('#vr').addEventListener('input', () => { let p = parseInt($('#vr').value, 10); if (VM > 100 && Math.abs(p - 100) <= 4) { p = 100; $('#vr').value = 100; } applyP(p, true); showUi(); });
+  document.addEventListener('pointerdown', e => { if (!e.target.closest('#vpop,#vb')) $('#vpop').classList.add('hide'); });
   const tr = $('#tr'); let drag = false;
   const trSeek = e => { const r = tr.getBoundingClientRect(); seekTo((V.duration || 0) * Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))); };
   tr.addEventListener('pointerdown', e => { drag = true; tr.setPointerCapture(e.pointerId); trSeek(e); });
@@ -203,8 +234,8 @@ body.wait .mid .cb.big{opacity:0}
   document.addEventListener('keydown', e => {
     if (e.key === ' ') { e.preventDefault(); V.paused ? V.play().catch(() => {}) : V.pause(); }
     else if (e.key === 'ArrowLeft') seekTo(V.currentTime - 5); else if (e.key === 'ArrowRight') seekTo(V.currentTime + 5);
-    else if (e.key === 'ArrowUp') { V.muted = false; V.volume = Math.min(1, V.volume + .05); } else if (e.key === 'ArrowDown') V.volume = Math.max(0, V.volume - .05);
-    else if (e.key === 'm' || e.key === 'M') V.muted = !V.muted; showUi();
+    else if (e.key === 'ArrowUp') applyP(PV + 5, true); else if (e.key === 'ArrowDown') applyP(PV - 5, true);
+    else if (e.key === 'm' || e.key === 'M') muteToggle(); showUi();
   });
   ['play', 'pause'].forEach(e => V.addEventListener(e, () => { ppIcon(); tick(); showUi(); }));
   V.addEventListener('seeked', () => { send({t: 'seeked', cur: V.currentTime}); wait(false); });
@@ -213,30 +244,36 @@ body.wait .mid .cb.big{opacity:0}
   V.addEventListener('loadedmetadata', () => {
     paintMarks(); paintTime();
     if (V.videoWidth && V.videoHeight) { try { wv.postMessage('ar:' + (V.videoWidth / V.videoHeight)); } catch (e) {} }
-    if (start) { const s = start; start = null; if (s.cur > 0.5) V.currentTime = s.cur; loading = false; wait(false); if (!s.paused) V.play().catch(() => {}); ppIcon(); tick(); }
+    if (start) { if (start.cur > 0.5) V.currentTime = start.cur; if (!start.hand) { const s = start; start = null; loading = false; wait(false); if (!s.paused) V.play().catch(() => {}); ppIcon(); tick(); } }
   });
+  V.addEventListener('canplay', () => { if (start && start.hand && !start.sent) { start.sent = true; send({t: 'cp'}); } });
   V.addEventListener('error', () => { wait(false); send({t: 'error'}); });
   function load(m) {
     if (m.icons) { icons = m.icons; }
     if (m.ac) root.style.setProperty('--ac', m.ac);
     paintIcons();
-    D.skips = m.skips || {}; D.hasPrev = !!m.hasPrev; D.hasNext = !!m.hasNext; D.nx = null; shownKey = '';
+    D.skips = m.skips || {}; D.hasPrev = !!m.hasPrev; D.hasNext = !!m.hasNext; D.nx = null; shownKey = ''; nxHold = false; $('#pills').innerHTML = '';
     $('#tt').innerHTML = '<span></span><small></small>'; $('#tt span').textContent = m.title || ''; $('#tt small').textContent = m.sub || '';
     $('#pv').classList.toggle('off', !D.hasPrev); $('#nt').classList.toggle('off', !D.hasNext);
-    fromMain++; try { V.volume = m.vol == null ? 1 : Math.max(0, Math.min(1, m.vol)); V.muted = !!m.muted; V.playbackRate = m.rate || 1; } catch (e) {} setTimeout(() => { fromMain = Math.max(0, fromMain - 1); }, 60);
-    $('#vr').value = Math.round(V.volume * 100); vol();
-    loading = true; wait(true); start = {cur: m.cur || 0, paused: !!m.paused};
+    VM = m.vmax >= 200 ? 200 : 100; own = !!m.own; V.playbackRate = m.rate || 1; $('#vb').classList.toggle('hide', false); applyP(m.p == null ? 100 : m.p, false);
+    loading = true; wait(true); hand = !!m.hand; start = {cur: m.cur || 0, paused: !!m.paused, hand: hand};
     V.src = m.src; V.load(); ppIcon(); showUi();
   }
   window.__pipIn = m => {
     if (!m) return;
     switch (m.t) {
       case 'init': case 'src': load(m); break;
-      case 'loading': loading = true; wait(true); V.pause(); break;
+      case 'loading': D.nx = null; loading = true; hand = false; start = null; wait(true); V.pause(); break;
+      case 'go':  // головний плеєр передав відео: той самий момент і той самий стан (пауза / відтворення)
+        hand = false; loading = false; wait(false);
+        if (start) { start = null; }
+        if (Math.abs(V.currentTime - (m.cur || 0)) > 0.35) V.currentTime = m.cur || 0;
+        if (!m.paused) V.play().catch(() => {}); ppIcon(); tick(); break;
       case 'cmd':
+        if (start && !start.hand) { if (m.c === 'play') start.paused = false; else if (m.c === 'pause') start.paused = true; else if (m.c === 'seek') start.cur = m.v || 0; break; }
         if (m.c === 'play') V.play().catch(() => {}); else if (m.c === 'pause') V.pause(); else if (m.c === 'seek') { V.currentTime = m.v || 0; }
         break;
-      case 'vol': fromMain++; try { V.volume = m.v; V.muted = !!m.m; } catch (e) {} setTimeout(() => { fromMain = Math.max(0, fromMain - 1); }, 60); break;
+      case 'vol': applyP(m.p, false); break;
       case 'rate': try { V.playbackRate = m.v || 1; } catch (e) {} break;
       case 'skips': D.skips = m.skips || {}; paintMarks(); shownKey = ''; break;
       case 'nav': D.hasPrev = !!m.hasPrev; D.hasNext = !!m.hasNext; $('#pv').classList.toggle('off', !D.hasPrev); $('#nt').classList.toggle('off', !D.hasNext); break;
@@ -8600,7 +8637,7 @@ SYNC_SETTINGS_KEYS = ['view', 'auto_skip', 'auto_skip_opening', 'auto_skip_endin
                       'np_ep_cover', 'hide_psave', 'auto_arc', 'skip_mode', 'vol_max', 'own_vol', 'recent_min', 'site_order', 'dub_fav', 'dub_prio', 'fx_style']
 SYNC_GROUPS = {'view': ['view'], 'player': ['auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'skip_mode', 'vol_max', 'own_vol', 'np_ep_cover', 'hide_psave', 'auto_arc']}
 SYNC_SCOPES = ('all', 'view', 'player', 'other')
-SYNC_ALWAYS = ('fx_style',)  # анімація передачі синхронізується завжди, незалежно від груп
+SYNC_ALWAYS = ('fx_style', 'site_order', 'dub_fav', 'dub_prio')  # анімація передачі синхронізується завжди, незалежно від груп
 
 
 def _sgroup(k):
@@ -8640,7 +8677,7 @@ def _sync_state():
     st.setdefault('id', uuid.uuid4().hex[:16])
     st.setdefault('epoch', uuid.uuid4().hex[:12])
     st.setdefault('name', 'iPhone' if nm.lower() in ('localhost', 'iphone', '') else nm)
-    for k, v in (('sync', bool(st.get('enabled'))), ('sync_settings', False), ('sync_view', True), ('sync_player', True), ('sync_other', bool(st.get('sync_settings'))), ('seq', 0), ('clock', 0), ('regs', {}), ('last', {}), ('peers', {}), ('kind', 'phone'), ('name_user', False)):
+    for k, v in (('sync', bool(st.get('enabled'))), ('sync_settings', False), ('sync_view', True), ('sync_player', True), ('sync_other', bool(st.get('sync_settings'))), ('seq', 0), ('clock', 0), ('gone', {}), ('regs', {}), ('last', {}), ('peers', {}), ('kind', 'phone'), ('name_user', False)):
       st.setdefault(k, v)
     SYNC['st'] = st
     return st
@@ -8731,7 +8768,10 @@ def _sync_snapshot(st):
     out['go/' + gid] = (json.dumps(kids), kids, None)
   for k in SYNC_SETTINGS_KEYS:
     if k in SETTINGS and _sync_group_on(st, k):
-      out['s/' + k] = (json.dumps(SETTINGS[k]), SETTINGS[k], None)
+      sv = SETTINGS[k]
+      if k == 'view' and isinstance(sv, dict):
+        sv = {a: b for a, b in sv.items() if a != 'cols'}  # «Колонок у сітці» не синхронізується — залежить від екрана
+      out['s/' + k] = (json.dumps(sv), sv, None)
   with _NOTIF_LOCK:  # повідомлення: нові, прочитані (read у значенні) і видалені (див. _sync_scan) синхронізуються повністю
     for x in NOTIFS:
       out['nt/' + x['id']] = (_nt_hash(x), json.loads(json.dumps(x, ensure_ascii=False)), None)
@@ -8845,6 +8885,9 @@ def _sync_apply_one(st, k, r):
   if kind == 's':
     if parts[1] in SYNC_SETTINGS_KEYS and _sync_group_on(st, parts[1]):
       before = json.dumps(SETTINGS.get(parts[1]))
+      if parts[1] == 'view' and isinstance(v, dict):
+        v = {**v, **({'cols': SETTINGS['view']['cols']} if isinstance(SETTINGS.get('view'), dict) and 'cols' in SETTINGS['view'] else {})}
+        v = {a: b for a, b in v.items() if a != 'cols' or isinstance(SETTINGS.get('view'), dict) and 'cols' in SETTINGS['view']}
       api_settings({parts[1]: v})
       last[k] = json.dumps(SETTINGS.get(parts[1]))
       return last[k] != before  # зміна → піднімаємо «gen», і відкритий інтерфейс сам підтягне нові налаштування
@@ -9252,6 +9295,7 @@ class _SyncHandler(BaseHTTPRequestHandler):
                                    'out_seq': 0, 'epoch': '', 'last': 0, 't0': time.time()}
           _sync_save()
         SYNC['pending'] = None
+        (st.get('gone') or {}).pop(pd['id'], None)
         SYNC['wake'].set()
         return self._send({'ok': True, 'secret': secret, 'id': st['id'], 'name': st['name'], 'kind': st['kind'], 'port': SYNC_PORT})
       pid = self.headers.get('X-Sync-Id') or ''
@@ -9308,9 +9352,34 @@ def _sync_command(body, pid=None):
       SYNC['offer'] = {'hid': uuid.uuid4().hex[:10], 'from': str(body.get('from') or '')[:30], 'n': len(vals), 'scope': body.get('scope') if body.get('scope') in SYNC_SCOPES else 'all', 'settings': {k: v for k, v in vals.items() if k in SYNC_SETTINGS_KEYS}, 'ts': time.time()}
     return {'ok': True}
   if body.get('type') == 'ping':
-    return {'ok': True, 'sync': bool(_sync_state().get('sync'))}
+    return {'ok': True, 'sync': bool(_sync_state().get('sync')), 'pids': list(_sync_state()['peers'])}
   if body.get('type') == 'unpair' and pid:
     _sync_drop_peer(pid)
+    return {'ok': True}
+  if body.get('type') == 'introduce' and pid:  # пристрій групи знайомить нас з іншим пристроєм групи (спільний секрет)
+    st = _sync_state()
+    nid = str(body.get('id') or '')
+    if not nid or nid == st['id'] or nid in (st.get('gone') or {}) or not body.get('secret'):
+      return {'ok': True}
+    with SYNC_LOCK:
+      old = st['peers'].get(nid)
+      if old is None or (old.get('via') and pid <= old['via']):
+        st['peers'][nid] = {**(old or {}), 'name': str(body.get('name') or '')[:40], 'kind': str(body.get('kind') or 'phone')[:10], 'secret': str(body['secret']),
+                            'addr': str(body.get('addr') or ''), 'port': int(body.get('port') or SYNC_PORT), 'via': pid, 'in_seq': 0, 'out_seq': 0, 'epoch': '', 'last': 0,
+                            't0': (old or {}).get('t0') or time.time()}
+        SYNC['gen'] += 1
+        _sync_save()
+    SYNC['wake'].set()
+    return {'ok': True}
+  if body.get('type') == 'forget' and pid:  # інший пристрій групи видалив цей пристрій — забуваємо його теж
+    st = _sync_state()
+    nid = str(body.get('id') or '')
+    if nid and nid != st['id']:
+      st.setdefault('gone', {})[nid] = time.time()
+      if nid in st['peers']:
+        _sync_drop_peer(nid)
+      else:
+        _sync_save()
     return {'ok': True}
   if body.get('type') == 'handoff':
     if not SETTINGS.get('handoff'):
@@ -9450,6 +9519,31 @@ def _sync_scan_net():
     list(ex.map(probe, range(1, 255)))
 
 
+def _sync_mesh(xid, xpids):
+  """Група пристроїв: якщо в мене є два пристрої, які не знають одне одного — знайомлю їх (спільний секрет), а про видалені — нагадую."""
+  st = _sync_state()
+  gone = st.get('gone') or {}
+  for gid, t in list(gone.items()):
+    if time.time() - t > 3 * 86400:
+      gone.pop(gid, None)
+    elif (xid, gid) not in SYNC.setdefault('fsent', set()) and gid != xid:
+      _peer_cmd(xid, {'type': 'forget', 'id': gid}, 3)
+      SYNC['fsent'].add((xid, gid))
+  if not isinstance(xpids, list):
+    return
+  ok = lambda i: (SYNC['status'].get(i) or {}).get('ok')
+  for yid, y in list(st['peers'].items()):
+    if yid == xid or yid in xpids or yid in gone or not ok(yid) or not ok(xid):
+      continue
+    x = st['peers'].get(xid)
+    if not x:
+      return
+    sec = secrets.token_hex(32)
+    mk = lambda p, i: {'type': 'introduce', 'id': i, 'name': p.get('name'), 'kind': p.get('kind'), 'addr': p.get('addr'), 'port': p.get('port', SYNC_PORT), 'secret': sec}
+    _peer_cmd(xid, mk(y, yid), 4)
+    _peer_cmd(yid, mk(x, xid), 4)
+
+
 def _sync_loop():
   n = 0
   while True:
@@ -9474,6 +9568,10 @@ def _sync_loop():
       try:
         r = _peer_cmd(pid, {'type': 'ping'}, 4)
         SYNC['status'][pid] = {'ok': True, 't': time.time(), 'sync': bool(r.get('sync'))}
+        try:
+          _sync_mesh(pid, r.get('pids'))
+        except Exception:
+          pass
         if st.get('sync') and r.get('sync'):
           _sync_exchange(pid)
       except Exception as ex:
@@ -9668,6 +9766,7 @@ def api_sync_code(code):
     raise ValueError('Запит спарювання застарів — почніть ще раз')
   r = _sync_http(po['addr'], po['port'], '/sync/pair_confirm', {'id': st['id'], 'code': str(code or '').strip(), 'port': SYNC_PORT})
   with SYNC_LOCK:
+    (st.get('gone') or {}).pop(po['id'], None)
     st['peers'][po['id']] = {'name': r.get('name') or po['name'], 'kind': r.get('kind') or po.get('kind', 'phone'), 'secret': r['secret'], 'addr': po['addr'],
                              'port': int(r.get('port') or po['port']), 'in_seq': 0, 'out_seq': 0, 'epoch': '', 'last': 0, 't0': time.time()}
     _sync_save()
@@ -9685,7 +9784,17 @@ def api_sync_unpair(pid):
   with SYNC_LOCK:
     st['peers'].pop(pid, None)
     SYNC['status'].pop(pid, None)
+    st.setdefault('gone', {})[pid] = time.time()
     _sync_save()
+  SYNC['wake'].set()
+  for oid in list(st['peers']):  # решта групи теж має дізнатись, що пристрій видалено
+    def _f(oid=oid):
+      try:
+        _peer_cmd(oid, {'type': 'forget', 'id': pid}, 3)
+        SYNC.setdefault('fsent', set()).add((oid, pid))
+      except Exception:
+        pass
+    threading.Thread(target=_f, daemon=True).start()
   return api_sync_state()
 
 
@@ -10279,7 +10388,7 @@ body.pl{overflow:hidden!important}
 .bar{position:sticky;top:0;z-index:20;transform:translateZ(0);-webkit-backface-visibility:hidden;backface-visibility:hidden;display:flex;align-items:center;gap:8px;
   padding:calc(10px + var(--top)) 14px 10px;background:rgba(13,14,19,.82);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d}
-#root .bar{position:fixed;top:0;left:0;right:0;padding-left:calc(14px + var(--lft));padding-right:calc(14px + var(--rgt));background:rgba(13,14,19,.94)}
+#root .bar{position:fixed;top:0;left:0;right:0;padding-left:calc(14px + var(--lft));padding-right:calc(14px + var(--rgt));background:rgba(13,14,19,.9);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-bottom:1px solid #ffffff12}  /* та сама прозорість, що в нижньої панелі */
 #root:has(.bar){padding-top:var(--barh,calc(58px + var(--top)))}
 html,body,#root{overflow-anchor:none}/* перемальовування списку (морфінг) не має зсувати прокрутку «якорем» браузера */
 .hdr2{position:sticky;top:var(--barh,58px);z-index:19;background:rgba(13,14,19,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid #ffffff0d;max-height:55vh;overflow-y:auto;will-change:transform,opacity;transition:transform .55s cubic-bezier(.32,.72,0,1),opacity .45s ease}
@@ -11190,6 +11299,59 @@ html[data-pc] .skwrap.ui{bottom:calc(62px + var(--pcl))}
 html[data-pc] .skwrap.vol{bottom:calc(116px + var(--pcl))}
 @media (orientation:landscape){html[data-pc] .skwrap.ui{bottom:calc(52px + var(--pcl))}}
 html[data-pc] .skwrap:not(.ui):not(.vol){bottom:calc(14px + var(--pcl) - 8px)}
+/* положення кнопки «Пропустити»: над нижньою панеллю (ui) та над повзунком гучності (vol) з однаковим відступом */
+.skwrap.ui{bottom:calc(72px + var(--bot))}.skwrap.vol{bottom:calc(108px + var(--bot))}
+@media (orientation:landscape){.skwrap.ui{bottom:calc(64px + min(var(--bot),6px))}.skwrap.vol{bottom:calc(104px + min(var(--bot),6px))}}
+html[data-pc] .skwrap.ui{bottom:calc(70px + var(--pcl))}html[data-pc] .skwrap.vol{bottom:calc(108px + var(--pcl))}
+
+/* ===== ПК: наведення миші, великі вікна, прокрутка озвучок ===== */
+@media (hover:hover){
+html[data-pc] .card .poster{transition:transform .22s cubic-bezier(.2,.8,.2,1),box-shadow .22s,filter .22s}
+html[data-pc] body:not(.dragging) .card:not(.reo):not(.drag):hover .poster{transform:translateY(-4px) scale(1.025);box-shadow:0 14px 30px #0009,0 0 0 1px #ffffff26;filter:brightness(1.07)}
+html[data-pc] .card:not(.reo):hover .t{color:#fff}
+html[data-pc] .btn,html[data-pc] .ib,html[data-pc] .dchip,html[data-pc] .chip,html[data-pc] .dtabs button,html[data-pc] .srcs button,html[data-pc] .acts button,html[data-pc] #tabs button,html[data-pc] .cm button{transition:background .16s,transform .16s,filter .16s,box-shadow .16s,color .16s}
+html[data-pc] .btn:not(:disabled):hover,html[data-pc] .ib:not(:disabled):hover{filter:brightness(1.22);transform:translateY(-1px)}
+html[data-pc] .btn.pri:not(:disabled):hover{box-shadow:0 6px 18px color-mix(in srgb,var(--ac) 45%,transparent)}
+html[data-pc] .btn:not(:disabled):active,html[data-pc] .ib:not(:disabled):active{transform:translateY(0) scale(.97)}
+html[data-pc] .dchip:not(.on):hover,html[data-pc] .dtabs button:not(.on):hover,html[data-pc] .srcs button:not(.on):hover{background:#ffffff1c;transform:translateY(-1px)}
+html[data-pc] #tabs button:hover{filter:brightness(1.3)}
+html[data-pc] #tabs button:hover .i{transform:translateY(-1px) scale(1.08)}
+html[data-pc] #tabs button .i{transition:transform .16s}
+html[data-pc] .ep,html[data-pc] .ec,html[data-pc] .erm{transition:background .15s,transform .15s}
+html[data-pc] .ep:hover{background:#ffffff0d}
+html[data-pc] .ec:hover{transform:translateY(-2px)}
+html[data-pc] .dvcard.dev,html[data-pc] .dvcard.dvsw,html[data-pc] .set .row,html[data-pc] .cm button{transition:background .15s,transform .15s}
+html[data-pc] .dvcard.dev:hover,html[data-pc] .dvcard.dvsw:hover{background:var(--s2);transform:translateX(2px)}
+html[data-pc] .cm button:hover,html[data-pc] .sheet .row:hover{background:#ffffff12}
+html[data-pc] .rgrid>*:hover{transform:translateY(-3px)}
+html[data-pc] .rgrid>*{transition:transform .2s}
+}
+html[data-pc] .card.reo .arws{display:none}
+@media (min-width:700px){#root .bar .btn[data-act=reorder]{flex:none;width:auto;min-width:150px;padding-left:18px;padding-right:18px}.dlbar.lbr{width:min(440px,calc(100% - 20px))!important;min-width:0!important;max-width:440px}.dlbar:not(.lbr){max-width:640px}}
+html[data-pc] .dubs,html[data-pc] .srcs{flex-wrap:wrap;overflow-x:hidden;overflow-y:auto;max-height:142px;scrollbar-width:thin;scrollbar-color:#ffffff30 transparent}
+html[data-pc] .dubs::-webkit-scrollbar,html[data-pc] .srcs::-webkit-scrollbar{display:block;width:6px}
+html[data-pc] .dubs::-webkit-scrollbar-thumb,html[data-pc] .srcs::-webkit-scrollbar-thumb{background:#ffffff30;border-radius:3px}
+html[data-pc] .dublist{scrollbar-width:thin}
+@media (min-width:1400px){
+  .grid{grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:20px;padding:20px 28px}
+  .grid.c3{grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}
+  .grid .card .t{font-size:14px}
+  .set,.grp,#root.settings-pg>*:not(.bar){max-width:900px}
+  #root.detail{max-width:1560px}
+  .epgrid{grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px}
+}
+@media (min-width:1900px){
+  .grid{grid-template-columns:repeat(auto-fill,minmax(236px,1fr));gap:24px;padding:24px 36px}
+  .grid.c3{grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}
+  .grid .card .t{font-size:15px}
+  .set,.grp,#root.settings-pg>*:not(.bar){max-width:1040px}
+  #root.detail{max-width:1800px}
+  .epgrid{grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+  .rgrid{grid-template-columns:repeat(auto-fill,minmax(156px,1fr))}
+}
+@media (orientation:landscape){html[data-pc] .skwrap.ui{bottom:calc(66px + var(--pcl))}html[data-pc] .skwrap.vol{bottom:calc(106px + var(--pcl))}}
+.vmb{border:0;background:none;color:inherit;padding:0;margin:0;width:26px;height:26px;display:grid;place-items:center;flex:none;border-radius:9px;transition:opacity .15s,transform .15s}.vmb:active{transform:scale(.9)}
+.vvp.mut .vmb{opacity:.45}.vc .sk .xb.muted{opacity:.6}
 .pcm{position:fixed;z-index:100000;max-height:min(62vh,440px);overflow:auto;padding:6px;border-radius:16px;background:rgba(28,30,44,.9);-webkit-backdrop-filter:blur(24px) saturate(1.4);backdrop-filter:blur(24px) saturate(1.4);border:1px solid #ffffff1c;box-shadow:0 18px 50px #000b;animation:pcmin .14s ease}
 .pcm button{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;color:var(--tx);padding:11px 12px;border-radius:11px;font-size:15px;text-align:left;cursor:default;white-space:nowrap}
 .pcm button:hover{background:#ffffff12}
@@ -11321,7 +11483,7 @@ html[data-pc].pcfs .vc .sk{left:28px;right:28px}
         <button class="cb" id="vfwd" aria-label="Вперед 10 с"><i data-ico="fwd10"></i></button>
         <button class="cb sm" data-act="pnext" aria-label="Наступна серія"><i data-ico="next"></i></button>
       </div>
-      <div class="vvp hide" id="vvp"><i data-ico="vol"></i><div class="vsl" id="vsl"><input type="range" id="vvr" min="0" max="100" step="1" value="100" aria-label="Гучність"><span class="v100" id="v100"></span></div><b id="vvn">100%</b></div>
+      <div class="vvp hide" id="vvp"><button class="vmb" id="vmb" aria-label="Вимкнути або увімкнути звук"><i data-ico="vol"></i></button><div class="vsl" id="vsl"><input type="range" id="vvr" min="0" max="100" step="1" value="100" aria-label="Гучність"><span class="v100" id="v100"></span></div><b id="vvn">100%</b></div>
       <div class="sk"><span id="vcur">0:00</span><div class="tr" id="vtr"><div class="tbar"><div class="tfill" id="vfill"></div></div><div class="knob" id="vknob"></div><input type="range" id="vseek" min="0" max="1000" value="0" step="1"></div><span id="vrem">0:00</span>
         <button class="xb" id="psbtn" data-act="pset" aria-label="Налаштування плеєра"><i data-ico="cog"></i></button>
         <button class="xb" id="vvol" aria-label="Гучність"><i data-ico="vol"></i></button>
@@ -11602,7 +11764,7 @@ function setMirror(v) {
 }
 function pollMirror() { if (IOS_APP) api('/api/net').then(r => { setMirror(!!r.captured); uiStuck(); }).catch(() => {}); }
 setInterval(pollMirror, 1500);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { pollMirror(); setTimeout(uiStuck, 300); } });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { pollMirror(); setTimeout(uiStuck, 300); if (S.libLoaded && !S.cur) loadLib('vis').catch(() => {}); } });
 window.addEventListener('pageshow', () => { pollMirror(); setTimeout(uiStuck, 300); });
 async function pollNet() {
   let st = 'online', ifn = '';
@@ -12427,10 +12589,15 @@ function ago(ts) {
   return Math.round(d / 86400) + ' дн тому';
 }
 S.notifs = {items: [], unread: 0};
+function notifFresh(j) {  // з'явилось нове повідомлення про серію — карточки в бібліотеці (33/34, тег «Нова») треба оновити
+  const ids = new Set((S.notifs.items || []).map(x => x.id));
+  return (j.items || []).some(x => !ids.has(x.id) && x.type === 'new');
+}
 async function pollNotifs() {
   try {
-    const j = await api('/api/notifs'), old = S.notifs.unread;
+    const j = await api('/api/notifs'), old = S.notifs.unread, fresh = notifFresh(j);
     S.notifs = j;
+    if (fresh) loadLib('vis').catch(() => {});
     if (S.sheet && S.sheet.kind === 'notifs') renderSheet();
     else if (old !== j.unread && route().name === 'home' && !S.sheet && !S.reorder) render();
   } catch (e) { /* сервер недоступний */ }
@@ -12444,7 +12611,7 @@ function notifBadge() {  // значок на дзвіночку оновлює�
 }
 setInterval(async () => {  // повідомлення синхронізуються між пристроями — значок має не відставати
   if (document.hidden) return;
-  try { const j = await api('/api/notifs'); if (j.unread !== S.notifs.unread || (j.items || []).length !== (S.notifs.items || []).length) { S.notifs = j; if (S.sheet && S.sheet.kind === 'notifs') renderSheet(); notifBadge(); } } catch (e) {}
+  try { const j = await api('/api/notifs'); if (j.unread !== S.notifs.unread || (j.items || []).length !== (S.notifs.items || []).length) { const fresh = notifFresh(j); S.notifs = j; if (fresh) loadLib('vis').catch(() => {}); if (S.sheet && S.sheet.kind === 'notifs') renderSheet(); notifBadge(); } } catch (e) {}
 }, 3000);
 setInterval(async () => {  // завантаження можуть початися самі (команда з іншого пристрою) — підхоплюємо без ручного відкриття списку
   if (document.hidden || pollTimer) return;
@@ -14418,6 +14585,7 @@ function libEdgeGap(x) {  // довге натискання на вузькій
 document.addEventListener('pointerdown', ev => {
   if (['home', 'group'].includes(route().name) && !S.cur && !S.sheet && !(ev.target.closest && ev.target.closest('input,textarea'))) document.body.classList.add('pressing');
   if (!['home', 'group'].includes(route().name) || S.cur || S.sheet) return;
+  if (PC_APP && ev.pointerType === 'mouse' && ev.button !== 0) return;  // ПК: права кнопка — меню, не редагування
   const c = ev.target.closest && ev.target.closest('.card[data-id]');
   if (DR.on) {  // другий палець: дотик по картці додає її в стос, рух — прокручує сторінку
     if (ev.pointerId !== DR.pid && !DR.aux) DR.aux = {pid: ev.pointerId, y: ev.clientY, y0: ev.clientY, card: c, moved: false};
@@ -14435,13 +14603,25 @@ document.addEventListener('pointerdown', ev => {
     }, 450);
     return;
   }
+  DR.t0 = Date.now(); DR.pc = PC_APP && ev.pointerType === 'mouse';
   DR.timer = setTimeout(() => {
     DR.timer = null;
     if (S.reorder) drStart(c);  // у режимі редагування — перетягування
+    else if (DR.pc) { pcEnterEdit(c); }  // ПК: довге утримання без руху — виділяє картку й вмикає редагування
     else if (c.dataset.gid) { LP.t = Date.now(); try { getSelection().removeAllRanges(); } catch (e) {} if (navigator.vibrate) try { navigator.vibrate(15); } catch (e) {} openSheet('cmenu', {gid: c.dataset.gid, rect: c.getBoundingClientRect()}); }
     else { LP.t = Date.now(); try { getSelection().removeAllRanges(); } catch (e) {} if (navigator.vibrate) try { navigator.vibrate(15); } catch (e) {} openSheet('cmenu', {id: c.dataset.id, rect: c.getBoundingClientRect()}); }  // довге натискання на картку — меню
-  }, S.reorder ? 200 : 480);
+  }, S.reorder ? 200 : DR.pc ? 650 : 480);
 });
+function pcEnterEdit(c, drag) {  // ПК: вхід у редагування з картки (виділяє її); drag — одразу починаємо перетягування
+  const id = c.dataset.id, gid = c.dataset.gid;
+  LP.t = Date.now(); try { getSelection().removeAllRanges(); } catch (e) {}
+  if (!gid && id) S.libSel.add(id);
+  S.reorder = true; keepAnchor(render);
+  if (drag) {
+    const nc = document.querySelector(gid ? `#root .card[data-gid="${CSS.escape(gid)}"]` : `#root .card[data-id="${CSS.escape(id)}"]`);
+    if (nc) { clearTimeout(DR.timer); DR.timer = null; drStart(nc); }
+  }
+}
 document.addEventListener('pointermove', ev => {
   if (DR.aux && ev.pointerId === DR.aux.pid) {
     if (Math.abs(ev.clientY - DR.aux.y0) > 9) DR.aux.moved = true;
@@ -14450,6 +14630,11 @@ document.addEventListener('pointermove', ev => {
   }
   if (DR.pid !== null && ev.pointerId !== DR.pid) return;
   DR.px = ev.clientX; DR.py = ev.clientY;
+  if (DR.pc && DR.timer && !S.reorder && !DR.on && DR.id !== undefined && Date.now() - DR.t0 >= 110 && Math.hypot(ev.clientX - DR.sx, ev.clientY - DR.sy) > 7) {
+    const c0 = document.elementFromPoint(DR.sx, DR.sy), cc = c0 && c0.closest && c0.closest('.card[data-id]');  // ПК: затиснув і потягнув — редагування + перетягування
+    clearTimeout(DR.timer); DR.timer = null;
+    if (cc) { pcEnterEdit(cc, true); return; }
+  }
   if (DR.timer && Math.hypot(ev.clientX - DR.sx, ev.clientY - DR.sy) > 9) { clearTimeout(DR.timer); DR.timer = null; }
   if (DR.on) drMove();
 });
@@ -14459,7 +14644,48 @@ document.addEventListener('pointermove', ev => {
   if (DR.on) drEnd(); else { clearTimeout(DR.timer); DR.timer = null; DR.pid = null; }
 }, true));
 document.addEventListener('touchmove', ev => { if (DR.on) ev.preventDefault(); }, {passive: false});
-document.addEventListener('contextmenu', ev => { if (ev.target.closest && ev.target.closest('.card[data-id]')) ev.preventDefault(); });
+document.addEventListener('contextmenu', ev => {
+  const t = ev.target; if (!t || !t.closest) return;
+  if (t.closest('.card[data-id]')) ev.preventDefault();
+  if (!PC_APP || S.cur || S.sheet || DR.on || t.closest('input,textarea')) return;
+  const rn = route().name, c = t.closest('.card[data-id]');
+  if (c && ['home', 'group'].includes(rn) && !S.reorder) { ev.preventDefault(); gpHaptic(); LP.t = Date.now(); openSheet('cmenu', c.dataset.gid ? {gid: c.dataset.gid, rect: c.getBoundingClientRect()} : {id: c.dataset.id, rect: c.getBoundingClientRect()}); return; }
+  const sc = (rn === 'search' || rn === 'new') ? t.closest('.card.sr') : null;
+  if (sc) { const r = cardRes(sc); if (r) { ev.preventDefault(); openSheet('cmenu', {res: r, rect: sc.getBoundingClientRect()}); } return; }
+  const lp = t.closest('[data-lp]');
+  if (lp && A[lp.dataset.lp]) { ev.preventDefault(); GP.t = Date.now(); A[lp.dataset.lp](lp); }
+});
+document.addEventListener('keydown', ev => {  // Ctrl+Z — скасувати, Ctrl+Y / Ctrl+Shift+Z — повернути (зміни розкладу в режимі редагування)
+  if (!(ev.ctrlKey || ev.metaKey) || ev.altKey || S.cur || S.sheet) return;
+  const t = ev.target; if (t && t.closest && t.closest('input,textarea,select,[contenteditable]')) return;
+  const z = ev.code === 'KeyZ' || ev.key === 'z' || ev.key === 'Z' || ev.key === 'я', y = ev.code === 'KeyY' || ev.key === 'y' || ev.key === 'Y' || ev.key === 'н';
+  if (!z && !y) return;
+  const redo = y || (z && ev.shiftKey);
+  if (!S.reorder) return;
+  ev.preventDefault();
+  if (redo ? LAY.redo.length : LAY.undo.length) layStep(redo ? 1 : -1);
+});
+(function hScroll() {  // горизонтальні списки (озвучки, сайти, вкладки, фільтри): колесо миші й перетягування мишею
+  const SEL = '.dubs,.srcs,.rrow,.dtabs,.sfil';
+  document.addEventListener('wheel', ev => {
+    const el = ev.target.closest && ev.target.closest(SEL); if (!el || el.scrollWidth <= el.clientWidth + 2) return;
+    if (Math.abs(ev.deltaY) < Math.abs(ev.deltaX)) return;
+    const b = el.scrollLeft; el.scrollLeft += ev.deltaY; if (el.scrollLeft !== b) ev.preventDefault();
+  }, {passive: false});
+  let d = null;
+  document.addEventListener('pointerdown', ev => {
+    if (ev.pointerType !== 'mouse' || ev.button !== 0) return;
+    const el = ev.target.closest && ev.target.closest(SEL); if (!el || el.scrollWidth <= el.clientWidth + 2) return;
+    d = {el, x: ev.clientX, l: el.scrollLeft, m: false};
+  }, true);
+  document.addEventListener('pointermove', ev => {
+    if (!d) return; const dx = ev.clientX - d.x;
+    if (!d.m && Math.abs(dx) > 5) d.m = true;
+    if (d.m) d.el.scrollLeft = d.l - dx;
+  }, true);
+  ['pointerup', 'pointercancel'].forEach(t => document.addEventListener(t, () => { if (d && d.m) { const m = d; setTimeout(() => {}, 0); window.__hsDrag = Date.now(); } d = null; }, true));
+  document.addEventListener('click', ev => { if (window.__hsDrag && Date.now() - window.__hsDrag < 250) { ev.preventDefault(); ev.stopPropagation(); ev.stopImmediatePropagation(); window.__hsDrag = 0; } }, true);
+})();
 document.addEventListener('submit', ev => { if (ev.target.dataset && ev.target.dataset.form === 'search') { ev.preventDefault(); A.dosearch(); } });
 const unpress = () => setTimeout(() => document.body.classList.remove('pressing'), 60);
 document.addEventListener('pointerup', unpress, true); document.addEventListener('pointercancel', unpress, true); document.addEventListener('touchend', unpress, true);
@@ -14480,6 +14706,7 @@ document.addEventListener('pointerdown', ev => {
   const el = card ? null : t.closest('[data-lp]');
   if (!card && !el) return;
   clearTimeout(GP.timer); GP.x = ev.clientX; GP.y = ev.clientY; GP.fired = false;
+  if (PC_APP && ev.pointerType === 'mouse') return;  // на ПК меню — правий клік
   if (card) document.body.classList.add('pressing');
   GP.timer = setTimeout(() => {
     GP.timer = null;
@@ -14601,19 +14828,20 @@ const nativeHls = !!V.canPlayType('application/vnd.apple.mpegurl');
 
 /* ---------- власний PiP на ПК: окреме вікно програми грає відео, а тут плеєр лишається «пультом» ---------- */
 ['loadedmetadata', 'canplay', 'playing'].forEach(e => V.addEventListener(e, () => { try { $('#player').classList.remove('ld'); } catch (er) {} }));
-const PCPIP = {on: false, loading: false, ready: false, t: 0, paused: true, vol: false, mine: 0, nxk: ''};
+const PCPIP = {on: false, hand: false, hooked: false, loading: false, ready: false, back: false, t: 0, paused: true, vol: false, mine: 0, nxk: ''};
 const PCPIP_CT = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime'), PCPIP_PA = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'paused');
 const pcWv = () => (PC_APP && window.chrome && window.chrome.webview) || null;
 function pcPost(m) { try { pcWv().postMessage(m); } catch (e) {} }
 function pcPipSend(o) { if (PCPIP.on) pcPost('pip>' + JSON.stringify(o)); }
-function pipUi() { try { $('#player').classList.toggle('pipon', !!(PCPIP.on || pipOn())); } catch (e) {} }
-function pcPipPayload(t, cur, paused) {
+function pipUi() { try { $('#player').classList.toggle('pipon', !!(PCPIP.hooked || pipOn())); } catch (e) {} }
+function pcPipPayload(t, cur, paused, src, hand) {
   const it = S.cur && item(S.cur.id), i = it ? it.episodes.findIndex(x => x.n === S.cur.n) : -1, ic = {};
   ['play', 'pause', 'prev', 'next', 'back10', 'fwd10', 'vol', 'close', 'fs'].forEach(n => { ic[n] = ico(n); });
-  return {t, src: V.currentSrc, cur, paused, vol: V.volume, muted: V.muted, rate: V.playbackRate, skips, icons: ic, ac: getComputedStyle(document.documentElement).getPropertyValue('--ac').trim(),
+  return {t, src, cur, paused, hand: !!hand, own: ownVol(), vmax: volMax(), p: volGet(), rate: V.playbackRate, skips, icons: ic, ac: getComputedStyle(document.documentElement).getPropertyValue('--ac').trim(),
     title: S.cur ? 'Серія ' + S.cur.n : '', sub: it ? it.title : '', hasPrev: i > 0, hasNext: !!(it && i >= 0 && it.episodes[i + 1])};
 }
 function pcPipHook(on) {  // поки йде PiP, стандартні властивості відео керують вікном PiP: решта коду плеєра (позиція, інтро/аутро, автоперехід) працює без змін
+  PCPIP.hooked = !!on;
   if (on) {
     Object.defineProperty(V, 'currentTime', {configurable: true,
       get: () => PCPIP.loading ? PCPIP_CT.get.call(V) : PCPIP.t,
@@ -14627,43 +14855,60 @@ function pcPipHook(on) {  // поки йде PiP, стандартні влас�
     V.pause = () => { if (!PCPIP.loading) pcPipSend({t: 'cmd', c: 'pause'}); };
   } else { delete V.currentTime; delete V.paused; delete V.play; delete V.pause; }
 }
+/* Передача без пауз: відео в головному плеєрі грає, поки вікно PiP завантажується; коли воно готове — передаємо той самий момент і стан */
 function pcPipOpen() {
   if (!S.cur || !V.currentSrc || PCPIP.on) return;
   if (document.documentElement.classList.contains('pcfs')) pcPost('fsoff');
+  Object.assign(PCPIP, {on: true, hand: true, hooked: false, loading: false, ready: false, back: false, t: V.currentTime, paused: V.paused, nxk: ''});
+  pcPost('pipopen');
+  setTimeout(() => { if (PCPIP.on && PCPIP.hand) { pcPost('pipclose'); pcPipEnd(true, false); toast('Не вдалося відкрити вікно PiP', true); } }, 12000);
+}
+function pcPipStart() { pcPipSend(pcPipPayload('init', V.currentTime, V.paused, V.currentSrc, true)); }
+function pcPipGo() {
+  if (!PCPIP.on || !PCPIP.hand) return;
   const cur = V.currentTime, paused = V.paused;
   V.pause();
-  Object.assign(PCPIP, {on: true, loading: false, ready: false, t: cur, paused, nxk: ''});
-  pcPipHook(true); pipUi(); pcPost('pipopen');
-  setTimeout(() => { if (PCPIP.on && !PCPIP.ready) { pcPost('pipclose'); pcPipEnd(true, false); toast('Не вдалося відкрити вікно PiP', true); } }, 9000);
+  PCPIP.hand = false; PCPIP.t = cur; PCPIP.paused = paused; pcPipHook(true); pipUi();
+  pcPipSend({t: 'go', cur, paused});
 }
-function pcPipStart() { pcPipSend(pcPipPayload('init', PCPIP.t, PCPIP.paused)); }
-function pcPipEnd(resume, front) {  // повертаємо відео в головний плеєр з того ж місця й у тому ж стані (пауза / відтворення)
+function pcPipNewSrc(url, resume) {  // нова серія: вікно PiP починає вантажити її одразу, щойно відомий URL
+  PCPIP.loading = false; PCPIP.t = resume || 0; PCPIP.paused = false; PCPIP.nxk = '';
+  pcPipSend(pcPipPayload('src', PCPIP.t, false, new URL(url, location.href).href, false));
+}
+function pcPipEnd(resume, front, fs) {  // повертаємо відео в головний плеєр з того ж місця й у тому ж стані (пауза / відтворення)
   if (!PCPIP.on) return;
-  const t = PCPIP.loading ? PCPIP_CT.get.call(V) : PCPIP.t, paused = PCPIP.loading ? false : PCPIP.paused;
-  PCPIP.on = false; PCPIP.loading = false; pcPipHook(false); pipUi();
-  try { P.prog = true; setTimeout(() => { P.prog = false; }, 800); V.currentTime = t; } catch (e) {}
-  if (resume && !paused) { const pr = V.play(); if (pr && pr.catch) pr.catch(() => {}); }
+  const was = PCPIP.hooked, t = PCPIP.loading ? PCPIP_CT.get.call(V) : PCPIP.t, paused = PCPIP.loading ? false : PCPIP.paused;
+  PCPIP.on = false; PCPIP.loading = false; PCPIP.hand = false; pcPipHook(false); pipUi();
+  if (was) {
+    try { P.prog = true; setTimeout(() => { P.prog = false; }, 800); V.currentTime = t; } catch (e) {}
+    if (resume && !paused) { const pr = V.play(); if (pr && pr.catch) pr.catch(() => {}); }
+  }
   if (front) pcPost('front');
+  if (fs) pcPost('fson');
   try { vcIcon(); } catch (e) {}
 }
-function pcPipTry() {  // нова серія завантажилась у головному плеєрі (без звуку) — передаємо її у вікно PiP
-  if (!PCPIP.on || !PCPIP.loading || V.readyState < 3 || V.seeking) return;
-  PCPIP.loading = false; PCPIP.t = PCPIP_CT.get.call(V); PCPIP.paused = false;
-  pcPipSend(pcPipPayload('src', PCPIP.t, false));
+async function pcPipBack(resume, front, fs) {  // спершу готуємо головний плеєр (перемотка до потрібного місця), а вікно PiP грає — тоді закриваємо без паузи
+  if (!PCPIP.on || PCPIP.back) return;
+  if (!PCPIP.hooked || PCPIP.loading) { pcPost('pipclose'); pcPipEnd(resume, front, fs); return; }
+  PCPIP.back = true;
+  try { P.prog = true; setTimeout(() => { P.prog = false; }, 800); PCPIP_CT.set.call(V, PCPIP.t); } catch (e) {}
+  for (let i = 0; i < 32 && PCPIP.on && (V.seeking || V.readyState < 3); i++) await new Promise(r => setTimeout(r, 80));
+  PCPIP.back = false;
+  if (!PCPIP.on) return;
+  pcPost('pipclose'); pcPipEnd(resume, front, fs);
 }
-['canplay', 'seeked', 'loadeddata'].forEach(e => V.addEventListener(e, pcPipTry));
-V.addEventListener('volumechange', () => { if (PCPIP.on && !PCPIP.vol && !SMUT) pcPipSend({t: 'vol', v: V.volume, m: V.muted}); });
-V.addEventListener('ratechange', () => { if (PCPIP.on) pcPipSend({t: 'rate', v: V.playbackRate}); });
+V.addEventListener('ratechange', () => { if (PCPIP.on && PCPIP.hooked) pcPipSend({t: 'rate', v: V.playbackRate}); });
 setInterval(() => {
-  if (!PCPIP.on || PCPIP.loading) return;
+  if (!PCPIP.on || PCPIP.loading || PCPIP.hand) return;
   const k = NXS ? NXS.n + ':' + NXS.left : '';
   if (k !== PCPIP.nxk) { PCPIP.nxk = k; pcPipSend({t: 'nx', nx: NXS ? {n: NXS.n, left: NXS.left} : null}); }
 }, 400);
 window.__pipMsg = m => {
   if (!m || !PCPIP.on) return;
-  if (m.t === 'ready') { PCPIP.ready = true; pcPipStart(); return; }
+  if (m.t === 'ready') { PCPIP.ready = true; if (PCPIP.hand) pcPipStart(); return; }
+  if (m.t === 'cp') { pcPipGo(); return; }
   if (m.t === 'closed') { pcPipEnd(true, false); return; }
-  if (PCPIP.loading) return;
+  if (PCPIP.loading || PCPIP.hand) return;
   if (m.t === 'tick') {
     PCPIP.t = m.cur || 0; const was = PCPIP.paused; PCPIP.paused = !!m.paused;
     if (was !== PCPIP.paused) { V.dispatchEvent(new Event(PCPIP.paused ? 'pause' : 'play')); if (!PCPIP.paused) V.dispatchEvent(new Event('playing')); }
@@ -14673,13 +14918,14 @@ window.__pipMsg = m => {
   } else if (m.t === 'ended') {
     PCPIP.paused = true; V.dispatchEvent(new Event('pause')); V.dispatchEvent(new Event('ended'));
   } else if (m.t === 'vol') {
-    PCPIP.vol = true; try { V.volume = m.v; V.muted = !!m.m; } catch (e) {} setTimeout(() => { PCPIP.vol = false; }, 80);
+    PCPIP.vol = true; try { volApply(m.p); volPaint(); } catch (e) {} PCPIP.vol = false;
   } else if (m.t === 'skip') { skDone[m.k] = true; doSkip(m.k, false); skipBtn(null);
   } else if (m.t === 'error') { toast('Не вдалося відтворити відео у PiP', true); pcPost('pipclose'); pcPipEnd(true, false);
   } else if (m.t === 'cmd') {
     if (m.c === 'prev') stepPlayer(-1); else if (m.c === 'next') stepPlayer(1); else if (m.c === 'nxcancel') nxCancel();
-    else if (m.c === 'close') { pcPost('pipclose'); pcPipEnd(true, false); }
-    else if (m.c === 'return') { pcPost('pipclose'); pcPipEnd(true, true); }
+    else if (m.c === 'close') pcPipBack(true, false, false);
+    else if (m.c === 'return') pcPipBack(true, true, false);
+    else if (m.c === 'fs') pcPipBack(true, true, true);
   }
 };
 /* ---------- власна гучність (окрема від системної; до 200%) ---------- */
@@ -14691,6 +14937,7 @@ function volApply(p) {
   if (!ownVol()) return;  // власна гучність (Web Audio) вимкнена: звук іде напряму, як у старих стабільних версіях
   p = Math.max(0, Math.min(volMax(), p));
   try { localStorage.setItem('pvol', String(p)); } catch (e) {}
+  if (PCPIP.on && PCPIP.hooked && !PCPIP.vol) pcPipSend({t: 'vol', p});  // вікно PiP грає з тією ж гучністю
   if (!AUD && p === 100) return;
   try {
     if (!AUD) {
@@ -14707,7 +14954,7 @@ function volPaint() {
   r.max = m; r.value = p;
   const sl = $('#vsl'); sl.style.setProperty('--p', (p / m * 100) + '%'); sl.style.setProperty('--m', m); sl.style.setProperty('--bs', (p > 100 ? 100 / p * 100 : 100) + '%');
   const mk = $('#v100'); mk.style.display = m > 100 ? 'block' : 'none'; mk.style.left = 'calc(' + (100 / m * 100) + '% - 1px)';
-  $('#vvn').textContent = p + '%'; $('#vvp').classList.toggle('boost', p > 100); $('#vvp').classList.toggle('at100', m > 100 && p === 100);
+  $('#vvn').textContent = p + '%'; $('#vvp').classList.toggle('boost', p > 100); $('#vvp').classList.toggle('at100', m > 100 && p === 100); $('#vvp').classList.toggle('mut', p === 0); const vb = $('#vvol'); if (vb) vb.classList.toggle('muted', p === 0);
 }
 function vvPlace() {  // вікно гучності стоїть над кнопкою гучності, не виходячи за краї екрана
   const v = $('#vvp'), b = $('#vvol'); if (!v || !b) return;
@@ -14724,6 +14971,9 @@ $('#vvr').addEventListener('input', () => {
 });
 window.addEventListener('resize', () => { const v = $('#vvp'); if (v && !v.classList.contains('hide')) vvPlace(); });
 $('#vvp').addEventListener('click', ev => ev.stopPropagation());
+let VOLPREV = 100;
+$('#vmb').addEventListener('click', ev => { ev.stopPropagation(); const p = volGet(); if (p > 0) { VOLPREV = p; volApply(0); } else volApply(VOLPREV || 100); volPaint(); vcShow(); });  // іконка в повзунку: вимкнути / повернути попередню гучність
+$('#pset').addEventListener('click', ev => { if (ev.target.id === 'pset') A.psclose(); });  // дотик поза меню (зокрема на кнопку налаштувань) закриває його
 V.addEventListener('playing', () => { if (AUD && AUD.ctx.state !== 'running') AUD.ctx.resume().catch(() => {}); });
 function volRestore() { if (!ownVol()) return; const p = volGet(); if (p !== 100 || AUD) volApply(p); }
 
@@ -14784,7 +15034,7 @@ const qNum = q => parseInt(String(q || '').replace(/\D/g, ''), 10) || 0;
 function psReplay() { if (!S.cur) return; const t = V.currentTime || 0; play(S.cur.id, S.cur.n, t > 3 ? t : 0); }
 let PRET = 0;
 async function play(id, n, startT, _retry) {
-  if (PCPIP.on) { PCPIP.loading = true; pcPipSend({t: 'loading'}); }  // PiP на ПК: нова серія вантажиться без звуку, потім переходить у вікно PiP
+  if (PCPIP.on) { if (PCPIP.hooked) { PCPIP.loading = true; pcPipSend({t: 'loading'}); } else { pcPost('pipclose'); pcPipEnd(false, false); } }  // PiP на ПК: нова серія одразу йде у вікно PiP
   if (!V.parentNode && V.__par) { try { V.__par.insertBefore(V, V.__nx || null); } catch (e) {} }
   if (!_retry) PRET = 0;
   if (!pipOn() && !(IOS_APP && S.set.ios_player === true) && (V.webkitDisplayingFullscreen || (V.webkitPresentationMode && V.webkitPresentationMode !== 'inline'))) { fsLeave(); vReseat(); }  // залишок попереднього системного плеєра
@@ -14824,6 +15074,7 @@ async function play(id, n, startT, _retry) {
     V.src = s.url; volRestore(); psSpeedApply();
     const nx2 = it.episodes[it.episodes.findIndex(x => x.n === n) + 1]; if (nx2 && !nx2.downloaded) warm(id, nx2.n, ((psGet(id) || {}).dub) || it.dubbing);
     const resume = startT > 1 ? startT : (e && e.pos > 5 && !e.watched ? e.pos : 0);
+    if (PCPIP.on && PCPIP.loading) pcPipNewSrc(s.url, resume);
     V.onloadedmetadata = () => { psSpeedApply(); paintMarks(); if (resume && resume < (V.duration || 1e9) - 10) { P.prog = true; setTimeout(() => { P.prog = false; }, 800); P.credit += resume; P.extra += resume; P.good = P.lastT = resume; V.currentTime = resume; } msg.classList.add('hide'); };
     let rec = 0;
     V.onerror = async () => {
@@ -15213,7 +15464,7 @@ function pipHeal() {  // шар відео міг «зависнути» над 
   } catch (e) {}
 }
 $('#vpip').addEventListener('click', () => {
-  if (PC_APP && pcWv()) { if (PCPIP.on) { pcPost('pipclose'); pcPipEnd(true, false); } else pcPipOpen(); return; }  // ПК: власне вікно PiP
+  if (PC_APP && pcWv()) { if (PCPIP.on) pcPipBack(true, false, false); else pcPipOpen(); return; }  // ПК: власне вікно PiP
   if ((PIP.st === 'entering' || PIP.st === 'exiting') && Date.now() - PIP.t < 3500) return;
   if (Date.now() < PIPCOOL) return;  // iOS ще дограє анімацію переходу
   const wk = PIPWK(), std = !wk && document.pictureInPictureEnabled && V.requestPictureInPicture && !V.disablePictureInPicture;
