@@ -38,6 +38,7 @@ namespace AniSyns
         const int Edge = 6;  // смуга по краях для зміни розміру
         static readonly Color Bg = Color.FromArgb(13, 14, 19);
         readonly WebView2 wv = new WebView2();
+        Splash splash;
         Process server;
         bool full;
         FormWindowState prevState;
@@ -70,6 +71,9 @@ namespace AniSyns
             wv.DefaultBackgroundColor = Bg;
             wv.AllowExternalDrop = false;
             Controls.Add(wv);
+            splash = new Splash { Dock = DockStyle.Fill };
+            Controls.Add(splash);  // екран завантаження поверх сторінки, поки сервер і вікно не готові
+            splash.BringToFront();
             Padding = new Padding(Edge);
             SetStyle(ControlStyles.ResizeRedraw | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
 
@@ -121,7 +125,9 @@ namespace AniSyns
 
         protected override void WndProc(ref Message m)
         {
-            const int WM_NCCALCSIZE = 0x83, WM_NCHITTEST = 0x84;
+            const int WM_NCCALCSIZE = 0x83, WM_NCHITTEST = 0x84, WM_NCACTIVATE = 0x86, WM_NCPAINT = 0x85;
+            if (m.Msg == WM_NCACTIVATE) { m.LParam = (IntPtr)(-1); base.WndProc(ref m); return; }  // не перемальовувати системну рамку при втраті фокуса
+            if (m.Msg == WM_NCPAINT) { m.Result = IntPtr.Zero; return; }
             if (m.Msg == WM_NCCALCSIZE && m.WParam != IntPtr.Zero)
             {
                 if (WindowState == FormWindowState.Maximized && !full)
@@ -259,9 +265,19 @@ namespace AniSyns
                     if (msg == "min") WindowState = FormWindowState.Minimized;
                     else if (msg == "max") { if (!full) WindowState = WindowState == FormWindowState.Maximized ? FormWindowState.Normal : FormWindowState.Maximized; }
                     else if (msg == "close") Close();
+                    else if (msg == "fs") SetFull(!full);
+                    else if (msg == "fsoff") { if (full) SetFull(false); }
                     else if (msg == "drag" && !full) { ReleaseCapture(); SendMessage(Handle, 0xA1, (IntPtr)2, IntPtr.Zero); }  // WM_NCLBUTTONDOWN, HTCAPTION
                 };
-                c.NavigationCompleted += (s, e) => OnState();
+                c.NavigationCompleted += (s, e) =>
+                {
+                    OnState();
+                    if (splash != null)
+                    {
+                        var sp = splash; splash = null;
+                        Controls.Remove(sp); sp.Dispose();  // далі показує свою заставку сама сторінка
+                    }
+                };
                 c.Navigate(Url);
             }
             catch (Exception ex)
@@ -285,6 +301,7 @@ namespace AniSyns
                 Padding = Padding.Empty;
                 WindowState = FormWindowState.Normal;
                 Bounds = Screen.FromControl(this).Bounds;
+                Tell(true);
             }
             else
             {
@@ -292,8 +309,14 @@ namespace AniSyns
                 Bounds = prevBounds;
                 WindowState = prevState;
                 OnState();
+                Tell(false);
                 Nudge();
             }
+        }
+
+        void Tell(bool on)
+        {
+            try { if (wv.CoreWebView2 != null) wv.CoreWebView2.ExecuteScriptAsync("window.__fs&&window.__fs(" + (on ? "true" : "false") + ")"); } catch { }
         }
 
         // WebView2 після виходу з повного екрана може лишити старий розмір сторінки — підштовхуємо розмір
@@ -315,6 +338,97 @@ namespace AniSyns
         void StopServer()
         {
             try { if (server != null && !server.HasExited) server.Kill(true); } catch { }
+        }
+    }
+
+    // Екран завантаження: темний фон, логотип, назва та рухома смужка (як заставка на iOS)
+    class Splash : Control
+    {
+        readonly System.Windows.Forms.Timer tm = new System.Windows.Forms.Timer { Interval = 16 };
+        readonly Stopwatch sw = Stopwatch.StartNew();
+        Image logo;
+
+        public Splash()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            BackColor = Color.FromArgb(13, 14, 19);
+            try { logo = Image.FromFile(Path.Combine(AppContext.BaseDirectory, "splash.png")); } catch { }
+            tm.Tick += (s, e) => Invalidate();
+            tm.Start();
+        }
+
+        protected override void Dispose(bool d)
+        {
+            if (d) { tm.Stop(); tm.Dispose(); if (logo != null) logo.Dispose(); }
+            base.Dispose(d);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.Clear(BackColor);
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+            float t = (float)sw.Elapsed.TotalSeconds;
+            float cx = Width / 2f, cy = Height / 2f - 30;
+
+            // м'яке фіолетове сяйво
+            float gr = 230 + 10 * (float)Math.Sin(t * 2);
+            using (var path = new System.Drawing.Drawing2D.GraphicsPath())
+            {
+                path.AddEllipse(cx - gr, cy - gr, gr * 2, gr * 2);
+                using (var pb = new System.Drawing.Drawing2D.PathGradientBrush(path))
+                {
+                    pb.CenterColor = Color.FromArgb(70, 109, 76, 255);
+                    pb.SurroundColors = new[] { Color.FromArgb(0, 109, 76, 255) };
+                    g.FillPath(pb, path);
+                }
+            }
+
+            // логотип: поява + легке «биття»
+            float appear = Math.Min(1f, t / 0.7f);
+            float k = (0.8f + 0.2f * (1 - (float)Math.Pow(1 - appear, 3))) * (1 + 0.025f * (float)Math.Sin(t * 4.2));
+            float sz = 150 * k;
+            if (logo != null)
+            {
+                var cm = new System.Drawing.Imaging.ColorMatrix { Matrix33 = appear };
+                using (var ia = new System.Drawing.Imaging.ImageAttributes())
+                {
+                    ia.SetColorMatrix(cm);
+                    g.DrawImage(logo, new Rectangle((int)(cx - sz / 2), (int)(cy - sz / 2), (int)sz, (int)sz), 0, 0, logo.Width, logo.Height, GraphicsUnit.Pixel, ia);
+                }
+            }
+
+            // назва
+            float na = Math.Max(0f, Math.Min(1f, (t - 0.5f) / 0.6f));
+            using (var f = new Font("Segoe UI", 26f, FontStyle.Bold, GraphicsUnit.Point))
+            {
+                var s1 = g.MeasureString("Ani", f, 0, StringFormat.GenericTypographic);
+                var s2 = g.MeasureString("Syns", f, 0, StringFormat.GenericTypographic);
+                float x = cx - (s1.Width + s2.Width) / 2, y = cy + 100;
+                using (var b1 = new SolidBrush(Color.FromArgb((int)(255 * na), 255, 255, 255)))
+                    g.DrawString("Ani", f, b1, x, y, StringFormat.GenericTypographic);
+                using (var b2 = new System.Drawing.Drawing2D.LinearGradientBrush(new RectangleF(x + s1.Width, y, s2.Width, s2.Height), Color.FromArgb((int)(255 * na), 155, 107, 255), Color.FromArgb((int)(255 * na), 95, 176, 255), 0f))
+                    g.DrawString("Syns", f, b2, x + s1.Width, y, StringFormat.GenericTypographic);
+            }
+            using (var f = new Font("Segoe UI", 10f, FontStyle.Regular, GraphicsUnit.Point))
+            using (var b = new SolidBrush(Color.FromArgb((int)(255 * na), 154, 160, 184)))
+            {
+                var sf = new StringFormat { Alignment = StringAlignment.Center };
+                g.DrawString("The way to watch Anime with comfort!", f, b, cx, cy + 148, sf);
+            }
+
+            // рухома смужка завантаження
+            float bw = 120, bh = 3, bx = cx - bw / 2, by = Height - 64;
+            using (var bg = new SolidBrush(Color.FromArgb(20, 255, 255, 255)))
+                g.FillRectangle(bg, bx, by, bw, bh);
+            float ph = (t % 1.2f) / 1.2f, seg = bw * 0.45f;
+            float sx = bx - seg + (bw + seg) * (ph * ph * (3 - 2 * ph));
+            float x0 = Math.Max(bx, sx), x1 = Math.Min(bx + bw, sx + seg);
+            if (x1 > x0)
+                using (var lb = new System.Drawing.Drawing2D.LinearGradientBrush(new RectangleF(x0 - 1, by, x1 - x0 + 2, bh), Color.FromArgb(122, 59, 203), Color.FromArgb(102, 162, 211), 0f))
+                    g.FillRectangle(lb, x0, by, x1 - x0, bh);
         }
     }
 }

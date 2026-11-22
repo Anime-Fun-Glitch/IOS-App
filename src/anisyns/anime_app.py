@@ -10960,9 +10960,8 @@ body.rmpg #rcbar{display:none!important}
 /* ---------- Режим ПК (лише data-pc; на iPhone/iPad не діє) ---------- */
 html[data-pc]{color-scheme:dark}
 html[data-pc]{--pcl:26px}
-html[data-pc] #root .bar{min-height:62px;background:rgba(13,14,19,.66);-webkit-backdrop-filter:blur(22px) saturate(1.35);backdrop-filter:blur(22px) saturate(1.35)}
-html[data-pc] #tabs{background:rgba(13,14,19,.66);-webkit-backdrop-filter:blur(22px) saturate(1.35);backdrop-filter:blur(22px) saturate(1.35)}
-html[data-pc] .vc .sk{bottom:calc(8px + var(--pcl));left:24px;right:24px;border-radius:16px;background:#0009;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
+html[data-pc] #root .bar{min-height:62px}
+html[data-pc] .vc .sk{bottom:calc(8px + var(--pcl));left:24px;right:24px;border-radius:16px}
 html[data-pc] .vvp{bottom:calc(66px + var(--pcl))}
 html[data-pc] .nxbox{bottom:calc(96px + var(--pcl))}
 html[data-pc] .skwrap.ui{bottom:calc(62px + var(--pcl))}
@@ -14858,7 +14857,7 @@ function setNowPlaying(it, e, n) {
   } catch (er) {}
 }
 $('#vfs').addEventListener('click', () => {
-  if (PC_APP) { try { if (document.fullscreenElement) document.exitFullscreen(); else $('#player').requestFullscreen(); } catch (e) {} return; }  // ПК: на весь екран іде наш плеєр, а не стандартний елемент відео
+  if (PC_APP) { try { if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage('fs'); else if (document.fullscreenElement) document.exitFullscreen(); else $('#player').requestFullscreen(); } catch (e) {} return; }  // ПК: на весь екран іде наш плеєр, а не стандартний елемент відео
   try { if (V.webkitEnterFullscreen) V.webkitEnterFullscreen(); else if (V.requestFullscreen) V.requestFullscreen(); } catch (e) { toast('Не вдалося відкрити на весь екран', true); }
 });
 (function () {
@@ -15047,6 +15046,7 @@ function fsOrphanGuard() {  // після закриття (зокрема пу�
 }
 function closePlayer() {
   nxCancel(); savePos(true);
+  if (PC_APP) { try { if (window.chrome && window.chrome.webview) window.chrome.webview.postMessage('fsoff'); else if (document.fullscreenElement) document.exitFullscreen(); } catch (e) {} }  // ПК: закриваючи серію, виходимо з повного екрана
   let wasFs = false;
   try { if (V.webkitDisplayingFullscreen || V.webkitPresentationMode === 'fullscreen') { wasFs = true; fsLeave(); } } catch (e) {}
   document.title = 'Мої аніме'; V.removeAttribute('poster');
@@ -16285,6 +16285,8 @@ if (PC_APP) (function () {
   });
   if (!wvh) return;
   document.addEventListener('fullscreenchange', () => document.documentElement.classList.toggle('pcfs', !!document.fullscreenElement));
+  window.__fs = on => document.documentElement.classList.toggle('pcfs', !!on);  // повний екран вікна керується з боку програми
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.documentElement.classList.contains('pcfs')) post('fsoff'); }, true);
   const SVG_MAX = '<svg viewBox="0 0 14 14"><rect x="2.5" y="2.5" width="9" height="9" rx="1.2"/></svg>';
   const SVG_RES = '<svg viewBox="0 0 14 14"><rect x="2.5" y="4.5" width="7" height="7" rx="1"/><path d="M4.5 4.5v-1a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-1"/></svg>';
   const w = document.createElement('div'); w.className = 'wc';
