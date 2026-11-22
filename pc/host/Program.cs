@@ -71,6 +71,7 @@ namespace AniSyns
             wv.AllowExternalDrop = false;
             Controls.Add(wv);
             Padding = new Padding(Edge);
+            SetStyle(ControlStyles.ResizeRedraw | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
 
             // розмір і місце: з минулого разу, інакше 82% робочої області екрана по центру
             var wa = Screen.PrimaryScreen.WorkingArea;
@@ -156,16 +157,32 @@ namespace AniSyns
                 DwmSetWindowAttribute(Handle, 20, ref one, 4);
                 DwmSetWindowAttribute(Handle, 33, ref round, 4);  // заокруглені кути (Windows 11)
                 DwmSetWindowAttribute(Handle, 34, ref none, 4);  // без кольорової рамки навколо вікна
-                var mg = new MARGINS { l = 1, r = 1, t = 1, b = 1 };
-                DwmExtendFrameIntoClientArea(Handle, ref mg);      // тінь навколо безрамкового вікна
             }
             catch { }
         }
 
         protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); Style(); }
 
+        // Тонка напівпрозора рамка у стилі програми (замість білої системної)
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e);
+            if (WindowState == FormWindowState.Maximized || full) return;
+            using (var pen = new Pen(Color.FromArgb(255, 44, 46, 60)))
+                e.Graphics.DrawRectangle(pen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
+        }
+
+        // Поки вікно згорнуте, не міняємо розмір сторінки — інакше вона «перебудовується» при відкритті
+        protected override void OnLayout(LayoutEventArgs levent)
+        {
+            if (WindowState == FormWindowState.Minimized) return;
+            base.OnLayout(levent);
+        }
+
         void OnState()
         {
+            if (WindowState == FormWindowState.Minimized) return;
+            Invalidate();
             bool mx = WindowState == FormWindowState.Maximized;
             Padding = (mx || full) ? Padding.Empty : new Padding(Edge);
             try { if (wv.CoreWebView2 != null) wv.CoreWebView2.ExecuteScriptAsync("window.__wmax&&window.__wmax(" + (mx ? "true" : "false") + ")"); } catch { }
@@ -205,7 +222,7 @@ namespace AniSyns
                     }
                     if (!ok) throw new Exception("Сервер не відповів. Журнал: " + Path.Combine(DataDir(), "server.log"));
                 }
-                var opts = new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required --disable-features=msSmartScreenProtection --in-process-gpu --renderer-process-limit=1");
+                var opts = new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required --disable-features=msSmartScreenProtection --ignore-gpu-blocklist --enable-gpu-rasterization --renderer-process-limit=1");
                 string ud = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AniSyns", "webview");
                 var env = await CoreWebView2Environment.CreateAsync(null, ud, opts);
                 await wv.EnsureCoreWebView2Async(env);

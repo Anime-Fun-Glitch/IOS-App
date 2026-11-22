@@ -10959,6 +10959,24 @@ body.rmpg #rcbar{display:none!important}
 
 /* ---------- Режим ПК (лише data-pc; на iPhone/iPad не діє) ---------- */
 html[data-pc]{color-scheme:dark}
+html[data-pc]{--pcl:26px}
+html[data-pc] #root .bar{min-height:62px;background:rgba(13,14,19,.66);-webkit-backdrop-filter:blur(22px) saturate(1.35);backdrop-filter:blur(22px) saturate(1.35)}
+html[data-pc] #tabs{background:rgba(13,14,19,.66);-webkit-backdrop-filter:blur(22px) saturate(1.35);backdrop-filter:blur(22px) saturate(1.35)}
+html[data-pc] .vc .sk{bottom:calc(8px + var(--pcl));left:24px;right:24px;border-radius:16px;background:#0009;-webkit-backdrop-filter:blur(16px);backdrop-filter:blur(16px)}
+html[data-pc] .vvp{bottom:calc(66px + var(--pcl))}
+html[data-pc] .nxbox{bottom:calc(96px + var(--pcl))}
+html[data-pc] .skwrap.ui{bottom:calc(62px + var(--pcl))}
+html[data-pc] .skwrap.vol{bottom:calc(116px + var(--pcl))}
+@media (orientation:landscape){html[data-pc] .skwrap.ui{bottom:calc(52px + var(--pcl))}}
+html[data-pc] .skwrap:not(.ui):not(.vol){bottom:calc(14px + var(--pcl) - 8px)}
+.pcm{position:fixed;z-index:100000;max-height:min(62vh,440px);overflow:auto;padding:6px;border-radius:16px;background:rgba(28,30,44,.9);-webkit-backdrop-filter:blur(24px) saturate(1.4);backdrop-filter:blur(24px) saturate(1.4);border:1px solid #ffffff1c;box-shadow:0 18px 50px #000b;animation:pcmin .14s ease}
+.pcm button{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;color:var(--tx);padding:11px 12px;border-radius:11px;font-size:15px;text-align:left;cursor:default;white-space:nowrap}
+.pcm button:hover{background:#ffffff12}
+.pcm button.on{color:var(--ac);background:#ffffff0d}
+.pcm button span{flex:1}
+.pcm button svg{width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-width:2.2;visibility:hidden}
+.pcm button.on svg{visibility:visible}
+@keyframes pcmin{from{opacity:0;transform:translateY(-4px) scale(.98)}}
 html[data-pc] a,html[data-pc] img,html[data-pc] svg{-webkit-user-drag:none;user-drag:none}
 html[data-pc] ::-webkit-scrollbar{width:10px;height:10px}
 html[data-pc] ::-webkit-scrollbar-track{background:transparent}
@@ -10979,7 +10997,8 @@ html[data-pc] #player .vc .top{padding-right:178px}
 html[data-pc]:not(.pcfs):has(#player:not(.hide)) .wc{opacity:0;pointer-events:none}
 html[data-pc]:not(.pcfs):has(#player:not(.hide) #vc:not(.off)) .wc{opacity:1;pointer-events:auto}
 html[data-pc].pcfs .wc{display:none}
-html[data-pc].pcfs #player .vc .top{padding-right:0}
+html[data-pc].pcfs #player .vc .top{padding-right:18px;padding-left:18px}
+html[data-pc].pcfs .vc .sk{left:28px;right:28px}
 </style>
 <script>
 /* Безпечні зони (виріз / Dynamic Island / індикатор «Home»). Якщо WebView розтягнутий на весь екран, а env() віддає 0 —
@@ -16276,6 +16295,42 @@ if (PC_APP) (function () {
   const onBar = e => { const bar = e.target.closest && e.target.closest('#root .bar'); return bar && !e.target.closest('button,a,input,select,textarea,.ib,[data-act]'); };
   document.addEventListener('mousedown', e => { if (e.button === 0 && onBar(e)) post('drag'); }, true);
   document.addEventListener('dblclick', e => { if (onBar(e)) post('max'); }, true);
+})();
+
+/* ПК: власне меню вибору замість системного списку (як на iPhone) */
+if (PC_APP) (function () {
+  let menu = null, cur = null;
+  const close = () => { if (menu) { menu.remove(); menu = null; cur = null; } };
+  const open = sel => {
+    close(); cur = sel; const r = sel.getBoundingClientRect();
+    menu = document.createElement('div'); menu.className = 'pcm';
+    [...sel.options].forEach((o, i) => {
+      if (o.hidden) return;
+      const b = document.createElement('button'); b.type = 'button'; b.disabled = o.disabled; if (o.selected) b.className = 'on';
+      b.innerHTML = '<span></span><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      b.firstChild.textContent = o.textContent;
+      b.addEventListener('click', () => { const ch = sel.selectedIndex !== i; sel.selectedIndex = i; if (ch) { sel.dispatchEvent(new Event('input', {bubbles: true})); sel.dispatchEvent(new Event('change', {bubbles: true})); } close(); });
+      menu.appendChild(b);
+    });
+    document.body.appendChild(menu);
+    menu.style.minWidth = Math.max(r.width, 180) + 'px';
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    let left = Math.max(10, Math.min(r.left, innerWidth - mw - 10)), top = r.bottom + 6;
+    if (top + mh > innerHeight - 10) top = Math.max(10, r.top - 6 - mh);
+    menu.style.left = left + 'px'; menu.style.top = top + 'px';
+    const on = menu.querySelector('.on'); if (on) on.scrollIntoView({block: 'nearest'});
+  };
+  document.addEventListener('mousedown', e => {
+    const sel = e.target.closest && e.target.closest('select');
+    if (sel && !sel.multiple && !sel.disabled) { e.preventDefault(); if (cur === sel) close(); else open(sel); return; }
+    if (menu && !menu.contains(e.target)) close();
+  }, true);
+  document.addEventListener('keydown', e => {
+    if (menu && e.key === 'Escape') { e.preventDefault(); close(); return; }
+    const t = e.target; if (t && t.tagName === 'SELECT' && ['Enter', ' ', 'ArrowDown'].indexOf(e.key) >= 0) { e.preventDefault(); open(t); }
+  }, true);
+  addEventListener('resize', close); addEventListener('blur', close);
+  document.addEventListener('scroll', e => { if (menu && !menu.contains(e.target)) close(); }, true);
 })();
 </script>
 </body>
