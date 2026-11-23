@@ -12763,12 +12763,12 @@ function cardHTML(it, i, demo, go, G) {
   const ratio = st.total ? st.watched / st.total : 0;
   const reo = S.reorder && !demo;
   const nx = it.meta && it.meta.next;
-  const ejb = !G && !demo && !go && !S.reorder && it.group && route().name === 'group' ? `<button class="ejb" data-act="eject" data-id="${key}" aria-label="Прибрати з групи" title="Прибрати з групи"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h5a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-5"/><path d="M4 12h11M8 8l-4 4 4 4"/></svg></button>` : '';
+  const ejb = '';
   const cd = V.timer && nx && nx.ts ? `<div class="cd" data-c="1" data-ts="${nx.ts}" data-ep="${esc(nx.ep ?? '')}" data-approx="${nx.approx ? 1 : 0}" data-date="${nx.date_only ? 1 : 0}">${ico('clock')}<span></span></div>` : '';
   const dv = reo || demo || go || G, SEL = sel(reo);
   const psx = x => { const q = x.meta && x.meta.poster; return q ? `background-image:url('${esc(q)}')` : ''; };
   const rest = G ? G.m.filter(x => x !== it) : [];
-  const lay = (x, c) => x ? `<i class="gl ${c}${x.archived ? ' arch' : ''}" style="${psx(x)}"></i>` : `<i class="gl ${c}"></i>`;
+  const lay = (x, c) => x ? `<i class="gl ${c}${x.archived ? ' arch' : ''}" style="${psx(x)}"></i>` : '';  // шарів стільки, скільки аніме в групі (2 аніме — 1 шар позаду)
   const layers = G ? lay(rest[1], 'l2') + lay(rest[0], 'l1') : '';
   const ttl = G ? (gname(G.m) || lname(it)) : lname(it);
   return `<${dv ? 'div' : 'a'} class="card${G ? ' gcard' : ''}${arch ? ' arch' : ''}${ENTER ? ' enter' : ''}${reo ? ' reo' : ''}${SEL ? ' csel' : ''}${V.title && !(G && V.gtitle === false) ? '' : ' hidet'}" data-id="${key}"${G ? ` data-gid="${esc(G.g)}"` : ''} ${go ? 'data-act="gmopen"' : G ? (reo ? '' : 'data-act="gopen"') : dv ? '' : `href="#/a/${it.id}"`} style="--i:${Math.min(i || 0, 12)}">
@@ -13272,7 +13272,7 @@ function renderSheet() {
      ${castTargets().length ? `<button data-act="cmcast">${ico('xfer')} Відкрити на іншому пристрої</button>` : ''}
      <button data-act="cmrename" data-id="${s.id}">${ico('edit')} Перейменувати</button>
      <button data-act="cmarc" data-lp="gpick" data-id="${s.id}">${ico(it.archived ? 'refresh' : 'check')} ${it.archived ? 'У бібліотеку' : 'У переглянуте'}</button>
-     ${it.group ? '' : `<button data-act="cmgroup" data-id="${s.id}">${ico('plus')} Створити групу</button>`}
+     ${it.group ? `<button data-act="cmeject" data-id="${s.id}">${ico('undo')} Прибрати з групи</button>` : `<button data-act="cmgroup" data-id="${s.id}">${ico('plus')} Створити групу</button>`}
      <button class="dng" data-act="cmdel" data-id="${s.id}">${ico('trash')} Видалити</button></div>`; }
   else if (s.kind === 'group') inner = groupSheetHTML(s.gid);
   else if (s.kind === 'text') inner = `<h3>${esc(s.title)}</h3><p style="color:var(--mu);font-size:13px">${esc(s.text || '')}</p>
@@ -13806,6 +13806,7 @@ const A = {
     const v = await askText('Назва групи', '', 'Можна залишити порожнім — тоді група буде без назви.'); if (v === null || v === undefined) return;
     try { await api('/api/group', {ids, name: v}); S.libSel.clear(); await loadLib(); toast('Групу створено', false, 'check'); } catch (e) { toast(e.message, true); }
   },
+  async cmeject(el) { closeSheet(); await new Promise(r => setTimeout(r, 220)); await A.eject(el); },
   async eject(el) {  // прибрати аніме з групи (якщо в групі лишається одне — група розформовується)
     const id = el.dataset.id, it = item(id); if (!it || !it.group) return;
     const left = groupMembers(it.group).filter(x => x.id !== id);
@@ -14476,6 +14477,7 @@ setInterval(() => { if (S.arcPend.size && route().name === 'home' && !S.cur && !
 
 const LP = {t: 0, timer: null, x: 0, y: 0};
 const DR = {lock: 0, el: null, on: false, timer: null, sx: 0, sy: 0, gx: 0, gy: 0, px: 0, py: 0, auto: 0, id: '', pid: null, stack: [], clones: [], aux: null, corner: false, w: 0};
+const drNoOrder = () => !S.reorder && route().name !== 'group' && !!S.view.sort && S.view.sort !== 'my';  // у відфільтрованих/відсортованих списках порядок міняти не можна — лише групувати
 function drZones(upd) {
   if (PC_APP) return;  // на ПК кутових зон («переглянуте»/«видалити») немає
   const ic = ico(drToArc() ? 'check' : 'refresh');
@@ -14559,7 +14561,7 @@ function drMove() {
     else if (!DR.mg && Date.now() - DR.mtime >= mdw) { DR.mg = over; over.classList.add('mrg'); c.classList.add('mrgd'); if (navigator.vibrate) try { navigator.vibrate(14); } catch (e) {} }
   } else if (DR.mc && !(over && DR.mc === over)) drClearMerge();
   if (over !== DR.sw) { DR.sw = over; DR.stime = Date.now(); clearTimeout(DR.st); if (over) DR.st = setTimeout(drMove, DR.pc ? 90 : 280); }
-  const hit = over && !inner && Date.now() - DR.stime >= (DR.pc ? 70 : 260) ? over : null;
+  const hit = over && !inner && !drNoOrder() && Date.now() - DR.stime >= (DR.pc ? 70 : 260) ? over : null;
   if (hit) DR.sw = null;
   if (hit) {
     const rects = new Map(cards.map(o => [o, o.getBoundingClientRect()]));
@@ -14630,6 +14632,7 @@ function drEnd() {
   document.querySelectorAll('.card.mrg').forEach(x => x.classList.remove('mrg')); c.classList.remove('mrgd'); DR.mc = DR.mg = null;
   if (mg && !corner) { mergeDrop(mg, [c, ...stack].flatMap(tileIds)); return; }
   if (corner) { cornerDrop([c, ...stack].flatMap(tileIds), corner, c); return; }
+  if (drNoOrder()) { render(); return; }
   const domIds = []; document.querySelectorAll('#root .card[data-id]').forEach(x => { if (x.dataset.gid) groupMembers(x.dataset.gid).forEach(y => domIds.push(y.id)); else domIds.push(x.dataset.id); });
   const slots = S.items.map((x, i) => domIds.includes(x.id) ? i : -1).filter(i => i >= 0), byId = new Map(S.items.map(x => [x.id, x]));
   domIds.forEach((id, k) => { S.items[slots[k]] = byId.get(id); });
@@ -14692,7 +14695,7 @@ document.addEventListener('pointermove', ev => {
   }
   if (DR.pid !== null && ev.pointerId !== DR.pid) return;
   DR.px = ev.clientX; DR.py = ev.clientY;
-  if (DR.pc && DR.timer && !DR.on && DR.id !== undefined && (S.reorder || !S.view.sort || S.view.sort === 'my') && Math.hypot(ev.clientX - DR.sx, ev.clientY - DR.sy) > 5) {
+  if (DR.pc && DR.timer && !DR.on && DR.id !== undefined && Math.hypot(ev.clientX - DR.sx, ev.clientY - DR.sy) > 5) {
     const c0 = document.elementFromPoint(DR.sx, DR.sy), cc = c0 && c0.closest && c0.closest('.card[data-id]');  // ПК: затиснув і потягнув — редагування + перетягування
     clearTimeout(DR.timer); DR.timer = null;
     if (cc) { try { getSelection().removeAllRanges(); } catch (e) {} drStart(cc); drMove(); return; }  // просто перенесення: без виділення й без режиму редагування
