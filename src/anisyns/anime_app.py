@@ -2152,7 +2152,7 @@ def label_quality(label):
 
 def extract_media_links(html):
   """Шукає в тексті плеєра прямі m3u8/mp4 і визначає якість за мітками плеєра, а не вгадує зі стандартного списку."""
-  html = html.replace('\\/', '/')
+  html = html.replace('\\/', '/').replace('&amp;', '&')
   links = {}
   ext = r'(?:m3u8|mp4)'
   url_re = r'(https?://[^\s,"\'\[\]<>]*\.' + ext + r'[^\s,"\'\[\]<>]*)'
@@ -2172,7 +2172,8 @@ def extract_media_links(html):
     for m in re.finditer(r'https?://[^\s"\'<>\\]+\.' + ext + r'[^\s"\'<>\\]*', html):
       link = m.group(0)
       q = re.search(r'[/_.=-](1080|720|480|360)p?(?=[/_.&?-]|$)', link)
-      links.setdefault((q.group(1) + 'p') if q else '?', link)
+      hq = re.match(r'https?://(fhd|hd|std)\.', link)  # AnimeVost: fhd. = 1080p, hd. = 720p, std. = 480p
+      links.setdefault((q.group(1) + 'p') if q else ({'fhd': '1080p', 'hd': '720p', 'std': '480p'}[hq.group(1)] if hq else '?'), link)
   return links
 
 
@@ -2318,7 +2319,7 @@ def player_links(name, iframe, referer):
   return generic_links(iframe, referer) + (None,)
 
 
-def resolve_players(players, referer, base_skips=None):
+def resolve_players(players, referer, base_skips=None, limits=(22, 5)):
   """players: [(назва, iframe)]. Опитує всі плеєри паралельно й бере найкращу якість із усіх.
   Повертає {'links': {q: url}, 'hdrs': {q: заголовки}, 'players': {q: назва}}."""
   _stage('Отримую посилання на відео…')
@@ -2344,9 +2345,9 @@ def resolve_players(players, referer, base_skips=None):
   got, pending, t0, first_ok = {}, set(futs), time.time(), None
   while pending:
     _chk()
-    left = 22 - (time.time() - t0)
+    left = limits[0] - (time.time() - t0)
     if first_ok:
-      left = min(left, first_ok + 5 - time.time())
+      left = min(left, first_ok + limits[1] - time.time())
     if left <= 0:
       break
     dn, pending = concurrent.futures.wait(pending, timeout=min(left, 1.0), return_when=concurrent.futures.FIRST_COMPLETED)
@@ -2800,17 +2801,27 @@ def _fetch_vost(url):
 
   _stage('Отримую список серій…')
   playlist = None
-  for api in dict.fromkeys(['https://api.animevost.org/v1/playlist', f'{origin}/v1/playlist']):
-    try:
-      r = http_post(api, data={'id': rid}, headers={'Referer': origin + '/'}, timeout=12, retries=1)
-      j = r.json()
-      if isinstance(j, list) and j:
-        playlist = j
+  def _pl_try(api):
+    r = http_post(api, data={'id': rid}, headers={'Referer': origin + '/'}, timeout=7, retries=0)
+    j = r.json()
+    if isinstance(j, list) and j:
+      return j
+    raise RuntimeError('порожній плейлист')
+  apis = list(dict.fromkeys(['https://api.animevost.org/v1/playlist', f'{origin}/v1/playlist']))
+  _ex = concurrent.futures.ThreadPoolExecutor(max_workers=len(apis))  # обидва дзеркала паралельно: беремо перше, що відповіло (раніше — по черзі з довгими таймаутами)
+  _fs = [_ex.submit(_pl_try, a) for a in apis]
+  try:
+    for _ in range(2):
+      _chk()
+      dn, _pend = concurrent.futures.wait([x for x in _fs if not x.done()] or _fs, timeout=8, return_when=concurrent.futures.FIRST_COMPLETED)
+      for x in _fs:
+        if x.done() and not x.exception():
+          playlist = x.result()
+          break
+      if playlist or all(x.done() for x in _fs):
         break
-    except Cancelled:
-      raise
-    except Exception:
-      continue
+  finally:
+    _ex.shutdown(wait=False)
 
   eps = []
   hdr = {'Referer': origin + '/'}
@@ -2830,11 +2841,13 @@ def _fetch_vost(url):
   def frame_resolver(pid, api_links):
     """Опитуємо всі плеєри серії паралельно. Перевірені посилання з API (480/720) лишаються надійною основою,
     а з плеєрів беремо те, чого в API немає (напр. 1080p) — але лише після швидкої перевірки, що це справжнє відео."""
-    pls = [(f'Плеєр {i + 1}', f'{origin}/{tpl}{pid}') for i, tpl in enumerate(templates)]
+    # «Плеєр №2» сайту (frame5.php?…&old=1) віддає прямі mp4 до 1080p; «Плеєр №1» (frame5 без old) — лише blob без вибору якості, тож його не опитуємо
+    pls = [(f'Плеєр {i + 1}', f'{origin}/{tpl}{pid}') for i, tpl in enumerate(templates) if not tpl.startswith('frame5.php')]
+    pls.insert(0, ('Плеєр 2', f'{origin}/frame5.php?play={pid}&old=1'))
 
     def resolve():
       try:
-        r = resolve_players(pls, origin + '/')
+        r = resolve_players(pls, origin + '/', limits=(10, 2.5))
       except Cancelled:
         raise
       except Exception as ex:
@@ -11140,6 +11153,10 @@ input,select,textarea{font-size:16px}
 .card.arch .pb>i{background:#7fd6a4}
 .seen{position:absolute;left:9px;top:9px;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:#ffffff26;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#bff0d4}.seen .i{width:14px;height:14px}
 .card.mrg .poster,.card.mrg .gst{outline:3px solid var(--ac2);outline-offset:3px;transform:scale(.95);transition:transform .2s}
+.gcard.mrg .poster{outline:none;transform:none;box-shadow:0 0 0 3px var(--ac2)}.gcard.mrg .gst{outline:none;transform:scale(.95);transition:transform .2s}.gcard.mrg .gl{box-shadow:0 0 0 2.5px var(--ac2),0 3px 10px #0007}
+.ejb{position:absolute;right:8px;top:36px;z-index:3;width:26px;height:26px;border-radius:8px;display:grid;place-items:center;border:1px solid #ffffff2e;background:#12142299;color:#fff;-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);cursor:pointer;padding:0;transition:background .15s,transform .15s}
+.ejb:active{transform:scale(.9)}.ejb .i{width:15px;height:15px}
+@media (hover:hover){.ejb:hover{background:var(--ac);transform:scale(1.08)}}
 .card.mrgd{opacity:.9}
 .gcard{cursor:pointer}
 .gst{position:relative}
@@ -11401,7 +11418,8 @@ html[data-pc] ::-webkit-scrollbar-track{background:transparent}
 html[data-pc] ::-webkit-scrollbar-thumb{background:#ffffff22;border-radius:8px;border:2px solid transparent;background-clip:content-box}
 html[data-pc] ::-webkit-scrollbar-thumb:hover{background:#ffffff3d;background-clip:content-box;border:2px solid transparent}
 html[data-pc] select option{background:#171923;color:#eef0f7}
-html[data-pc] #root .bar{padding-right:calc(14px + 159px)}
+html[data-pc] #root .bar,html[data-pc] #oppage .bar{padding-right:calc(14px + 159px)}
+html[data-pc] #oppage .bar{min-height:62px}
 html[data-pc] #bkbox .bkc{margin-left:0;margin-right:0}
 html[data-pc] #bkbox{max-width:760px;margin-left:auto;margin-right:auto}
 .wc{position:fixed;top:10px;right:14px;display:flex;gap:8px;z-index:99999;transition:opacity .2s}
@@ -12745,6 +12763,7 @@ function cardHTML(it, i, demo, go, G) {
   const ratio = st.total ? st.watched / st.total : 0;
   const reo = S.reorder && !demo;
   const nx = it.meta && it.meta.next;
+  const ejb = !G && !demo && !go && !S.reorder && it.group && route().name === 'group' ? `<button class="ejb" data-act="eject" data-id="${key}" aria-label="Прибрати з групи" title="Прибрати з групи"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h5a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-5"/><path d="M4 12h11M8 8l-4 4 4 4"/></svg></button>` : '';
   const cd = V.timer && nx && nx.ts ? `<div class="cd" data-c="1" data-ts="${nx.ts}" data-ep="${esc(nx.ep ?? '')}" data-approx="${nx.approx ? 1 : 0}" data-date="${nx.date_only ? 1 : 0}">${ico('clock')}<span></span></div>` : '';
   const dv = reo || demo || go || G, SEL = sel(reo);
   const psx = x => { const q = x.meta && x.meta.poster; return q ? `background-image:url('${esc(q)}')` : ''; };
@@ -12754,6 +12773,7 @@ function cardHTML(it, i, demo, go, G) {
   const ttl = G ? (gname(G.m) || lname(it)) : lname(it);
   return `<${dv ? 'div' : 'a'} class="card${G ? ' gcard' : ''}${arch ? ' arch' : ''}${ENTER ? ' enter' : ''}${reo ? ' reo' : ''}${SEL ? ' csel' : ''}${V.title && !(G && V.gtitle === false) ? '' : ' hidet'}" data-id="${key}"${G ? ` data-gid="${esc(G.g)}"` : ''} ${go ? 'data-act="gmopen"' : G ? (reo ? '' : 'data-act="gopen"') : dv ? '' : `href="#/a/${it.id}"`} style="--i:${Math.min(i || 0, 12)}">
     ${G ? `<div class="gst">${layers}` : ''}<div class="poster""${reo ? ' data-act="csel"' : ''}${demo ? ` style="background-image:linear-gradient(160deg,${it.hue})"` : p ? ` style="background-image:url('${esc(p)}'),linear-gradient(160deg,#2b2f4d,#171926)"` : ''}>
+      ${ejb}
       ${arch && !reo ? `<i class="seen">${ico('check')}</i>` : ''}
       ${reo ? `<span class="cks">${SEL ? ico('check') : ''}</span>` : ''}
       ${p ? '' : `<span>${esc((it.title || '?')[0])}</span>`}
@@ -13786,6 +13806,11 @@ const A = {
     const v = await askText('Назва групи', '', 'Можна залишити порожнім — тоді група буде без назви.'); if (v === null || v === undefined) return;
     try { await api('/api/group', {ids, name: v}); S.libSel.clear(); await loadLib(); toast('Групу створено', false, 'check'); } catch (e) { toast(e.message, true); }
   },
+  async eject(el) {  // прибрати аніме з групи (якщо в групі лишається одне — група розформовується)
+    const id = el.dataset.id, it = item(id); if (!it || !it.group) return;
+    const left = groupMembers(it.group).filter(x => x.id !== id);
+    try { await api('/api/ungroup', {ids: [id, ...(left.length < 2 ? left.map(x => x.id) : [])]}); await loadLib(); toast('Прибрано з групи', false, 'check'); } catch (e) { toast(e.message, true); }
+  },
   async libungrp() {
     const ids = [...S.libSel].filter(id => item(id) && item(id).group); if (!ids.length) return;
     try { await api('/api/ungroup', {ids}); S.libSel.clear(); await loadLib(); toast('Розгруповано', false, 'check'); } catch (e) { toast(e.message, true); }
@@ -14452,6 +14477,7 @@ setInterval(() => { if (S.arcPend.size && route().name === 'home' && !S.cur && !
 const LP = {t: 0, timer: null, x: 0, y: 0};
 const DR = {lock: 0, el: null, on: false, timer: null, sx: 0, sy: 0, gx: 0, gy: 0, px: 0, py: 0, auto: 0, id: '', pid: null, stack: [], clones: [], aux: null, corner: false, w: 0};
 function drZones(upd) {
+  if (PC_APP) return;  // на ПК кутових зон («переглянуте»/«видалити») немає
   const ic = ico(drToArc() ? 'check' : 'refresh');
   let r = $('#dzr'), l = $('#dzl');
   if (!r) { r = document.createElement('div'); r.id = 'dzr'; r.className = 'dz r'; document.body.appendChild(r); }
@@ -14460,6 +14486,7 @@ function drZones(upd) {
 }
 function zoneC(side) { const e = $(side === 'l' ? '#dzl' : '#dzr'); if (!e) return null; const b = e.getBoundingClientRect(); return {x: b.left + b.width / 2, y: b.top + b.height / 2, e}; }
 function inCorner() {
+  if (PC_APP) return false;
   let best = false;
   for (const sd of ['r', 'l']) {
     const z = zoneC(sd); if (!z) continue;
@@ -14665,7 +14692,7 @@ document.addEventListener('pointermove', ev => {
   }
   if (DR.pid !== null && ev.pointerId !== DR.pid) return;
   DR.px = ev.clientX; DR.py = ev.clientY;
-  if (DR.pc && DR.timer && !DR.on && DR.id !== undefined && Math.hypot(ev.clientX - DR.sx, ev.clientY - DR.sy) > 5) {
+  if (DR.pc && DR.timer && !DR.on && DR.id !== undefined && (S.reorder || !S.view.sort || S.view.sort === 'my') && Math.hypot(ev.clientX - DR.sx, ev.clientY - DR.sy) > 5) {
     const c0 = document.elementFromPoint(DR.sx, DR.sy), cc = c0 && c0.closest && c0.closest('.card[data-id]');  // ПК: затиснув і потягнув — редагування + перетягування
     clearTimeout(DR.timer); DR.timer = null;
     if (cc) { try { getSelection().removeAllRanges(); } catch (e) {} drStart(cc); drMove(); return; }  // просто перенесення: без виділення й без режиму редагування
@@ -16958,6 +16985,7 @@ loadLib(_bootCached ? 'vis' : false).then(() => { pollJobs(); pollNotifs(); chec
 if (PC_APP) (function () {
   const wvh = window.chrome && window.chrome.webview, post = m => { try { wvh.postMessage(m); } catch (e) {} };
   document.addEventListener('dragstart', e => e.preventDefault(), true);
+  ['mousedown', 'mouseup', 'auxclick'].forEach(t => document.addEventListener(t, e => { if (e.button === 1) { e.preventDefault(); e.stopPropagation(); } }, true));  // середня кнопка миші не відкриває браузер і не вмикає автопрокрутку
   document.addEventListener('dragover', e => e.preventDefault(), true);
   document.addEventListener('drop', e => e.preventDefault(), true);
   document.addEventListener('contextmenu', e => { if (!(e.target.closest && e.target.closest('input,textarea,[contenteditable="true"]'))) e.preventDefault(); }, true);
