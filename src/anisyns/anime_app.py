@@ -319,17 +319,22 @@ body.wait .mid .cb.big{opacity:0}
   };
   (function () {  // власні курсори (як у головному вікні)
     const H = document.documentElement, HS = {default: [4, 2], pointer: [12, 3], text: [16, 16], grab: [16, 16], grabbing: [16, 16], 'not-allowed': [4, 2]};
-    let last = null, prev = '';
+    let last = null, prev = '', SZ = {};
+    const cu = k => { const z = SZ[k] >= 40 && SZ[k] <= 200 ? SZ[k] : 100, h = HS[k]; return `url('/cur/${k}.svg?s=${z}') ${Math.round(h[0] * z / 100)} ${Math.round(h[1] * z / 100)}, auto`; };
     const set = e => {
       const t = e.target; if (t === last || !(t instanceof Element) || !H.classList.contains('curx')) return;
       if (last) last.style.cursor = prev; last = null;
       let c = getComputedStyle(t).cursor.split(',').pop().trim(); if (c === 'none') return;
-      const k = HS[c] ? c : 'default'; prev = t.style.cursor; last = t; t.style.cursor = `url('/cur/${k}.svg') ${HS[k][0]} ${HS[k][1]}, auto`;
+      const k = HS[c] ? c : 'default'; prev = t.style.cursor; last = t; t.style.cursor = cu(k);
     };
     document.addEventListener('mouseover', set, true); document.addEventListener('mousemove', set, true);
     document.addEventListener('pointerdown', e => { if (e.target.closest && e.target.closest('input[type=range],.tr')) H.classList.add('cgrab'); }, true);
     addEventListener('pointerup', () => H.classList.remove('cgrab'), true);
-    fetch('/api/settings').then(r => r.json()).then(j => { if (j.pc_cursor !== false) H.classList.add('curx'); }).catch(() => {});
+    fetch('/api/settings').then(r => r.json()).then(j => {
+      SZ = j.cursor_sizes || {}; const st = document.createElement('style');
+      st.textContent = `html.curx,html.curx body{cursor:${cu('default')}}\nhtml.curx.cgrab,html.curx.cgrab *{cursor:${cu('grabbing')}!important}\nhtml.curx body:not(.show){cursor:none}`; document.head.appendChild(st);
+      if (j.pc_cursor !== false) H.classList.add('curx');
+    }).catch(() => {});
   })();
   send({t: 'ready'});
 })();
@@ -625,7 +630,8 @@ def _make_episode(d):
   pv = d.get('preview')
   preview = None
   if isinstance(pv, dict):
-    preview = pv.get('src') or pv.get('thumbnail') or ((pv.get('optimized') or {}).get('src') if isinstance(pv.get('optimized'), dict) else None)
+    opt = pv.get('optimized') if isinstance(pv.get('optimized'), dict) else {}
+    preview = next((v for v in (pv.get('src'), pv.get('preview'), pv.get('thumbnail'), opt.get('src'), opt.get('preview'), opt.get('thumbnail')) if isinstance(v, str) and v), None)
   elif isinstance(pv, str):
     preview = pv
   return {
@@ -688,17 +694,57 @@ def _anilib_next(node, episodes):
   return {'ts': stamps[0] + 7 * 86400, 'ep': _num(last + 1), 'approx': True}
 
 
+def _al_name(d):
+  """Назва релізу AniLiberty: старий формат name={main,english}, новий — name рядком + nameEnglish."""
+  n = d.get('name') if isinstance(d, dict) else None
+  if isinstance(n, dict):
+    return (n.get('main') or '').strip(), (n.get('english') or '').strip()
+  return (n or '').strip() if isinstance(n, str) else '', (d.get('nameEnglish') or d.get('name_english') or '').strip() if isinstance(d, dict) else ''
+
+
+def _al_poster(d):
+  """Постер релізу: рядок (каталог), або {src|preview|thumbnail|optimized:{…}} (сторінка, API)."""
+  if not isinstance(d, dict):
+    return None
+  p = d.get('poster')
+  if isinstance(p, str) and p:
+    return p
+  if isinstance(p, dict):
+    opt = p.get('optimized') if isinstance(p.get('optimized'), dict) else {}
+    for v in (p.get('src'), p.get('preview'), opt.get('src'), opt.get('preview'), p.get('thumbnail'), opt.get('thumbnail')):
+      if isinstance(v, str) and v:
+        return v
+  v = d.get('posterThumbnail') or d.get('poster_thumbnail')
+  return v if isinstance(v, str) and v else None
+
+
+def _al_genres(d):
+  out = []
+  for g in (d.get('genres') or []) if isinstance(d, dict) else []:
+    n = g.get('name') if isinstance(g, dict) else g
+    if isinstance(n, str) and n:
+      out.append(n)
+  return out
+
+
+def _lib_alias(url):
+  """alias релізу з будь-якої форми адреси: /anime/releases/<alias> (нова) або /anime/releases/release/<alias>/episodes (стара)."""
+  p = urlparse(url or '').path
+  m = re.search(r'/anime/releases/release/([^/?#]+)', p) or re.search(r'/anime/releases/([^/?#]+)', p) or re.search(r'/release/([^/?#]+)', p)
+  return unquote(m.group(1)) if m else None
+
+
+def _lib_url(host, alias):
+  return f'https://{host}/anime/releases/{alias}'
+
+
 def _anilib_meta(node, base=None):
-  """Постер, опис та інше з об'єкта релізу AniLiberty (camelCase і snake_case)."""
+  """Постер, опис та інше з об'єкта релізу AniLiberty (camelCase і snake_case; старий і новий формат сайту)."""
   if not isinstance(node, dict):
     return {}
-  poster = node.get('poster') or {}
-  src = None
-  if isinstance(poster, dict):
-    opt = poster.get('optimized') or {}
-    src = poster.get('src') or (opt.get('src') if isinstance(opt, dict) else None)
-  name = node.get('name') if isinstance(node.get('name'), dict) else {}
-  genres = [g.get('name') for g in node.get('genres') or [] if isinstance(g, dict) and g.get('name')]
+  src = _al_poster(node)
+  name = {'english': _al_name(node)[1]}
+  genres = _al_genres(node)
   ong = node.get('isOngoing', node.get('is_ongoing'))
   tot = node.get('episodesTotal') or node.get('episodes_total')
   prod = node.get('isInProduction', node.get('is_in_production'))
@@ -790,18 +836,17 @@ def parse_page(html, url=None):
   release_node = None
   alias = None
   try:
-    am = re.search(r'/release/([^/?#]+)', urlparse(url or '').path)
-    alias = unquote(am.group(1)).lower() if am else None
+    alias = (_lib_alias(url) or '').lower() or None
   except Exception:
     alias = None
-  cands = [d for d in nodes if isinstance(d.get('name'), dict) and d['name'].get('main') and 'episodes' in d]
+  cands = [d for d in nodes if _al_name(d)[0] and isinstance(d.get('episodes'), list) and d.get('alias')]
   if alias:  # сторінка може містити й інші релізи (стрічка новинок, схожі) — беремо саме той, чия адреса відкрита
     byal = [d for d in cands if str(d.get('alias') or '').lower() == alias]
     if byal:
       cands = byal
   if cands:
     release_node = cands[0]
-    release_name = release_node['name']['main']
+    release_name = _al_name(release_node)[0]
 
   def collect(src):
     for d in src:
@@ -830,6 +875,15 @@ def parse_page(html, url=None):
   meta = _anilib_meta(release_node)
   if isinstance(release_node, dict) and release_node.get('id'):
     meta['rid'] = release_node.get('id')
+  try:  # франшиза («Связанное») і «Рекомендованные релизы» лежать у payload сторінки
+    dd = data.get('data') if isinstance(data, dict) else None
+    for k, v in (dd or {}).items():
+      if k.startswith('anime:franchises:release:') and not k.endswith('$fetchedAt') and isinstance(v, list):
+        meta['_frn'] = [r for fr in v if isinstance(fr, dict) for r in (fr.get('releases') or []) if isinstance(r, dict)]
+      elif k.startswith('anime:releases:recommended:') and not k.endswith('$fetchedAt') and isinstance(v, list):
+        meta['_recs'] = [r for r in v if isinstance(r, dict)]
+  except Exception:
+    pass
   exact = _find_next(release_node) if release_node else None
   meta['next'] = ({'ts': exact, 'ep': (max([e['ordinal'] for e in eps if isinstance(e['ordinal'], (int, float))] or [0]) + 1) or None, 'approx': False}
                   if exact else _anilib_next(release_node, eps))
@@ -864,15 +918,40 @@ def fetch_episodes(url):
 
 
 def _rel_anilib(url, meta):
-  """AniLiberty: «Связанное» (франшиза). meta['rid'] — службове поле з parse_page, у бібліотеку не потрапляє."""
+  """AniLiberty: «Связанное» (франшиза) + «Рекомендованные релизы». Беремо з payload сторінки, а за потреби — з API.
+  meta['rid'], meta['_frn'], meta['_recs'] — службові поля з parse_page, у бібліотеку не потрапляють."""
   rid = meta.pop('rid', None)
-  m = re.search(r'/release/([^/?#]+)', urlparse(url).path)
-  if not m:
+  frn = meta.pop('_frn', None)
+  recs = meta.pop('_recs', None)
+  alias = _lib_alias(url)
+  if not alias:
     return
-  host, alias = urlparse(url).netloc, unquote(m.group(1))
-  rel = related_cached('a:' + alias, lambda: _anilib_related(host, rid, alias))
+  host = urlparse(url).netloc
+
+  def conv(lst, kind, order=False):
+    out = []
+    for r in sorted(lst, key=lambda r: r.get('position') or 0) if order else lst:
+      a = r.get('alias')
+      nm = _al_name(r)[0] or _al_name(r)[1]
+      if not a or not nm:
+        continue
+      tp = r.get('type') if isinstance(r.get('type'), str) else None
+      out.append({'url': _lib_url(host, a), 'title': nm, 'note': ', '.join(str(x) for x in (tp, r.get('year')) if x),
+                  'poster': _al_poster(r), 'kind': kind})
+    return out
+  rel = conv(frn, 'order', True) if frn else []
+  if not rel:
+    try:
+      rel = related_cached('a:' + alias, lambda: _anilib_related(host, rid, alias))
+    except Cancelled:
+      raise
+    except Exception:
+      rel = []
   rel = _rel_clean(rel, None)
-  rel = [x for x in rel if f'/release/{alias}/' not in x['url']]
+  rel = [x for x in rel if _lib_alias(x['url']) != alias]
+  if recs:
+    seen = {x['url'] for x in rel}
+    rel += [x for x in _rel_clean(conv(recs, 'similar'), None) if x['url'] not in seen and _lib_alias(x['url']) != alias]
   if rel:
     meta['related'] = rel
 
@@ -884,8 +963,28 @@ def _fetch_episodes(url):
   if _is_vost(url):
     return _fetch_vost(url)
   _stage('Читаю сторінку…')
-  html = http_get(url, headers=HEADERS, timeout=20).text
-  name, eps, meta = parse_page(html, url)
+  if site_info(url)['id'] == 'aniliberty' and _lib_alias(url):  # сайт змінив адреси: пробуємо нову форму, потім стару
+    cand = [_lib_url(urlparse(url).netloc, _lib_alias(url)), url]
+    cand = list(dict.fromkeys(cand))
+  else:
+    cand = [url]
+  html = name = eps = meta = None
+  last_ex = None
+  for cu in cand:
+    try:
+      html = http_get(cu, headers=HEADERS, timeout=20).text
+      name, eps, meta = parse_page(html, cu)
+      if eps or cu == cand[-1]:
+        url = cu if eps else url
+        break
+    except Cancelled:
+      raise
+    except Exception as ex:
+      last_ex = ex
+      if cu == cand[-1]:
+        raise
+  if html is None:
+    raise last_ex or RuntimeError('Сторінка не відкрилась')
   _rel_anilib(url, meta)
 
   # Посилання на конкретну серію: /anime/video/episode/<uuid>
@@ -906,12 +1005,12 @@ def _fetch_episodes(url):
 
   # Запасний варіант: офіційне API (якщо в HTML даних не знайшли)
   if not eps:
-    alias = re.search(r'/release/([^/?#]+)', urlparse(url).path)
-    if alias:
+    alias = _lib_alias(url)
+    if alias and site_info(url)['id'] == 'aniliberty':
       host = urlparse(url).netloc
-      api = f'https://{host}/api/v1/anime/releases/{alias.group(1)}'
+      api = f'https://{host}/api/v1/anime/releases/{alias}'
       j = http_get(api, headers=HEADERS, timeout=20).json()
-      name = (j.get('name') or {}).get('main') or alias.group(1)
+      name = _al_name(j)[0] or alias
       meta = _anilib_meta(j, f'https://{host}/')
       for d in j.get('episodes') or []:
         ep = _make_episode(d)
@@ -3075,14 +3174,14 @@ def _anilib_related(host, rid, alias):
     if depth > 6:
       return
     if isinstance(o, dict):
-      if o.get('alias') and isinstance(o.get('name'), dict) and (o['name'].get('main') or o['name'].get('english')):
+      if o.get('alias') and (_al_name(o)[0] or _al_name(o)[1]):
         if o['alias'] not in seen:
           seen.add(o['alias'])
           mt = _anilib_meta(o, base)
           tp = o.get('type')
-          tp = tp.get('description') or tp.get('value') if isinstance(tp, dict) else None
-          items.append({'url': f'https://{host}/anime/releases/release/{o["alias"]}/episodes',
-                        'title': o['name'].get('main') or o['name'].get('english'),
+          tp = tp.get('description') or tp.get('value') if isinstance(tp, dict) else (tp if isinstance(tp, str) else None)
+          items.append({'url': _lib_url(host, o['alias']),
+                        'title': _al_name(o)[0] or _al_name(o)[1],
                         'note': ', '.join(str(x) for x in (tp, o.get('year')) if x), 'poster': mt.get('poster'), 'kind': 'order'})
         return
       for v in o.values():
@@ -3163,35 +3262,85 @@ def _utf(r):
   return r.text
 
 
+def _al_catalog_html(host, page, params):
+  """Каталог AniLiberty зі сторінки сайту: дані лежать у __NUXT_DATA__ (anime:catalog:releases). Повертає (список, усього)."""
+  q = dict(params)
+  if page > 1:
+    q['page'] = page
+  r = http_get(f'https://{host}/anime/catalog', params=q or None, headers=HEADERS, timeout=14, retries=0)
+  if r.status_code != 200:
+    raise RuntimeError(f'HTTP {r.status_code}')
+  m = re.search(r'<script[^>]*id="__NUXT_DATA__"[^>]*>(.*?)</script>', r.text, re.S)
+  if not m:
+    raise RuntimeError('немає даних на сторінці')
+  root = _devalue(json.loads(m.group(1)))
+  dd = (root.get('data') if isinstance(root, dict) else None) or {}
+  cat = next((v for k, v in dd.items() if k.startswith('anime:catalog:releases') and not k.endswith('$fetchedAt') and isinstance(v, dict)), None)
+  if cat is None:
+    raise RuntimeError('немає каталогу в даних сторінки')
+  return [d for d in (cat.get('releases') or []) if isinstance(d, dict)], cat.get('total')
+
+
+def _al_row(d, host):
+  """Реліз із каталогу/пошуку/API (обидва формати) → запис для списку, або None."""
+  alias = d.get('alias')
+  title, eng = _al_name(d)
+  title = title or eng or alias
+  if not alias or not title:
+    return None
+  tp = d.get('type')
+  tp = (tp.get('description') or tp.get('value') or '') if isinstance(tp, dict) else (tp if isinstance(tp, str) else '')
+  le = d.get('latest_episode') if isinstance(d.get('latest_episode'), dict) else {}
+  tot = d.get('episodes_total', d.get('episodesTotal'))
+  info = ''
+  if le.get('ordinal') is not None:
+    info = f"серія {le.get('ordinal')}" + (f' з {tot}' if tot else '')
+  elif isinstance(tot, int) and tot:
+    info = f'{tot} серій'
+  rt = d.get('rating')
+  rt = rt.get('average') if isinstance(rt, dict) else None
+  return {'alias': alias, 'title': title, 'orig': eng, 'url': _lib_url(host, alias), 'poster': _abs(f'https://{host}/', _al_poster(d)),
+          'year': d.get('year'), 'type': tp, 'genres': _al_genres(d), 'info': info, 'rating': rt if isinstance(rt, (int, float)) and rt else None}
+
+
 def _search_aniliberty(q):
   last = None
+  nq = [w for w in re.split(r'\W+', (q or '').lower()) if len(w) > 1]
   for host in ('aniliberty.top', 'anilibria.top'):
     try:
       r = http_get(f'https://{host}/api/v1/app/search/releases', params={'query': q}, headers=HEADERS, timeout=12, retries=0)
-      if r.status_code != 200:
+      if r.status_code == 200:
+        j = r.json()
+        if isinstance(j, dict):
+          j = j.get('data') or j.get('items') or j.get('list') or []
+        out = []
+        for d in j or []:
+          row = _al_row(d, host) if isinstance(d, dict) else None
+          if row:
+            out.append({'title': row['title'], 'orig': row['orig'], 'url': row['url'], 'poster': row['poster'], 'year': row['year']})
+        if out:
+          return out
+      else:
         last = RuntimeError(f'HTTP {r.status_code}')
-        continue
-      j = r.json()
-      if isinstance(j, dict):
-        j = j.get('data') or j.get('items') or j.get('list') or []
-      out = []
-      for d in j or []:
-        if not isinstance(d, dict):
-          continue
-        alias = d.get('alias')
-        nm = d.get('name') if isinstance(d.get('name'), dict) else {}
-        title = nm.get('main') or nm.get('english') or alias
-        if not alias or not title:
-          continue
-        meta = _anilib_meta(d, f'https://{host}/')
-        out.append({'title': title, 'orig': nm.get('english') or '', 'url': f'https://{host}/anime/releases/release/{alias}/episodes',
-                    'poster': meta.get('poster'), 'year': d.get('year')})
-      return out
     except Cancelled:
       raise
     except Exception as ex:
       last = ex
-  raise last or RuntimeError('AniLiberty не відповідає')
+    # запасний шлях: пошук каталогу на сторінці (назву параметра сайт не документує — пробуємо відомі й перевіряємо, що результат справді про запит)
+    for prm in ('search', 'query', 'q', 'name'):
+      try:
+        lst, _t = _al_catalog_html(host, 1, {prm: q})
+        rows = [x for x in (_al_row(d, host) for d in lst) if x]
+        hit = [x for x in rows if any(w in (x['title'] + ' ' + x['orig']).lower() for w in nq)] if nq else rows
+        if hit:
+          return [{'title': x['title'], 'orig': x['orig'], 'url': x['url'], 'poster': x['poster'], 'year': x['year']} for x in hit]
+      except Cancelled:
+        raise
+      except Exception as ex:
+        last = ex
+  if last is not None:
+    raise last
+  return []
 
 
 def _search_yummy_api(q):
@@ -3768,10 +3917,20 @@ def _browse_aniliberty(page, hosts=('aniliberty.top', 'anilibria.top')):
   last = None
   t_end = time.time() + 25  # загальний ліміт: ланцюжок варіантів не має висіти хвилинами
   for host in hosts:
-    # 1) каталог з фільтром «онгоїнг» та сортуванням за свіжістю; 2) той самий каталог без фільтра; 3) «останні релізи»
+    # 1) сторінка каталогу сайту з фільтром «онгоїнг» (дані з __NUXT_DATA__); 2) API каталогу; 3) «останні релізи»
+    try:
+      lst, total = _al_catalog_html(host, page, {'publishStatuses': 'IS_ONGOING'})
+      rows = [x for x in (_al_row(d, host) for d in lst) if x]
+      if rows:
+        more = (page * 30 < int(total)) if isinstance(total, int) and total else len(rows) >= 30
+        return [_bi(x['title'], x['url'], x['poster'], x['year'], x['type'], x['genres'], x['info'], x['orig'], x['rating']) for x in rows], more
+      last = RuntimeError('порожня сторінка каталогу')
+    except Cancelled:
+      raise
+    except Exception as ex:
+      last = ex
     attempts = (
         ('/api/v1/anime/catalog/releases', {'page': page, 'limit': 24, 'f[publish_statuses][]': 'IS_ONGOING', 'f[sorting]': 'FRESH_AT_DESC'}),
-        ('/api/v1/anime/catalog/releases', {'page': page, 'limit': 24, 'f[publish_statuses]': 'IS_ONGOING', 'f[sorting]': 'FRESH_AT_DESC'}),
         ('/api/v1/anime/catalog/releases', {'page': page, 'limit': 24, 'f[sorting]': 'FRESH_AT_DESC'}),
         ('/api/v1/anime/releases/latest', {'limit': 24}),
     )
@@ -3786,34 +3945,14 @@ def _browse_aniliberty(page, hosts=('aniliberty.top', 'anilibria.top')):
         j = r.json()
         meta = j.get('meta') if isinstance(j, dict) else None
         lst = (j.get('data') or j.get('items') or j.get('list') or []) if isinstance(j, dict) else j
-        out = []
-        for d in lst or []:
-          if not isinstance(d, dict):
-            continue
-          alias = d.get('alias')
-          nm = d.get('name') if isinstance(d.get('name'), dict) else {}
-          title = nm.get('main') or nm.get('english') or alias
-          if not alias or not title:
-            continue
-          tp = d.get('type') if isinstance(d.get('type'), dict) else {}
-          gs = [g.get('name') for g in (d.get('genres') or []) if isinstance(g, dict) and g.get('name')]
-          le = d.get('latest_episode') if isinstance(d.get('latest_episode'), dict) else {}
-          tot = d.get('episodes_total')
-          info = ''
-          if le.get('ordinal') is not None:
-            info = f"серія {le.get('ordinal')}" + (f' з {tot}' if tot else '')
-          elif tot:
-            info = f'{tot} серій'
-          sn = d.get('season') if isinstance(d.get('season'), dict) else {}
-          out.append(_bi(title, f'https://{host}/anime/releases/release/{alias}/episodes', _anilib_meta(d, f'https://{host}/').get('poster'),
-                         d.get('year'), tp.get('description') or tp.get('value') or '', gs, info, nm.get('english') or ''))
-        if not out:
+        rows = [x for x in (_al_row(d, host) for d in (lst or []) if isinstance(d, dict)) if x]
+        if not rows:
           last = RuntimeError('порожня відповідь')
           continue
         pg = ((meta or {}).get('pagination') or {}) if isinstance(meta, dict) else {}
         total = pg.get('total_pages') or pg.get('last_page')
-        more = (page < int(total)) if total else (len(out) >= 24 and 'latest' not in path)
-        return out, more
+        more = (page < int(total)) if total else (len(rows) >= 24 and 'latest' not in path)
+        return [_bi(x['title'], x['url'], x['poster'], x['year'], x['type'], x['genres'], x['info'], x['orig'], x['rating']) for x in rows], more
       except Cancelled:
         raise
       except Exception as ex:
@@ -7027,7 +7166,7 @@ def net_state():
 SETTINGS = {'mobile_download': False, 'auto_skip': False, 'auto_skip_opening': True, 'auto_skip_ending': True, 'auto_next': True,
             'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': True, 'ios_player': False, 'ios_pl2': False, 'web_inapp': True, 'np_ep_cover': True, 'hide_psave': False, 'auto_arc': True, 'show_scrollbar': False,
             'bg_keep': True, 'bg_check': False, 'island': True, 'island_dl': True, 'island_check': False,
-            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'old_cards': False, 'pc_cursor': True, 'np_cover': 'ep', 'dub_fav': [], 'dub_prio': [], 'dub_seen': [], 'fx_style': 'blocks', 'recent_min': 3, 'handoff': True, 'rc': True, 'rc_in': True, 'rc_out': True, 'dv2': False, 'xgest': 'both', 'client': {},
+            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'old_cards': False, 'pc_cursor': True, 'cursor_sizes': {}, 'np_cover': 'ep', 'dub_fav': [], 'dub_prio': [], 'dub_seen': [], 'fx_style': 'blocks', 'recent_min': 3, 'handoff': True, 'rc': True, 'rc_in': True, 'rc_out': True, 'dv2': False, 'xgest': 'both', 'client': {},
             'site_order': ['aniliberty', 'yummyani', 'animevost', 'animru'], 'view': {}}
 
 
@@ -7071,7 +7210,10 @@ def api_settings(data=None):
     with LOCK:
       for k in SETTINGS:
         if k in data:
-          if isinstance(SETTINGS[k], bool):
+          if k == 'cursor_sizes':  # {вид курсора: розмір у відсотках}, лише відомі види й 40–200 %
+            raw = data[k] if isinstance(data[k], dict) else {}
+            SETTINGS[k] = {n: int(v) for n, v in raw.items() if n in CURSORS and isinstance(v, (int, float)) and not isinstance(v, bool) and 40 <= int(v) <= 200 and int(v) != 100}
+          elif isinstance(SETTINGS[k], bool):
             SETTINGS[k] = bool(data[k])
           elif isinstance(SETTINGS[k], dict):
             if isinstance(data[k], dict) and len(json.dumps(data[k])) < 4000:
@@ -7369,13 +7511,44 @@ def _cm_yummy(url, page, parent):
   return {'items': items, 'more': more}
 
 
+def _cm_liberty_html(html):
+  """Коментарі зі сторінки релізу (SSR): <article data-thread=…> з нікнеймом, датою, текстом і лайками."""
+  out = []
+  parts = re.split(r'(?=<article[^>]+data-thread=")', html)
+  for seg in parts:
+    m = re.match(r'<article[^>]+data-thread="([^"]+)"', seg)
+    if not m:
+      continue
+    nick = re.search(r'data-nickname[^>]*>([^<]*)<', seg)
+    tm = re.search(r'<time[^>]*datetime="([^"]*)"', seg)
+    body = seg.split('data-like', 1)[0]
+    ps = re.findall(r'<p(?:\s[^>]*)?>(.*?)</p>', body, re.S)
+    text = _cm_text('\n'.join(ps))
+    lk = re.search(r'aria-label="Нравится:\s*(\d+)"', seg)
+    av = re.search(r'data-slot="avatar-image"[^>]*\ssrc="([^"]+)"', seg) or re.search(r'<img[^>]+\ssrc="([^"]+)"[^>]*data-slot="avatar-image"', seg)
+    if not text:
+      continue
+    out.append({'id': m.group(1), 'author': htmllib.unescape(nick.group(1)).strip() if nick else 'Гість', 'avatar': htmllib.unescape(av.group(1)) if av else '',
+                'date': (tm.group(1)[:16].replace('T', ' ') if tm else ''), 'text': text, 'likes': int(lk.group(1)) if lk else None})
+  return out
+
+
 def _cm_liberty(url, page):
   host = urlparse(url).netloc
-  m = re.search(r'/release/([^/?#]+)', urlparse(url).path)
-  alias = m.group(1) if m else ''
+  alias = _lib_alias(url) or ''
   if not alias:
     raise RuntimeError('не розпізнав адресу релізу')
   last = None
+  if page == 0:  # новий сайт віддає перші коментарі прямо на сторінці релізу
+    try:
+      html = http_get(_lib_url(host, alias), headers=HEADERS, timeout=15, retries=0).text
+      items = _cm_liberty_html(html)
+      if items:
+        return {'items': items, 'more': 'Показать ещё комментар' in html}
+    except Cancelled:
+      raise
+    except Exception as ex:
+      last = ex
   for path in (f'/api/v1/anime/releases/{alias}/comments', f'/api/v1/comments/releases/{alias}', f'/api/v1/anime/comments/{alias}'):
     try:
       r = http_get(f'https://{host}{path}', params={'page': page + 1, 'limit': 20}, headers={**HEADERS, 'Accept': 'application/json'}, timeout=12, retries=0)
@@ -7557,7 +7730,13 @@ class Handler(BaseHTTPRequestHandler):
       if p == '/npframe' and NP_FRAME['b']:
         return self._bytes(NP_FRAME['b'], 'image/jpeg', extra={'Cache-Control': 'no-store'})
       if p.startswith('/cur/') and p.endswith('.svg') and p[5:-4] in CURSORS:
-        return self._bytes(CURSORS[p[5:-4]].encode('utf8'), 'image/svg+xml', extra={'Cache-Control': 'public, max-age=86400'})
+        try:
+          sc = max(40, min(200, int((parse_qs(urlparse(self.path).query).get('s') or ['100'])[0])))
+        except Exception:
+          sc = 100
+        px = max(16, min(128, round(32 * sc / 100)))  # розмір курсора = розмір зображення (SVG масштабується сам)
+        svg = CURSORS[p[5:-4]].replace('width="32" height="32"', f'width="{px}" height="{px}"', 1)
+        return self._bytes(svg.encode('utf8'), 'image/svg+xml', extra={'Cache-Control': 'public, max-age=86400'})
       if p == '/pip' and PC_APP:
         return self._bytes(PIP_HTML.encode('utf8'), 'text/html; charset=utf-8', extra={'Cache-Control': 'no-store'})
       if p in ('/', '/index.html'):
@@ -8786,13 +8965,13 @@ SYNC = {'st': None, 'srv': None, 'srv_err': '', 'started': False, 'found': {}, '
 SYNC_SETTINGS_KEYS = ['view', 'auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'auto_check', 'auto_check_hours', 'blur_thumbs',
                       'np_ep_cover', 'np_cover', 'ios_player', 'hide_psave', 'auto_arc', 'skip_mode', 'vol_max', 'own_vol', 'recent_min', 'site_order', 'dub_fav', 'dub_prio', 'fx_style',
                       # налаштування, яких немає на частині платформ, теж зберігаємо й передаємо — щоб при підключенні іншого пристрою вони відновились
-                      'web_inapp', 'mobile_download', 'bg_keep', 'bg_check', 'island', 'island_dl', 'island_check', 'xgest', 'pc_cursor']
+                      'web_inapp', 'mobile_download', 'bg_keep', 'bg_check', 'island', 'island_dl', 'island_check', 'xgest', 'pc_cursor', 'cursor_sizes']
 SYNC_GROUPS = {'view': ['view', 'blur_thumbs'],
                'player': ['auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'skip_mode', 'vol_max', 'own_vol', 'np_ep_cover', 'np_cover', 'ios_player', 'hide_psave'],
                'library': ['recent_min', 'auto_arc'],
                'auto': ['auto_check', 'auto_check_hours'],
                'sites': ['site_order', 'dub_fav', 'dub_prio'],
-               'device': ['web_inapp', 'mobile_download', 'bg_keep', 'bg_check', 'island', 'island_dl', 'island_check', 'xgest', 'pc_cursor'],
+               'device': ['web_inapp', 'mobile_download', 'bg_keep', 'bg_check', 'island', 'island_dl', 'island_check', 'xgest', 'pc_cursor', 'cursor_sizes'],
                'covers': []}  # covers — не налаштування, а власні обкладинки карток (передаються разом із прапорцями аніме)
 SYNC_GNAMES = list(SYNC_GROUPS)
 SYNC_SCOPES = ('all',) + tuple(SYNC_GNAMES)
@@ -10688,6 +10867,8 @@ html[data-pc] .net:not(.offline){display:none}
 .cenum .in{width:72px;text-align:center;padding:9px 6px}.cenum button{width:38px;height:38px;border:0;border-radius:11px;background:var(--s2,#20232f);color:inherit;font:inherit;font-size:20px;font-weight:600;cursor:pointer}
 .cesw{display:flex;align-items:center;gap:12px;margin-top:12px}.cesw .tx{flex:1;font-size:13px;color:var(--mu)}
 .dvsec{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mu);margin:16px 4px 8px}
+.cus{display:flex;align-items:center;gap:12px}.cus .tx{flex:1;min-width:0}.cuv{width:72px;height:72px;flex:none;border-radius:12px;background:#ffffff0d;display:grid;place-items:center}.cuv img{display:block;pointer-events:none}
+.cus input[type=range]{width:130px;flex:none;accent-color:var(--ac)}.cun{width:44px;text-align:right;font-size:12px;color:var(--mu);font-variant-numeric:tabular-nums}
 .sephint{margin:4px 6px 12px}[data-sepk]{position:relative;-webkit-touch-callout:none}
 [data-sepk]:not(input):not(textarea){-webkit-user-select:none;user-select:none}
 [data-sepk].sepon{box-shadow:inset 3px 0 0 var(--ac);background:linear-gradient(90deg,rgba(139,123,255,.16),rgba(139,123,255,.04))}
@@ -11683,8 +11864,6 @@ html[data-pc] #stage:has(#vc.off){cursor:none}
 .osd{position:absolute;left:50%;top:18%;transform:translate(-50%,-6px) scale(.96);z-index:9;display:flex;align-items:center;gap:9px;padding:9px 16px;border-radius:14px;background:linear-gradient(135deg,#2a2e46ee,#171a29ee);border:1px solid #ffffff2a;color:#fff;font-weight:700;font-size:15px;opacity:0;pointer-events:none;transition:opacity .16s,transform .16s;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
 .osd.on{opacity:1;transform:translate(-50%,0) scale(1)}.osd .i{width:20px;height:20px}
 /* ===== ПК: власні курсори (клас curx на <html>; решту робить JS — inline cursor під наведеним елементом) ===== */
-html.curx,html.curx body{cursor:url('/cur/default.svg') 4 2,auto}
-html.curx body.dragging,html.curx body.dragging *,html.curx.cgrab,html.curx.cgrab *,html.curx.hsd,html.curx.hsd *,html.curx #rcbar.drag,html.curx #rcbar.drag *{cursor:url('/cur/grabbing.svg') 16 16,auto!important}
 html.curx #stage:has(#vc.off),html.curx #stage:has(#vc.off) *{cursor:none!important}
 html[data-pc] .card.reo{cursor:grab}
 html[data-pc] #oppage{cursor:progress}
@@ -11839,7 +12018,7 @@ html[data-pc].pcfs .vc .sk{left:28px;right:28px}
 <linearGradient id="spg2" x1="526" y1="370" x2="162" y2="458" gradientUnits="userSpaceOnUse"><stop offset=".4957" stop-color="#fff"/><stop offset=".8537" stop-color="#47367d"/><stop offset="1" stop-color="#543883"/></linearGradient>
 <linearGradient id="spg3" x1="257" y1="367" x2="311" y2="270" gradientUnits="userSpaceOnUse"><stop offset=".11" stop-color="#7a3bcb"/><stop offset="1" stop-color="#66a2d3"/></linearGradient></defs>
 <g class="pa"><polygon points="391.839,405.47 461.94,365.881 520.616,502.616 438.959,505.665" fill="#fff"/>
-<path d="M83 499 L262.338 101 L293.156 101 L297.302 180.97 L278.825 225.892 L257.739 213.547 C255.134 212.025 252.361 211.326 249.665 211.326 L249.656 211.326 L249.651 211.326 C247.22 211.326 244.843 211.892 242.699 212.923 C237.45 215.448 233.573 220.759 233.573 227.422 L233.573 233.183 L233.573 326.319 L155.763 499 Z" fill="#fff"/></g>
+<path d="M83 499 L262.338 101 L293.156 101 L295.6 101 L298.9 177.3 L297.302 180.97 L278.825 225.892 L257.739 213.547 C255.134 212.025 252.361 211.326 249.665 211.326 L249.656 211.326 L249.651 211.326 C247.22 211.326 244.843 211.892 242.699 212.923 C237.45 215.448 233.573 220.759 233.573 227.422 L233.573 233.183 L233.573 326.319 L155.763 499 Z" fill="#fff"/></g>
 <path class="pb" d="M297.302 180.97 L293.156 101 L316.231 101 L337.662 101 L397.098 234.559 C398.274 237.216 400.26 239.437 402.77 240.901 L471.915 281.271 C492.229 293.133 491.904 322.618 471.333 334.026 L271.188 447.056 C247.882 460.208 219.855 447.465 207.269 435.903 L233.441 377.821 C233.426 382.229 233.562 386.678 234.233 389.11 C237.034 399.275 249.552 403.717 260.05 398.273 C270.657 392.768 286.363 383.452 307.155 370.984 C334.35 354.677 370.246 332.977 414.814 307.358 C415.528 306.946 415.532 305.914 414.818 305.494 L337.876 260.459 C336.883 259.876 336.094 258.999 335.619 257.947 L298.824 177.271 Z" fill="url(#spg2)"/>
 <path class="pc" d="M360.709 299.135 L269.126 245.527 C263.774 242.395 257.045 246.259 257.045 252.461 L257.045 358.719 C257.045 364.891 263.719 368.76 269.068 365.682 L360.655 313.035 C366.003 309.961 366.033 302.25 360.709 299.135 Z" fill="url(#spg3)"/></svg>
 <div class="nm">Ani<i>Syns</i></div><div class="tg">The way to watch Anime with comfort!</div><div class="ld"></div></div>
@@ -12435,7 +12614,7 @@ const SITE_LIST = [['aniliberty', 'AniLiberty'], ['yummyani', 'YummyAnime'], ['a
 function siteRank(id) { const o = S.set.site_order || []; const i = o.indexOf(id); return i < 0 ? 99 : i; }
 function siteList() { return SITE_LIST.slice().sort((a, b) => siteRank(a[0]) - siteRank(b[0])); }  // порядок — як у налаштуваннях
 const SITE_MARK = {yummyani: 'Y', aniliberty: 'AL', animru: 'A', animevost: 'V'};
-const normU = u => String(u || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/(episodes)?\/?$/, '').replace(/\/page-\d+-/, '/');
+const normU = u => String(u || '').replace(/^https?:\/\/(www\.)?/, '').replace(/\/anime\/releases\/release\/([^/?#]+)(\/episodes)?/, '/anime/releases/$1').replace(/\/(episodes)?\/?$/, '').replace(/\/page-\d+-/, '/');
 function inLib(its) {
   const set = new Set(its.map(x => normU(x.url)));
   return S.items.some(it => (it.sources || []).some(sx => set.has(normU(sx.url))) || set.has(normU(it.url)));
@@ -12836,7 +13015,15 @@ function settingsHTML() {
       <div class="lvsub">Серії</div>
       <div class="row"><div class="tx"><b>Розмивати скріншоти серій</b><span class="d">Захист від спойлерів у картках серій.</span></div><label class="sw"><input type="checkbox" data-set="blur_thumbs" ${S.set.blur_thumbs ? 'checked' : ''}></label></div>
       ${PC_APP ? `<div class="lvsub">Програма</div>
-      <div class="row"><div class="tx"><b>Власний курсор</b><span class="d">Фірмові курсори програми. Вимкнено — звичайні Windows.</span></div><label class="sw"><input type="checkbox" data-set="pc_cursor" ${S.set.pc_cursor !== false ? 'checked' : ''}></label></div>` : ''}
+      <div class="skg ${S.cuOpen === true && S.set.pc_cursor !== false ? 'open' : ''}" id="cug">
+        <div class="skh" data-act="cutog"><div class="tx"><b>Власний курсор</b><span class="d">Фірмові курсори й їхній розмір. Вимкнено — звичайні Windows.</span></div>
+          <label class="sw"><input type="checkbox" data-set="pc_cursor" ${S.set.pc_cursor !== false ? 'checked' : ''}></label>
+          <button class="arr" aria-label="Розгорнути">${ico('chev')}</button></div>
+        <div class="fold"><div>
+          ${CUR_KINDS.map(([k, t, d]) => curRow(k, t, d)).join('')}
+          <div class="row"><button class="btn" data-act="cureset" style="margin-left:auto">Скинути розміри</button></div>
+        </div></div>
+      </div>` : ''}
     </div></div>
   </div>
 
@@ -14915,6 +15102,8 @@ const A = {
   grptog(el) { const g = document.getElementById(el.dataset.id); if (!g) return; S[el.dataset.g] = !g.classList.contains('open'); g.classList.toggle('open', S[el.dataset.g]); },
   istog(el, ev) { if (ev && ev.target.closest('.sw')) return; S.isOpen = !$('#isg').classList.contains('open'); $('#isg').classList.toggle('open', S.isOpen); },
   ovtog(el, ev) { if (ev && ev.target.closest('.sw')) return; S.ovOpen = !$('#ovg').classList.contains('open'); $('#ovg').classList.toggle('open', S.ovOpen); },
+  cutog(el, ev) { if (ev && ev.target.closest('.sw')) return; S.cuOpen = !$('#cug').classList.contains('open'); $('#cug').classList.toggle('open', S.cuOpen); },
+  cureset() { S.set.cursor_sizes = {}; setOpt('cursor_sizes', {}); if (window.__curApply) window.__curApply(); render(); },
   sktog(el, ev) { if (ev && ev.target.closest('.sw, .stsel')) return; S.skOpen = !$('#skg').classList.contains('open'); $('#skg').classList.toggle('open', S.skOpen); },
   ptog() { S.pOpen = !S.pOpen; const g = $('#pgrp'); if (g) g.classList.toggle('open', S.pOpen); },
   pprev() { stepPlayer(-1); },
@@ -15412,7 +15601,10 @@ document.addEventListener('change', ev => {
     if (ev.target.dataset.set === 'blur_thumbs') document.querySelectorAll('.ec .th img, .rme .thi').forEach(i => i.classList.toggle('bl', ev.target.checked));
     if (ev.target.dataset.set === 'auto_next') { const c = $('#pauto'); if (c) c.checked = ev.target.checked; }
     if (ev.target.dataset.set === 'ios_player') applyPlayerMode();
-    if (ev.target.dataset.set === 'pc_cursor' && window.__curApply) window.__curApply();
+    if (ev.target.dataset.set === 'pc_cursor') {
+      if (window.__curApply) window.__curApply();
+      const g = $('#cug'); if (g) { if (!ev.target.checked) g.classList.remove('open'); g.querySelectorAll('.row.sub').forEach(r => r.classList.toggle('dis', !ev.target.checked)); }
+    }
     if (ev.target.dataset.set === 'old_cards' && !ev.target.checked && S.epView === 'cards') { S.epView = 'list'; try { localStorage.setItem('epv', 'list'); } catch (e) {} }
   }
 });
@@ -15865,6 +16057,18 @@ document.addEventListener('click', () => setTimeout(skPlace, 30), true); documen
 const TAIL_MIN = 25; /* якщо після аутро лишається більше — це сцена, не кінець */
 function autoNext() { return S.set.auto_next !== false; }
 function syncAuto() { const c = $('#pauto'); if (c) c.checked = autoNext(); }
+const CUR_KINDS = [['default', 'Стандартний', 'Звичайна стрілка'], ['pointer', 'Вказівник', 'Кнопки, картки, посилання'], ['text', 'Текст', 'Поля вводу, виділюваний текст'],
+  ['wait', 'Очікування', 'Програма зайнята'], ['progress', 'Фоновий процес', 'Стрілка з індикатором'], ['help', 'Допомога', 'Підказки'], ['crosshair', 'Приціл', 'Точний вибір'],
+  ['not-allowed', 'Заборонено', 'Вимкнені кнопки'], ['resize-ns', 'Розмір ↕', 'Змінити висоту'], ['resize-ew', 'Розмір ↔', 'Змінити ширину'],
+  ['resize-nesw', 'Розмір ↗↙', 'Кут вікна'], ['resize-nwse', 'Розмір ↘↖', 'Кут вікна'], ['move', 'Переміщення', 'Рух у всі боки'],
+  ['grab', 'Рука', 'Можна схопити (перетягування карток)'], ['grabbing', 'Схопив', 'Тягнете картку чи повзунок'], ['zoom-in', 'Збільшити', 'Перегляд зображень'],
+  ['zoom-out', 'Зменшити', 'Перегляд зображень'], ['copy', 'Копіювання', 'Скинути файл у програму']];
+function curSz(k) { const v = S.set.cursor_sizes && S.set.cursor_sizes[k]; return v >= 40 && v <= 200 ? v : 100; }
+function curRow(k, t, d) {
+  const z = curSz(k), off = S.set.pc_cursor === false;
+  return `<div class="row sub cus ${off ? 'dis' : ''}" data-ck="${k}"><div class="cuv" data-curk="${k}"><img alt="" src="/cur/${k}.svg?s=100" style="width:${32 * z / 100}px;height:${32 * z / 100}px"></div>
+    <div class="tx"><b>${t}</b><span class="d">${d}</span></div><input type="range" min="50" max="200" step="5" value="${z}" data-cs="${k}" aria-label="Розмір: ${t}"><span class="cun">${z}%</span></div>`;
+}
 function setOpt(k, v) { S.set[k] = v; api('/api/settings', {[k]: v}).catch(er => toast(er.message, true)); }
 function win(k) { const w = skips && skips[k]; return w && w.length === 2 && w[1] > w[0] ? w : null; }
 function paintMarks() {
@@ -16527,6 +16731,7 @@ function sepPaint() {
   root.querySelectorAll('[data-lv]').forEach(el => tag(el, ['view.' + el.dataset.lv]));
   root.querySelectorAll('[data-act=lgv]').forEach(el => tag(el, ['view.' + el.dataset.k]));
   root.querySelectorAll('[data-act=lvcols]').forEach(el => tag(el, ['view.cols']));
+  { const ch = root.querySelector('#cug>.skh'); if (ch) { delete ch.dataset.sepk; tag(ch, ['pc_cursor', 'cursor_sizes']); } }
   Object.keys(SEP_KEYS).forEach(id => { const el = $('#' + id); if (el) tag(el, SEP_KEYS[id]); });
   root.querySelectorAll('.grp').forEach(g => {  // заголовок розкривного блока = весь блок цілком
     const h = g.querySelector(':scope>.gh'); if (!h) return;
@@ -16559,6 +16764,15 @@ document.addEventListener('click', ev => {  // Ctrl/Shift/Alt+клік по ка
   const h = a.getAttribute('href') || ''; if (h.startsWith('#') && !(ev.target.closest('[data-sepk]') && PC_APP && ev.ctrlKey)) location.hash = h;
 }, true);
 document.addEventListener('auxclick', ev => { if (ev.button === 1 && ev.target.closest && ev.target.closest('a[href]')) ev.preventDefault(); }, true);
+document.addEventListener('input', ev => {  // повзунок розміру курсора: живий перегляд, збереження — з паузою
+  const r = ev.target.closest && ev.target.closest('[data-cs]'); if (!r) return;
+  const k = r.dataset.cs, v = +r.value, m = {...(S.set.cursor_sizes || {})};
+  if (v === 100) delete m[k]; else m[k] = v;
+  S.set.cursor_sizes = m;
+  const row = r.closest('.cus'); if (row) { row.querySelector('.cun').textContent = v + '%'; const im = row.querySelector('img'); im.style.width = im.style.height = (32 * v / 100) + 'px'; }
+  if (window.__curApply) window.__curApply();
+  clearTimeout(S._cst); S._cst = setTimeout(() => setOpt('cursor_sizes', S.set.cursor_sizes), 350);
+}, true);
 (function sepGesture() {
   let t = 0, fired = 0, x0 = 0, y0 = 0, tgt = null;
   const find = ev => { if (route().name !== 'settings' || !ev.target.closest) return null; return ev.target.closest('[data-sepk]'); };
@@ -17665,8 +17879,13 @@ if (PC_APP) (function () {
   const H = document.documentElement;
   const HS = {default: [4, 2], pointer: [12, 3], text: [16, 16], wait: [16, 16], progress: [4, 2], help: [4, 2], crosshair: [16, 16], 'not-allowed': [4, 2], 'resize-ns': [16, 16], 'resize-ew': [16, 16], 'resize-nesw': [16, 16], 'resize-nwse': [16, 16], move: [16, 16], grab: [16, 16], grabbing: [16, 16], 'zoom-in': [13, 13], 'zoom-out': [13, 13], copy: [4, 2]};
   const MAP = {auto: 'default', default: 'default', pointer: 'pointer', text: 'text', 'vertical-text': 'text', wait: 'wait', progress: 'progress', help: 'help', crosshair: 'crosshair', 'not-allowed': 'not-allowed', 'no-drop': 'not-allowed', grab: 'grab', grabbing: 'grabbing', 'zoom-in': 'zoom-in', 'zoom-out': 'zoom-out', move: 'move', 'all-scroll': 'move', 'col-resize': 'resize-ew', 'ew-resize': 'resize-ew', 'e-resize': 'resize-ew', 'w-resize': 'resize-ew', 'row-resize': 'resize-ns', 'ns-resize': 'resize-ns', 'n-resize': 'resize-ns', 's-resize': 'resize-ns', 'nesw-resize': 'resize-nesw', 'ne-resize': 'resize-nesw', 'sw-resize': 'resize-nesw', 'nwse-resize': 'resize-nwse', 'nw-resize': 'resize-nwse', 'se-resize': 'resize-nwse', copy: 'copy', alias: 'copy', 'context-menu': 'default', cell: 'crosshair'};
-  const url = k => `url('/cur/${k}.svg') ${HS[k][0]} ${HS[k][1]}, auto`;
-  let last = null, prev = '';
+  const sz = k => { const v = S.set && S.set.cursor_sizes && S.set.cursor_sizes[k]; return v >= 40 && v <= 200 ? v : 100; };
+  const url = k => { const z = sz(k), h = HS[k]; return `url('/cur/${k}.svg?s=${z}') ${Math.round(h[0] * z / 100)} ${Math.round(h[1] * z / 100)}, auto`; };
+  window.__curUrl = url;
+  const dyn = document.createElement('style'); dyn.id = 'curdyn'; document.head.appendChild(dyn);
+  const css = () => `html.curx,html.curx body{cursor:${url('default')}}
+html.curx body.dragging,html.curx body.dragging *,html.curx.cgrab,html.curx.cgrab *,html.curx.hsd,html.curx.hsd *,html.curx #rcbar.drag,html.curx #rcbar.drag *{cursor:${url('grabbing')}!important}`;
+  let last = null, prev = '', mx = -1, my = -1;
   const clear = () => { if (last) { try { last.style.cursor = prev; } catch (e) {} last = null; prev = ''; } };
   const on = () => H.classList.contains('curx');
   const set = t => {
@@ -17676,6 +17895,8 @@ if (PC_APP) (function () {
     const cs = getComputedStyle(t); let c = cs.cursor.split(',').pop().trim();
     if (c === 'none') return;
     let k = MAP[c] || 'default';
+    const fk = t.closest('[data-curk]');  // плитка перегляду в налаштуваннях показує саме той вид курсора
+    if (fk && HS[fk.dataset.curk]) { prev = t.style.cursor; last = t; t.style.cursor = url(fk.dataset.curk); return; }
     const txtIn = /^(INPUT|TEXTAREA)$/.test(t.tagName) && !/^(checkbox|radio|range|button|submit|color|file)$/.test(t.type || '');
     const clk = !txtIn && t.closest('button,a[href],[data-act],[data-lp],label:has(input[type=checkbox],input[type=radio]),select,summary,[role=button],input[type=checkbox],input[type=radio]');
     if (clk && (k === 'default' || c === 'auto')) k = (clk.disabled || clk.getAttribute('aria-disabled') === 'true') ? 'not-allowed' : 'pointer';  // кнопки, перемикачі, меню: завжди «рука», навіть над текстом чи іконкою всередині
@@ -17683,12 +17904,27 @@ if (PC_APP) (function () {
     if (txtIn && k === 'default') k = 'text';
     prev = t.style.cursor; last = t; t.style.cursor = url(k);
   };
-  document.addEventListener('mouseover', e => set(e.target), true);
-  document.addEventListener('mousemove', e => { if (e.target !== last) set(e.target); }, true);
-  document.addEventListener('mouseleave', clear, true);
+  document.addEventListener('mouseover', e => { mx = e.clientX; my = e.clientY; set(e.target); }, true);
+  document.addEventListener('mousemove', e => { mx = e.clientX; my = e.clientY; if (e.target !== last) set(e.target); }, true);
+  document.addEventListener('mouseleave', () => { mx = my = -1; clear(); }, true);
+  let pend = 0;  // після перемальовування (клік по вкладці/меню) елемент під мишею новий — одразу даємо йому власний курсор, а не системний
+  const refresh = force => {
+    if (pend && !force) return; pend = 1;
+    requestAnimationFrame(() => {
+      pend = 0; if (mx < 0 || !on()) return;
+      const t = document.elementFromPoint(mx, my); if (!t) return;
+      if (!force && t === last && t.style.cursor) return;
+      clear(); set(t);
+    });
+  };
+  new MutationObserver(() => refresh(false)).observe(document.body, {childList: true, subtree: true});
+  window.__curRefresh = () => refresh(true);
   document.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse' && e.button === 0 && e.target.closest && e.target.closest('input[type=range]')) H.classList.add('cgrab'); }, true);
   ['pointerup', 'pointercancel', 'blur'].forEach(t => addEventListener(t, () => H.classList.remove('cgrab'), true));
-  window.__curApply = () => { const v = !(S.set && S.set.pc_cursor === false); if (H.classList.contains('curx') !== v) { clear(); H.classList.toggle('curx', v); } };
+  window.__curApply = () => {
+    const v = !(S.set && S.set.pc_cursor === false); if (H.classList.contains('curx') !== v) { clear(); H.classList.toggle('curx', v); }
+    const c = css(); if (dyn.textContent !== c) { dyn.textContent = c; clear(); refresh(true); }
+  };
   window.__curApply();
 })();
 
