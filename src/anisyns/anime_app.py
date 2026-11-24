@@ -38,6 +38,21 @@ INDEX_SERVED = [0.0]
 READY = [0.0]  # коли сторінка вперше намалювалась (сигнал для iPhone-обгортки)
 IOS_APP = False  # true, коли працює всередині iPhone-застосунку (див. app.py): тоді сторінка сама враховує вирізи екрана
 PC_APP = False  # true, коли працює всередині ПК-застосунку (вікно WebView2, див. pc/): сторінка вмикає режим ПК (data-pc)
+NP_FRAME = {'v': 0, 'b': b''}  # останній кадр перегляду — обкладинка на екрані блокування (режим «Недавній кадр»)
+
+
+def api_npframe(b):
+  raw = base64.b64decode(str(b.get('img') or '') + '==', validate=False)
+  if not raw[:2] == b'\xff\xd8' or len(raw) > 700 * 1024:
+    raise ValueError('bad frame')
+  NP_FRAME['b'] = raw
+  NP_FRAME['v'] += 1
+  return {'v': NP_FRAME['v']}
+
+
+# курсори ПК-застосунку (Bevel-Edge): SVG, віддаються на /cur/<назва>.svg
+CURSORS = {'default': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><path d="M4 2.5 L4 25.5 L10 20 L14.2 29 L18.2 27.2 L14 18.4 L22.5 18 Z" fill="url(#f)" stroke="url(#s)" stroke-width="1.6" stroke-linejoin="round"/></g></svg>', 'pointer': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><path d="M10.5 5.25 A2.25 2.25 0 0 1 15 5.25 V12.5 V16.5 V12.5 A2.25 2.25 0 0 1 19.5 12.5 V17 V13.3 A2.25 2.25 0 0 1 24 13.3 V17.5 V14.8 A1.75 1.75 0 0 1 27.5 14.8 V21 C27.5 25.5 24.5 28.5 20.5 28.5 H17 C14.5 28.5 12.8 27.4 11.5 25.6 L5.3 18 C4.7 17.2 4.9 16.1 5.7 15.6 C6.5 15.1 7.6 15.3 8.2 16 L10.5 19 Z" fill="url(#f)" stroke="url(#s)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></g></svg>', 'text': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><path d="M10 4.5 H22 Q17.4 5.2 17.2 9 V23 Q17.4 26.8 22 27.5 H10 Q14.6 26.8 14.8 23 V9 Q14.6 5.2 10 4.5 Z" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><path d="M10 4.5 H22 Q17.4 5.2 17.2 9 V23 Q17.4 26.8 22 27.5 H10 Q14.6 26.8 14.8 23 V9 Q14.6 5.2 10 4.5 Z" fill="url(#f)"/></g></svg>', 'wait': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><circle cx="16" cy="16" r="9" fill="none" stroke="url(#s)" stroke-width="4.8"/><circle cx="16" cy="16" r="9" fill="none" stroke="#F1F2FF" stroke-opacity=".28" stroke-width="2.8"/><circle cx="16" cy="16" r="9" fill="none" stroke="#F1F2FF" stroke-width="2.8" stroke-linecap="round" stroke-dasharray="17.0 39.6"><animateTransform attributeName="transform" type="rotate" from="0 16 16" to="360 16 16" dur="0.9s" repeatCount="indefinite"/></circle></g></svg>', 'progress': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><path transform="translate(.3 .3) scale(.82)" d="M4 2.5 L4 25.5 L10 20 L14.2 29 L18.2 27.2 L14 18.4 L22.5 18 Z" fill="url(#f)" stroke="url(#s)" stroke-width="1.6" stroke-linejoin="round"/><circle cx="23.5" cy="23.5" r="4.2" fill="none" stroke="url(#s)" stroke-width="3.8"/><circle cx="23.5" cy="23.5" r="4.2" fill="none" stroke="#F1F2FF" stroke-opacity=".28" stroke-width="1.8"/><circle cx="23.5" cy="23.5" r="4.2" fill="none" stroke="#F1F2FF" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="7.9 18.5"><animateTransform attributeName="transform" type="rotate" from="0 23.5 23.5" to="360 23.5 23.5" dur="0.9s" repeatCount="indefinite"/></circle></g></svg>', 'help': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><path transform="translate(.3 .3) scale(.82)" d="M4 2.5 L4 25.5 L10 20 L14.2 29 L18.2 27.2 L14 18.4 L22.5 18 Z" fill="url(#f)" stroke="url(#s)" stroke-width="1.6" stroke-linejoin="round"/><circle cx="23.5" cy="23.5" r="5.2" fill="url(#f)" stroke="url(#s)" stroke-width="1.1"/><path d="M21.4 21.8 C21.4 19.6 25.6 19.6 25.6 21.8 C25.6 23.3 23.5 23.3 23.5 24.8" fill="none" stroke="url(#s)" stroke-width="1.5" stroke-linecap="round"/><circle cx="23.5" cy="27" r=".9" fill="url(#s)"/></g></svg>', 'crosshair': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><path fill-rule="evenodd" d="M14.8 4 H17.2 V14.8 H28 V17.2 H17.2 V28 H14.8 V17.2 H4 V14.8 H14.8 Z" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><path fill-rule="evenodd" d="M14.8 4 H17.2 V14.8 H28 V17.2 H17.2 V28 H14.8 V17.2 H4 V14.8 H14.8 Z" fill="url(#f)"/></g></svg>', 'not-allowed': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><path transform="translate(.3 .3) scale(.82)" d="M4 2.5 L4 25.5 L10 20 L14.2 29 L18.2 27.2 L14 18.4 L22.5 18 Z" fill="url(#f)" stroke="url(#s)" stroke-width="1.6" stroke-linejoin="round"/><circle cx="23.5" cy="23.5" r="5.8" fill="url(#s)"/><circle cx="23.5" cy="23.5" r="4" fill="url(#f)" stroke="#FF7A98" stroke-width="1.9"/><path d="M20.7 20.7 L26.3 26.3" stroke="#FF7A98" stroke-width="1.9" stroke-linecap="round"/></g></svg>', 'resize-ns': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><polygon points="16 3 20.8 9.8 11.2 9.8" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 29 20.8 22.2 11.2 22.2" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><rect x="14.8" y="9" width="2.4" height="14" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 3 20.8 9.8 11.2 9.8" fill="url(#f)"/><polygon points="16 29 20.8 22.2 11.2 22.2" fill="url(#f)"/><rect x="14.8" y="9" width="2.4" height="14" fill="url(#f)"/></g></svg>', 'resize-ew': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><g transform="rotate(90 16 16)"><polygon points="16 3 20.8 9.8 11.2 9.8" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 29 20.8 22.2 11.2 22.2" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><rect x="14.8" y="9" width="2.4" height="14" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 3 20.8 9.8 11.2 9.8" fill="url(#f)"/><polygon points="16 29 20.8 22.2 11.2 22.2" fill="url(#f)"/><rect x="14.8" y="9" width="2.4" height="14" fill="url(#f)"/></g></g></svg>', 'resize-nesw': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><g transform="rotate(45 16 16)"><polygon points="16 3 20.8 9.8 11.2 9.8" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 29 20.8 22.2 11.2 22.2" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><rect x="14.8" y="9" width="2.4" height="14" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 3 20.8 9.8 11.2 9.8" fill="url(#f)"/><polygon points="16 29 20.8 22.2 11.2 22.2" fill="url(#f)"/><rect x="14.8" y="9" width="2.4" height="14" fill="url(#f)"/></g></g></svg>', 'resize-nwse': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><g transform="rotate(-45 16 16)"><polygon points="16 3 20.8 9.8 11.2 9.8" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 29 20.8 22.2 11.2 22.2" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><rect x="14.8" y="9" width="2.4" height="14" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 3 20.8 9.8 11.2 9.8" fill="url(#f)"/><polygon points="16 29 20.8 22.2 11.2 22.2" fill="url(#f)"/><rect x="14.8" y="9" width="2.4" height="14" fill="url(#f)"/></g></g></svg>', 'move': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><polygon points="16 2.5 20.2 8 11.8 8" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 29.5 20.2 24 11.8 24" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="2.5 16 8 11.8 8 20.2" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="29.5 16 24 11.8 24 20.2" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><rect x="14.8" y="8" width="2.4" height="16" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><rect x="8" y="14.8" width="16" height="2.4" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 2.5 20.2 8 11.8 8" fill="url(#f)"/><polygon points="16 29.5 20.2 24 11.8 24" fill="url(#f)"/><polygon points="2.5 16 8 11.8 8 20.2" fill="url(#f)"/><polygon points="29.5 16 24 11.8 24 20.2" fill="url(#f)"/><rect x="14.8" y="8" width="2.4" height="16" fill="url(#f)"/><rect x="8" y="14.8" width="16" height="2.4" fill="url(#f)"/></g></svg>', 'grab': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><path d="M11 18.5 V7.5 A2 2 0 0 1 15 7.5 V12 V5.5 A2 2 0 0 1 19 5.5 V12 V7 A2 2 0 0 1 23 7 V13 V10 A2 2 0 0 1 27 10 V19 C27 25.5 23.5 28.5 19.5 28.5 H17 C14 28.5 12 27 10.5 24.8 L5.2 17 C4.7 16.2 4.9 15.2 5.7 14.7 C6.5 14.2 7.5 14.4 8.1 15.1 L11 18.5 Z" fill="url(#f)" stroke="url(#s)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></g></svg>', 'grabbing': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><rect x="5.2" y="14.8" width="10" height="6" rx="3" transform="rotate(-24 10 17.8)" fill="url(#f)" stroke="url(#s)" stroke-width="1.6"/><path d="M8.5 14.5 A2.2 2.2 0 0 1 12.9 14.5 V19 V14.5 A2.2 2.2 0 0 1 17.3 14.5 V19 V14.5 A2.2 2.2 0 0 1 21.7 14.5 V19 V14.5 A2.2 2.2 0 0 1 26.1 14.5 V21 C26.1 25.5 23.2 28.5 19.2 28.5 H15.5 C11.8 28.5 8.5 26 8.5 22 Z" fill="url(#f)" stroke="url(#s)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></g></svg>', 'zoom-in': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><circle cx="13" cy="13" r="7.6" fill="rgba(238,240,255,.12)" stroke="url(#s)" stroke-width="5.2"/><path d="M19.3 19.3 L26.5 26.5" stroke="url(#s)" stroke-width="5.4" stroke-linecap="round"/><circle cx="13" cy="13" r="7.6" fill="none" stroke="url(#f)" stroke-width="2.6"/><path d="M19.3 19.3 L26.5 26.5" stroke="url(#f)" stroke-width="2.8" stroke-linecap="round"/><path d="M9.8 13 H16.2 M13 9.8 V16.2" stroke="#F1F2FF" stroke-width="1.5" stroke-linecap="round"/></g></svg>', 'zoom-out': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><circle cx="13" cy="13" r="7.6" fill="rgba(238,240,255,.12)" stroke="url(#s)" stroke-width="5.2"/><path d="M19.3 19.3 L26.5 26.5" stroke="url(#s)" stroke-width="5.4" stroke-linecap="round"/><circle cx="13" cy="13" r="7.6" fill="none" stroke="url(#f)" stroke-width="2.6"/><path d="M19.3 19.3 L26.5 26.5" stroke="url(#f)" stroke-width="2.8" stroke-linecap="round"/><path d="M9.8 13 H16.2" stroke="#F1F2FF" stroke-width="1.5" stroke-linecap="round"/></g></svg>', 'copy': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><path transform="translate(.3 .3) scale(.82)" d="M4 2.5 L4 25.5 L10 20 L14.2 29 L18.2 27.2 L14 18.4 L22.5 18 Z" fill="url(#f)" stroke="url(#s)" stroke-width="1.6" stroke-linejoin="round"/><rect x="16.5" y="16.5" width="8" height="8" rx="1.8" fill="url(#f)" stroke="url(#s)" stroke-width="1.5"/><rect x="20.5" y="20.5" width="8" height="8" rx="1.8" fill="url(#f)" stroke="url(#s)" stroke-width="1.5"/></g></svg>'}
+
 PIP_HTML = r'''<!doctype html><html lang="uk"><head><meta charset="utf-8"><title>AniSyns</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
@@ -45,6 +60,9 @@ PIP_HTML = r'''<!doctype html><html lang="uk"><head><meta charset="utf-8"><title
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;background:#000;overflow:hidden;color:var(--tx);font:13px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;user-select:none;-webkit-user-select:none;cursor:default}
 body:not(.show){cursor:none}
+html.curx,html.curx body{cursor:url('/cur/default.svg') 4 2,auto}
+html.curx body:not(.show){cursor:none}
+html.curx.cgrab,html.curx.cgrab *{cursor:url('/cur/grabbing.svg') 16 16,auto!important}
 video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
 button{font:inherit;color:inherit;border:0;background:none;padding:0;cursor:pointer}
 .i{width:100%;height:100%;display:block}
@@ -299,6 +317,20 @@ body.wait .mid .cb.big{opacity:0}
       case 'sk': D.sk = m.sk || null; break;
     }
   };
+  (function () {  // власні курсори (як у головному вікні)
+    const H = document.documentElement, HS = {default: [4, 2], pointer: [12, 3], text: [16, 16], grab: [16, 16], grabbing: [16, 16], 'not-allowed': [4, 2]};
+    let last = null, prev = '';
+    const set = e => {
+      const t = e.target; if (t === last || !(t instanceof Element) || !H.classList.contains('curx')) return;
+      if (last) last.style.cursor = prev; last = null;
+      let c = getComputedStyle(t).cursor.split(',').pop().trim(); if (c === 'none') return;
+      const k = HS[c] ? c : 'default'; prev = t.style.cursor; last = t; t.style.cursor = `url('/cur/${k}.svg') ${HS[k][0]} ${HS[k][1]}, auto`;
+    };
+    document.addEventListener('mouseover', set, true); document.addEventListener('mousemove', set, true);
+    document.addEventListener('pointerdown', e => { if (e.target.closest && e.target.closest('input[type=range],.tr')) H.classList.add('cgrab'); }, true);
+    addEventListener('pointerup', () => H.classList.remove('cgrab'), true);
+    fetch('/api/settings').then(r => r.json()).then(j => { if (j.pc_cursor !== false) H.classList.add('curx'); }).catch(() => {});
+  })();
   send({t: 'ready'});
 })();
 </script></body></html>
@@ -4599,6 +4631,7 @@ def entry_view(key, e):
       'archived': bool(e.get('archived')),
       'last_watch': int(e.get('last_watch') or 0),
       'alias': e.get('alias') or '',
+      'cover': _cover_view(kid, e), 'season': e.get('season'),
       'group': e.get('group') or '', 'gname': e.get('gname') or '',
       'sources': _sources_view(e),
       'meta': meta,
@@ -5936,6 +5969,72 @@ def api_archive(kid, value=True, auto=False):
   return {'ok': True}
 
 
+def _cover_dir():
+  return os.path.join(BASE_DIR, 'covers')
+
+
+def _cover_path(kid, orig=False):
+  return os.path.join(_cover_dir(), re.sub(r'[^0-9a-f]', '', str(kid)) + ('_o' if orig else '') + '.jpg')
+
+
+def _cover_view(kid, e):
+  c = e.get('cover')
+  if not c or not os.path.exists(_cover_path(kid)):
+    return None
+  return {'on': bool(c.get('on')), 'v': int(c.get('v') or 0), 'p': c.get('p') or {}}
+
+
+def api_cover(b):
+  """Власна обкладинка картки: підігнане зображення 2:3 (fit), оригінал (orig) для повторної підгонки, параметри p, режим on."""
+  kid = str(b.get('id') or '')
+  key, e = _find(kid)
+
+  def dec(s, mx):
+    raw = base64.b64decode(str(s).split(',')[-1] + '==', validate=False)
+    if raw[:2] != b'\xff\xd8' or len(raw) > mx:
+      raise ValueError('Невірне зображення.')
+    return raw
+  fit = dec(b['fit'], 900 * 1024) if b.get('fit') else None
+  orig = dec(b['orig'], 4 * 1024 * 1024) if b.get('orig') else None
+  if fit or orig:
+    os.makedirs(_cover_dir(), exist_ok=True)
+  for data, fp in ((fit, _cover_path(kid)), (orig, _cover_path(kid, True))):
+    if data:
+      with open(fp + '.tmp', 'wb') as f:
+        f.write(data)
+      os.replace(fp + '.tmp', fp)
+  with LOCK:
+    c = dict(e.get('cover') or {})
+    if fit:
+      c['v'] = int(time.time())
+      p = b.get('p') or {}
+      try:
+        c['p'] = {'z': max(1.0, min(4.0, float(p.get('z') or 1))), 'cx': max(0.0, min(1.0, float(p.get('cx') if p.get('cx') is not None else .5))), 'cy': max(0.0, min(1.0, float(p.get('cy') if p.get('cy') is not None else .5)))}
+      except (TypeError, ValueError):
+        c['p'] = {'z': 1.0, 'cx': .5, 'cy': .5}
+    if 'on' in b:
+      c['on'] = bool(b.get('on'))
+    if not os.path.exists(_cover_path(kid)):
+      c['on'] = False
+    e['cover'] = c
+  lib_save()
+  return {'ok': True, 'cover': _cover_view(kid, e)}
+
+
+def api_season(kid, value):
+  """Підпис сезону на картці: None/'auto' — автоматично, 'none' — без підпису, число — власний номер."""
+  key, e = _find(kid)
+  with LOCK:
+    if value in (None, '', 'auto'):
+      e.pop('season', None)
+    elif value == 'none':
+      e['season'] = 0
+    else:
+      e['season'] = max(1, min(30, int(float(value))))
+  lib_save()
+  return {'ok': True, 'season': e.get('season')}
+
+
 def api_rename(kid, name):
   """Власна назва — лише для бібліотеки (картка аніме показує оригінальну). Порожня — повертає оригінальну."""
   key, e = _find(kid)
@@ -6032,6 +6131,8 @@ def api_remove(kid):
   pf = _poster_file(kid)
   if pf:
     _rm(pf)
+  _rm(_cover_path(kid))
+  _rm(_cover_path(kid, True))
   td = os.path.join(BASE_DIR, '.cache', 'thumbs')
   if os.path.isdir(td):
     for fn in os.listdir(td):
@@ -6926,7 +7027,7 @@ def net_state():
 SETTINGS = {'mobile_download': False, 'auto_skip': False, 'auto_skip_opening': True, 'auto_skip_ending': True, 'auto_next': True,
             'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': True, 'ios_player': False, 'ios_pl2': False, 'web_inapp': True, 'np_ep_cover': True, 'hide_psave': False, 'auto_arc': True, 'show_scrollbar': False,
             'bg_keep': True, 'bg_check': False, 'island': True, 'island_dl': True, 'island_check': False,
-            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'old_cards': False, 'dub_fav': [], 'dub_prio': [], 'dub_seen': [], 'fx_style': 'blocks', 'recent_min': 3, 'handoff': True, 'rc': True, 'rc_in': True, 'rc_out': True, 'dv2': False, 'xgest': 'both', 'client': {},
+            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'old_cards': False, 'pc_cursor': True, 'np_cover': 'ep', 'dub_fav': [], 'dub_prio': [], 'dub_seen': [], 'fx_style': 'blocks', 'recent_min': 3, 'handoff': True, 'rc': True, 'rc_in': True, 'rc_out': True, 'dv2': False, 'xgest': 'both', 'client': {},
             'site_order': ['aniliberty', 'yummyani', 'animevost', 'animru'], 'view': {}}
 
 
@@ -6979,6 +7080,8 @@ def api_settings(data=None):
             SETTINGS[k] = data[k] if data[k] in ('blocks', 'vortex', 'edge') else 'blocks'
           elif k == 'xgest':
             SETTINGS[k] = data[k] if data[k] in ('both', 'top', 'edge') else 'both'
+          elif k == 'np_cover':
+            SETTINGS[k] = data[k] if data[k] in ('anime', 'ep', 'last') else 'ep'
           elif k == 'skip_mode':
             SETTINGS[k] = 'soft' if data[k] == 'soft' else 'instant'
           elif k == 'recent_min':
@@ -7400,6 +7503,7 @@ def _rewrite_playlist(text, base, sid):
 
 class Handler(BaseHTTPRequestHandler):
   protocol_version = 'HTTP/1.1'
+  timeout = 120  # напівмертві зʼєднання (пристрій вимкнули) не мають висіти потоками вічно
 
   def log_message(self, fmt, *a):
     try:
@@ -7444,6 +7548,16 @@ class Handler(BaseHTTPRequestHandler):
       u = urlparse(self.path)
       q = {k: v[0] for k, v in parse_qs(u.query).items()}
       p = u.path
+      if p.startswith('/cover/'):
+        fp = _cover_path(p[7:], 'o=1' in self.path)
+        if not os.path.exists(fp):
+          return self._json({'error': 'no cover'}, 404)
+        with open(fp, 'rb') as f:
+          return self._bytes(f.read(), 'image/jpeg', extra={'Cache-Control': 'max-age=31536000'})
+      if p == '/npframe' and NP_FRAME['b']:
+        return self._bytes(NP_FRAME['b'], 'image/jpeg', extra={'Cache-Control': 'no-store'})
+      if p.startswith('/cur/') and p.endswith('.svg') and p[5:-4] in CURSORS:
+        return self._bytes(CURSORS[p[5:-4]].encode('utf8'), 'image/svg+xml', extra={'Cache-Control': 'public, max-age=86400'})
       if p == '/pip' and PC_APP:
         return self._bytes(PIP_HTML.encode('utf8'), 'text/html; charset=utf-8', extra={'Cache-Control': 'no-store'})
       if p in ('/', '/index.html'):
@@ -7537,6 +7651,8 @@ class Handler(BaseHTTPRequestHandler):
           '/api/keep': lambda: api_keep(b.get('id'), bool(b.get('archived'))),
           '/api/archive': lambda: api_archive(b.get('id'), bool(b.get('value', True)), bool(b.get('auto'))),
           '/api/rename': lambda: api_rename(b.get('id'), b.get('name')),
+          '/api/cover': lambda: api_cover(b),
+          '/api/season': lambda: api_season(b.get('id'), b.get('value')),
           '/api/group': lambda: api_group(b.get('ids'), b.get('name'), b.get('gid')),
           '/api/ungroup': lambda: api_ungroup(b.get('ids')),
           '/api/group_rename': lambda: api_group_rename(b.get('gid'), b.get('name')),
@@ -7551,6 +7667,7 @@ class Handler(BaseHTTPRequestHandler):
           '/api/beat': lambda: api_beat(b.get('closed')),
           '/api/diag': lambda: api_diag(b),
           '/api/sync_cfg': lambda: api_sync_cfg(b),
+          '/api/sync_sep': lambda: api_sync_sep(b),
           '/api/sync_scan': lambda: api_sync_scan(),
           '/api/sync_pairmode': lambda: api_sync_pairmode(bool(b.get('on'))),
           '/api/sync_pair': lambda: api_sync_pair(b.get('id')),
@@ -7592,6 +7709,7 @@ class Handler(BaseHTTPRequestHandler):
           '/api/jobs_discard': lambda: api_jobs_discard(),
           '/api/dl_pause': lambda: api_dl_pause(b.get('on')),
           '/api/settings': lambda: api_settings(b),
+          '/api/npframe': lambda: api_npframe(b),
           '/api/storage_clear': lambda: api_storage_clear(b.get('what'), b.get('id'), b.get('name')),
           '/api/reorder': lambda: api_reorder(b.get('ids')),
           '/api/layout': lambda: api_layout(b.get('items')),
@@ -8666,23 +8784,57 @@ SYNC_LOCK = threading.RLock()
 SYNC = {'st': None, 'srv': None, 'srv_err': '', 'started': False, 'found': {}, 'pending': None, 'pair_out': None, 'gen': 0,
         'status': {}, 'inb': {}, 'wake': threading.Event(), 'scanning': 0.0, 'last_rescan': 0.0, 'pair_until': 0.0, 'last_scan': 0.0}
 SYNC_SETTINGS_KEYS = ['view', 'auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'auto_check', 'auto_check_hours', 'blur_thumbs',
-                      'np_ep_cover', 'hide_psave', 'auto_arc', 'skip_mode', 'vol_max', 'own_vol', 'recent_min', 'site_order', 'dub_fav', 'dub_prio', 'fx_style']
-SYNC_GROUPS = {'view': ['view'], 'player': ['auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'skip_mode', 'vol_max', 'own_vol', 'np_ep_cover', 'hide_psave', 'auto_arc']}
-SYNC_SCOPES = ('all', 'view', 'player', 'other')
-SYNC_ALWAYS = ('fx_style', 'site_order', 'dub_fav', 'dub_prio')  # анімація передачі синхронізується завжди, незалежно від груп
+                      'np_ep_cover', 'np_cover', 'ios_player', 'hide_psave', 'auto_arc', 'skip_mode', 'vol_max', 'own_vol', 'recent_min', 'site_order', 'dub_fav', 'dub_prio', 'fx_style',
+                      # налаштування, яких немає на частині платформ, теж зберігаємо й передаємо — щоб при підключенні іншого пристрою вони відновились
+                      'web_inapp', 'mobile_download', 'bg_keep', 'bg_check', 'island', 'island_dl', 'island_check', 'xgest', 'pc_cursor']
+SYNC_GROUPS = {'view': ['view', 'blur_thumbs'],
+               'player': ['auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'skip_mode', 'vol_max', 'own_vol', 'np_ep_cover', 'np_cover', 'ios_player', 'hide_psave'],
+               'library': ['recent_min', 'auto_arc'],
+               'auto': ['auto_check', 'auto_check_hours'],
+               'sites': ['site_order', 'dub_fav', 'dub_prio'],
+               'device': ['web_inapp', 'mobile_download', 'bg_keep', 'bg_check', 'island', 'island_dl', 'island_check', 'xgest', 'pc_cursor'],
+               'covers': []}  # covers — не налаштування, а власні обкладинки карток (передаються разом із прапорцями аніме)
+SYNC_GNAMES = list(SYNC_GROUPS)
+SYNC_SCOPES = ('all',) + tuple(SYNC_GNAMES)
+SYNC_ALWAYS = ('fx_style',)  # анімація передачі синхронізується завжди, незалежно від груп
+SYNC_KINDS = ('phone', 'tablet', 'pc')
 
 
 def _sgroup(k):
   for g, ks in SYNC_GROUPS.items():
     if k in ks:
       return g
-  return 'other'
+  return 'device'
 
 
 def _sync_group_on(st, k):
   if k in SYNC_ALWAYS:
     return True
   return bool(st.get('sync_' + _sgroup(k)))
+
+
+def _sep_on(st, key, kind):
+  r = st['regs'].get(f'sep/{key}/{kind}')
+  return bool(r and r.get('v'))
+
+
+def _sep_map(st):
+  out = {}
+  for k in SYNC_SETTINGS_KEYS:
+    ks = [kd for kd in SYNC_KINDS if _sep_on(st, k, kd)]
+    if ks:
+      out[k] = ks
+  return out
+
+
+def _sync_flags(e, st):
+  fl = {'a': bool(e.get('archived')), 'al': e.get('alias') or '', 'g': e.get('group') or '', 'gn': e.get('gname') or ''}
+  if e.get('season') is not None:
+    fl['sn'] = e['season']
+  c = e.get('cover')
+  if st.get('sync_covers', True) and isinstance(c, dict) and int(c.get('v') or 0) > 0:
+    fl['cv'] = {'v': int(c['v']), 'on': bool(c.get('on')), 'p': c.get('p') or {}}
+  return fl
 
 
 SYNC_BASE_FIELDS = ['url', 'title', 'dubbing', 'base_dub', 'all_dubs', 'folder', 'known', 'ep_titles', 'meta', 'sources', 'poster_v']
@@ -8709,7 +8861,10 @@ def _sync_state():
     st.setdefault('id', uuid.uuid4().hex[:16])
     st.setdefault('epoch', uuid.uuid4().hex[:12])
     st.setdefault('name', 'iPhone' if nm.lower() in ('localhost', 'iphone', '') else nm)
-    for k, v in (('sync', bool(st.get('enabled'))), ('sync_settings', False), ('sync_view', True), ('sync_player', True), ('sync_other', bool(st.get('sync_settings'))), ('seq', 0), ('clock', 0), ('gone', {}), ('regs', {}), ('last', {}), ('peers', {}), ('kind', 'phone'), ('name_user', False)):
+    od = bool(st['sync_other']) if 'sync_other' in st else True  # нові розділи успадковують старе «Усі інші налаштування»; за замовчуванням усе активне
+    for g in SYNC_GNAMES:
+      st.setdefault('sync_' + g, od if g not in ('view', 'player') else True)
+    for k, v in (('sync', bool(st.get('enabled'))), ('sync_settings', False), ('seq', 0), ('clock', 0), ('gone', {}), ('regs', {}), ('last', {}), ('peers', {}), ('kind', 'phone'), ('name_user', False)):
       st.setdefault(k, v)
     SYNC['st'] = st
     return st
@@ -8787,7 +8942,7 @@ def _sync_snapshot(st):
           continue
         if t >= 1:
           out[f'p/{kid}/{n}'] = (str(int(t // 10)), round(t, 1), None)
-      fl = {'a': bool(e.get('archived')), 'al': e.get('alias') or '', 'g': e.get('group') or '', 'gn': e.get('gname') or ''}
+      fl = _sync_flags(e, st)
       out['f/' + kid] = (json.dumps(fl, sort_keys=True), fl, None)
   groups = {}
   with LOCK:
@@ -8803,7 +8958,8 @@ def _sync_snapshot(st):
       sv = SETTINGS[k]
       if k == 'view' and isinstance(sv, dict):
         sv = {a: b for a, b in sv.items() if a != 'cols'}  # «Колонок у сітці» не синхронізується — залежить від екрана
-      out['s/' + k] = (json.dumps(sv), sv, None)
+      mk = st.get('kind') or 'phone'
+      out[f's/{k}@{mk}' if _sep_on(st, k, mk) else 's/' + k] = (json.dumps(sv), sv, None)
   with _NOTIF_LOCK:  # повідомлення: нові, прочитані (read у значенні) і видалені (див. _sync_scan) синхронізуються повністю
     for x in NOTIFS:
       out['nt/' + x['id']] = (_nt_hash(x), json.loads(json.dumps(x, ensure_ascii=False)), None)
@@ -8832,7 +8988,7 @@ def _sync_scan():
       ts = None
       if k.startswith('s/') and k not in last and k not in st['regs']:
         # налаштування, яких ми ще не фіксували: значення за замовчуванням не повинні перебивати змінені на іншому пристрої
-        if val == SETTINGS_DEF.get(k[2:]) or (k == 's/view' and isinstance(val, dict) and all(VIEW_DEF_PY.get(a) == b for a, b in val.items())):
+        if val == SETTINGS_DEF.get(k[2:].split('@')[0]) or (k.startswith('s/view') and isinstance(val, dict) and all(VIEW_DEF_PY.get(a) == b for a, b in val.items())):
           ts = 1
       elif k not in last and k not in st['regs'] and not k.startswith('k/'):
         # Вперше бачимо цей запис (пристрій довго не синхронізувався або щойно підключений): ставимо не «зараз», а час, коли
@@ -8909,19 +9065,64 @@ def _sync_create(v):
   return _kid(key)
 
 
+def _sync_cover_pull(kid, dev=None):
+  """Тягне файл власної обкладинки з пристрою, що її змінив (або з будь-якого іншого)."""
+  st = _sync_state()
+  ids = ([dev] if dev in st['peers'] else []) + [p for p in st['peers'] if p != dev]
+  for pid in ids:
+    try:
+      r = _peer_cmd(pid, {'type': 'cover', 'kid': kid}, 20)
+      raw = base64.b64decode(r.get('fit') or '')
+      if raw[:2] != b'\xff\xd8' or len(raw) > 900 * 1024:
+        continue
+      os.makedirs(_cover_dir(), exist_ok=True)
+      fp = _cover_path(kid)
+      with open(fp + '.tmp', 'wb') as f:
+        f.write(raw)
+      os.replace(fp + '.tmp', fp)
+      SYNC['gen'] += 1
+      return True
+    except Exception:
+      continue
+  return False
+
+
+def _sync_cover_retry():
+  """Обкладинки, мета яких уже прийшла, а файл ще ні (пристрій був поза мережею) — докачуємо по кілька за прохід."""
+  n = 0
+  with LOCK:
+    miss = [_kid(k) for k, e in library.items() if isinstance(e.get('cover'), dict) and int(e['cover'].get('v') or 0) > 0 and not os.path.exists(_cover_path(_kid(k)))]
+  for kid in miss[:3]:
+    if _sync_cover_pull(kid):
+      n += 1
+  return n
+
+
 def _sync_apply_one(st, k, r):
   """Застосовує один регістр до локальної бібліотеки/налаштувань. Повертає True, якщо щось змінилось."""
   v, last = r['v'], st['last']
   parts = k.split('/')
   kind = parts[0]
+  if kind == 'sep':  # «цей параметр налаштований окремо для типу пристрою»: sep/<ключ>/<тип>
+    if len(parts) == 3 and parts[1] in SYNC_SETTINGS_KEYS and parts[2] == (st.get('kind') or 'phone'):
+      k2 = f's/{parts[1]}@{parts[2]}' if v else 's/' + parts[1]
+      r2 = st['regs'].get(k2)
+      if r2:
+        return _sync_apply_one(st, k2, r2)
+    return False
   if kind == 's':
-    if parts[1] in SYNC_SETTINGS_KEYS and _sync_group_on(st, parts[1]):
-      before = json.dumps(SETTINGS.get(parts[1]))
-      if parts[1] == 'view' and isinstance(v, dict):
+    name, _, kd = parts[1].partition('@')
+    mk = st.get('kind') or 'phone'
+    if name in SYNC_SETTINGS_KEYS and _sync_group_on(st, name):
+      sep = _sep_on(st, name, mk)
+      if (kd and (kd != mk or not sep)) or (not kd and sep):
+        return False  # чужий тип пристрою або спільне значення, яке тут перекрите власним
+      before = json.dumps(SETTINGS.get(name))
+      if name == 'view' and isinstance(v, dict):
         v = {**v, **({'cols': SETTINGS['view']['cols']} if isinstance(SETTINGS.get('view'), dict) and 'cols' in SETTINGS['view'] else {})}
         v = {a: b for a, b in v.items() if a != 'cols' or isinstance(SETTINGS.get('view'), dict) and 'cols' in SETTINGS['view']}
-      api_settings({parts[1]: v})
-      last[k] = json.dumps(SETTINGS.get(parts[1]))
+      api_settings({name: v})
+      last[k] = json.dumps(SETTINGS.get(name))
       return last[k] != before  # зміна → піднімаємо «gen», і відкритий інтерфейс сам підтягне нові налаштування
     return False
   if kind == 'nt':
@@ -9104,7 +9305,19 @@ def _sync_apply_one(st, k, r):
           e[fld] = v[src]
         else:
           e.pop(fld, None)
-      last[k] = json.dumps({'a': bool(v.get('a')), 'al': v.get('al') or '', 'g': v.get('g') or '', 'gn': v.get('gn') or ''}, sort_keys=True)
+      if isinstance(v.get('sn'), int):
+        e['season'] = v['sn']
+      else:
+        e.pop('season', None)
+      cv = v.get('cv')
+      if st.get('sync_covers', True) and isinstance(cv, dict) and int(cv.get('v') or 0) > 0:  # без «cv» власну обкладинку не чіпаємо
+        c0 = e.get('cover') or {}
+        if int(cv['v']) >= int(c0.get('v') or 0) and (int(cv['v']) != int(c0.get('v') or 0) or not os.path.exists(_cover_path(kid))):
+          e['cover'] = {'on': bool(cv.get('on')), 'v': int(cv['v']), 'p': cv.get('p') if isinstance(cv.get('p'), dict) else {}}
+          threading.Thread(target=_sync_cover_pull, args=(kid, r.get('dev')), daemon=True).start()
+        elif int(cv['v']) == int(c0.get('v') or 0):
+          e['cover'] = {**c0, 'on': bool(cv.get('on')), 'p': cv.get('p') if isinstance(cv.get('p'), dict) else c0.get('p', {})}
+      last[k] = json.dumps(_sync_flags(e, st), sort_keys=True)
   return True
 
 
@@ -9112,7 +9325,7 @@ def _sync_apply(st, incoming):
   """Зливає чужі регістри: по кожному ключу перемагає новіша мітка (при рівності — більший id пристрою)."""
   changed = False
   order = 'ifgkwpsn'
-  for k in sorted(incoming, key=lambda x: order.index(x[0]) if x[:1] in order else 9):
+  for k in sorted(incoming, key=lambda x: -1 if x.startswith('sep/') else (order.index(x[0]) if x[:1] in order else 9)):
     r = incoming[k]
     try:
       ts, dev = int(r['ts']), str(r['dev'])
@@ -9275,6 +9488,7 @@ def _sync_exchange(pid, _retry=True):
 
 class _SyncHandler(BaseHTTPRequestHandler):
   protocol_version = 'HTTP/1.1'
+  timeout = 20
 
   def log_message(self, fmt, *a):
     pass
@@ -9378,6 +9592,13 @@ def _sync_command(body, pid=None):
       return {'ok': True, 'queued': r.get('queued', 0)}
     except Exception as ex:
       return {'ok': False, 'error': str(ex)[:200]}
+  if body.get('type') == 'cover':
+    try:
+      fp = _cover_path(str(body.get('kid') or ''))
+      with open(fp, 'rb') as f:
+        return {'ok': True, 'fit': base64.b64encode(f.read()).decode()}
+    except Exception:
+      return {'ok': False, 'error': 'Немає обкладинки'}
   if body.get('type') == 'settings_offer':
     vals = body.get('settings')
     if isinstance(vals, dict):
@@ -9533,7 +9754,7 @@ def _sync_send_beacon():
 def _sync_scan_net():
   """Запасний пошук, якщо широкомовлення заблоковане роутером: опитуємо всі адреси підмережі /24."""
   ip = _local_ip()
-  if not ip:
+  if not ip or SYNC.get('netscan'):
     return
   from concurrent.futures import ThreadPoolExecutor
   base = '.'.join(ip.split('.')[:3])
@@ -9547,8 +9768,12 @@ def _sync_scan_net():
       _sync_note_found(str(d['id']), str(d.get('name') or '')[:40], a, int(d.get('port') or SYNC_PORT), str(d.get('kind') or 'phone'), bool(d.get('pair')))
     except Exception:
       pass
-  with ThreadPoolExecutor(48) as ex:
-    list(ex.map(probe, range(1, 255)))
+  SYNC['netscan'] = True
+  try:
+    with ThreadPoolExecutor(16) as ex:
+      list(ex.map(probe, range(1, 255)))
+  finally:
+    SYNC['netscan'] = False
 
 
 def _sync_mesh(xid, xpids):
@@ -9580,7 +9805,7 @@ def _sync_loop():
   n = 0
   while True:
     lost0 = any(not (SYNC['status'].get(pid) or {}).get('ok') or (SYNC['status'].get(pid) or {}).get('fails') for pid in _sync_state()['peers'])
-    SYNC['wake'].wait(4 if lost0 else 10)  # якщо хтось не відповідає (iOS присипляє згорнуті програми) — перевіряємо частіше
+    SYNC['wake'].wait(8 if lost0 else 10)  # якщо хтось не відповідає (iOS присипляє згорнуті програми) — перевіряємо частіше
     SYNC['wake'].clear()
     st = _sync_state()
     n += 1
@@ -9589,7 +9814,7 @@ def _sync_loop():
     except Exception:
       pass
     lost = any(not (SYNC['status'].get(pid) or {}).get('ok') or (SYNC['status'].get(pid) or {}).get('fails') for pid in st['peers'])
-    if lost:  # пристрій зник (змінилась мережа/IP або він спить) — кричимо, щоб він нас знайшов за id
+    if lost and n % 2 == 0:  # пристрій зник (змінилась мережа/IP або він спить) — кричимо, щоб він нас знайшов за id
       _sync_send_beacon()
     if st.get('sync'):
       try:
@@ -9606,6 +9831,8 @@ def _sync_loop():
           pass
         if st.get('sync') and r.get('sync'):
           _sync_exchange(pid)
+          if n % 3 == 0 and st.get('sync_covers', True):
+            _sync_cover_retry()
       except Exception as ex:
         prev = SYNC['status'].get(pid) or {}
         fails = int(prev.get('fails', 0)) + 1
@@ -9619,7 +9846,7 @@ def _sync_loop():
           SYNC['status'][pid] = {**prev, 'fails': fails, 'err': str(ex)[:90]}  # один-два збої підряд (VPN/Wi-Fi блимнули) — ще не «офлайн»
         else:
           SYNC['status'][pid] = {'ok': False, 't': time.time(), 'err': str(ex)[:90], 'fails': fails}
-        if time.time() - SYNC['last_rescan'] > 60:  # адреса могла змінитись — шукаємо пристрій за id
+        if time.time() - SYNC['last_rescan'] > 120:  # адреса могла змінитись — шукаємо пристрій за id
           SYNC['last_rescan'] = time.time()
           threading.Thread(target=_sync_scan_net, daemon=True).start()
 
@@ -9649,12 +9876,17 @@ def _sync_selfcheck():
   try:
     if SYNC['srv'] is not None:
       import socket as _so
-      c = _so.create_connection(('127.0.0.1', SYNC_PORT), timeout=0.8); c.close(); ok = True
+      c = _so.create_connection(('127.0.0.1', SYNC_PORT), timeout=2); c.close(); ok = True
   except Exception:
     ok = False
-  if not ok:
-    _sync_stop()
-    _sync_run()
+  if ok:
+    SYNC['scf'] = 0
+  else:
+    SYNC['scf'] = SYNC.get('scf', 0) + 1
+    if SYNC['scf'] >= 2:  # один збій (сервер зайнятий) ще не привід перезапускати
+      SYNC['scf'] = 0
+      _sync_stop()
+      _sync_run()
   return ok
 
 
@@ -9663,10 +9895,10 @@ def _sync_stop():
     srv, SYNC['srv'] = SYNC['srv'], None
   if srv:
     try:
-      srv.shutdown()
-      srv.server_close()
+      srv.server_close()  # shutdown() тут міг би зависнути назавжди, якщо serve_forever уже мертвий
     except Exception:
       pass
+    threading.Thread(target=lambda: srv.shutdown(), daemon=True).start()
 
 
 def _sync_boot():
@@ -9699,7 +9931,7 @@ def api_sync_state():
   ho = SYNC.get('handoff')
   if ho and time.time() - ho['ts'] > 600:
     SYNC['handoff'] = ho = None
-  return {'offer': ({k: v for k, v in SYNC['offer'].items() if k != 'settings'} if SYNC.get('offer') else None), 'handoff': ho, 'kind': st['kind'], 'sync': bool(st['sync']), 'enabled': bool(st['sync']), 'pairing': _pairing(), 'handoff_on': bool(SETTINGS.get('handoff')), 'rc_on': bool(SETTINGS.get('rc')), 'rc_in': bool(SETTINGS.get('rc_in')), 'rc_out': bool(SETTINGS.get('rc_out')), 'rc_in_on': bool(SETTINGS.get('rc') and SETTINGS.get('rc_in')), 'rc_out_on': bool(SETTINGS.get('rc') and SETTINGS.get('rc_out')), 'name': st['name'], 'id': st['id'], 'sync_view': bool(st['sync_view']), 'sync_player': bool(st['sync_player']), 'sync_other': bool(st['sync_other']), 'sync_settings': bool(st['sync_view'] or st['sync_player'] or st['sync_other']), 'peers': peers,
+  return {'offer': ({k: v for k, v in SYNC['offer'].items() if k != 'settings'} if SYNC.get('offer') else None), 'handoff': ho, 'kind': st['kind'], 'sync': bool(st['sync']), 'enabled': bool(st['sync']), 'pairing': _pairing(), 'handoff_on': bool(SETTINGS.get('handoff')), 'rc_on': bool(SETTINGS.get('rc')), 'rc_in': bool(SETTINGS.get('rc_in')), 'rc_out': bool(SETTINGS.get('rc_out')), 'rc_in_on': bool(SETTINGS.get('rc') and SETTINGS.get('rc_in')), 'rc_out_on': bool(SETTINGS.get('rc') and SETTINGS.get('rc_out')), 'name': st['name'], 'id': st['id'], **{'sync_' + g_: bool(st.get('sync_' + g_, True)) for g_ in SYNC_GNAMES}, 'sync_settings': any(st.get('sync_' + g_, True) for g_ in SYNC_GNAMES), 'sep': _sep_map(st), 'sepable': [k for k in SYNC_SETTINGS_KEYS if k not in SYNC_ALWAYS], 'peers': peers,
           'found': found, 'incoming': {'name': pd['name'], 'code': pd['code']} if pd else None,
           'outgoing': {'name': po['name'], 'id': po['id']} if po else None, 'gen': SYNC['gen'], 'ip': _local_ip(), 'port': SYNC_PORT,
           'err': SYNC['srv_err'], 'scanning': now - SYNC['scanning'] < 8}
@@ -9720,7 +9952,7 @@ def api_sync_cfg(d):
       nm = re.sub(r'\s+', ' ', str(d['name'] or '')).strip()[:30]
       if nm:
         st['name'], st['name_user'] = nm, True
-    for gk in ('sync_view', 'sync_player', 'sync_other'):
+    for gk in ['sync_' + g_ for g_ in SYNC_GNAMES]:
       if gk in d:
         st[gk] = bool(d[gk])
     if 'sync' in d:
@@ -9865,6 +10097,30 @@ def api_sync_xfer(pid, mode):
     else:
       p.pop('xfer', None)
     _sync_save()
+  return api_sync_state()
+
+
+def api_sync_sep(b):
+  """Налаштувати параметр(и) окремо для типу цього пристрою (iPhone / iPad / ПК) або повернути спільне значення."""
+  st = _sync_state()
+  mk = st.get('kind') or 'phone'
+  keys = [k for k in (b.get('keys') or []) if k in SYNC_SETTINGS_KEYS and k not in SYNC_ALWAYS]
+  on = bool(b.get('on'))
+  with SYNC_LOCK:
+    for k in keys:
+      if _sep_on(st, k, mk) == on:
+        continue
+      _sync_set(st, f'sep/{k}/{mk}', 1 if on else 0, st['id'])
+      if not on:  # назад до спільного значення: беремо те, що зараз спільне для інших пристроїв
+        r2 = st['regs'].get('s/' + k)
+        if r2:
+          _sync_apply_one(st, 's/' + k, r2)
+    _sync_save()
+  try:
+    _sync_scan()
+  except Exception:
+    pass
+  SYNC['wake'].set()
   return api_sync_state()
 
 
@@ -10087,9 +10343,15 @@ def server_alive():
     return False
   try:
     import socket
-    c = socket.create_connection(('127.0.0.1', PORT), timeout=0.4)
-    c.close()
-    return True
+    c = socket.create_connection(('127.0.0.1', PORT), timeout=1.5)
+    try:  # порт прийняв зʼєднання — перевіряємо, що сервер реально відповідає (потік не завис)
+      c.settimeout(3)
+      c.sendall(b'GET /api/ping HTTP/1.0\r\nHost: x\r\n\r\n')
+      ok = bool(c.recv(12))
+    finally:
+      c.close()
+    _SRV['dead'] = 0 if ok else _SRV.get('dead', 0) + 1
+    return ok or _SRV['dead'] < 3
   except OSError:
     return False
 
@@ -10368,7 +10630,53 @@ body.pl{overflow:hidden!important}
 .dvic.big{width:56px;height:56px;border-radius:17px}.dvic.big .i{width:30px;height:30px}.dvic.big .dot{width:15px;height:15px}
 .dvdots{color:var(--mu);font-size:20px;line-height:1;padding:0 2px}
 .dvcode{font-size:30px;font-weight:800;letter-spacing:6px}
+.stsel{position:relative;flex:none}
+.stsel select{appearance:none;-webkit-appearance:none;background:var(--s2,#20232f);border:1px solid rgba(255,255,255,.08);color:inherit;border-radius:11px;padding:8px 28px 8px 12px;font:inherit;font-size:13px;font-weight:600;max-width:160px;min-width:0}
+.stsel::after{content:'';position:absolute;right:11px;top:50%;width:6px;height:6px;border-right:2px solid var(--mu);border-bottom:2px solid var(--mu);transform:translateY(-70%) rotate(45deg);pointer-events:none}
+.stsel.offd{opacity:.5}
+.lvsub{font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mu);padding:14px 16px 6px;border-top:1px solid #ffffff12}
+.stcap{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mu);margin:22px 20px 2px}
+html[data-pc] .net:not(.offline){display:none}
+.gpx{display:flex;gap:12px;align-items:center;margin:2px 0 10px;padding:10px;background:var(--s2,#20232f);border-radius:14px}
+.gpx .th{width:38px;height:54px;border-radius:8px;background:#2b2f4d center/cover no-repeat;flex:none}
+.gpx .tx{min-width:0}.gpx .tx b{display:block;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gpx .tx span{font-size:12px;color:var(--mu)}
+.gpl{max-height:44vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin:8px 0 4px;padding:2px 2px 4px;overscroll-behavior:contain}
+.gpr{display:flex;align-items:center;gap:14px;width:100%;border:1.5px solid transparent;background:var(--s2,#20232f);color:inherit;font:inherit;text-align:left;padding:10px 12px;border-radius:14px;cursor:pointer;flex:none}
+.gpr:active{transform:scale(.985)}
+.gpr .gps{position:relative;width:52px;height:62px;flex:none}
+.gpr .gps i{position:absolute;width:40px;height:56px;border-radius:8px;background:#2b2f4d center/cover no-repeat}
+.gpr .gps .gc{left:0;top:0;box-shadow:0 3px 10px #0009;z-index:3}
+.gpr .gps .g1{left:6px;top:3px;opacity:.55;z-index:2}.gpr .gps .g2{left:12px;top:6px;opacity:.3;z-index:1}
+.gpr .gpt{flex:1;min-width:0}.gpr .gpt b{display:block;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gpr .gpt span{display:block;font-size:12px;color:var(--mu);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gpr .gpa{width:30px;height:30px;border-radius:50%;background:var(--ac,#8174e6)33;color:var(--ac2,#a99cff);display:grid;place-items:center;flex:none}.gpr .gpa .i{width:16px;height:16px}
+.gpr.gpn{border:1.5px dashed #8174e688;background:#8174e614}.gpr.gpn .gps{display:grid;place-items:center;width:52px}.gpr.gpn .gps .i{width:24px;height:24px;color:var(--ac2,#a99cff)}
+@media (hover:hover){.gpr:hover{border-color:#ffffff22}}
+.cet{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mu);margin:18px 2px 8px}
+.ceps{display:flex;gap:12px}
+.cep{flex:1;min-width:0;position:relative;cursor:pointer;border-radius:18px;padding:7px;border:2px solid transparent;transition:border-color .15s,background .15s;text-align:center;-webkit-user-select:none;user-select:none}
+.cep.on{border-color:var(--ac,#8174e6);background:#8174e61a}
+.cep .card{width:100%;pointer-events:none;margin:0;animation:none}
+.cep .poster{animation:none}
+.cep b{display:block;font-size:13px;margin-top:8px}
+.cep .ck{position:absolute;top:14px;left:14px;width:22px;height:22px;border-radius:50%;background:var(--ac,#8174e6);color:#fff;display:none;place-items:center;z-index:4}.cep .ck .i{width:14px;height:14px}.cep.on .ck{display:grid}
+.cep .cepa{position:absolute;inset:0;display:grid;place-items:center;text-align:center;font-size:12px;line-height:1.3;color:var(--mu);border:1.5px dashed #ffffff40;border-radius:inherit;padding:10px;z-index:1}
+.cep .cepa .i{width:26px;height:26px;display:block;margin:0 auto 6px;color:var(--ac2,#a99cff)}
+.cep.dz{border-color:var(--ac2,#a99cff);background:#8174e62a}
+.cesub{display:flex;gap:6px;justify-content:center;margin-top:8px}
+.cesub button{border:0;background:var(--s2,#20232f);color:inherit;font:inherit;font-size:12px;font-weight:600;padding:6px 10px;border-radius:9px;cursor:pointer}
+.cfr{width:min(240px,62vw);aspect-ratio:2/3;margin:6px auto 12px;border-radius:16px;overflow:hidden;touch-action:none;cursor:grab;position:relative;box-shadow:0 8px 30px #000a}
+.cfr canvas{width:100%;height:100%;display:block}
+.cfz{width:100%;margin:4px 0 2px}
+.cenum{display:flex;gap:8px;align-items:center;justify-content:center;margin-top:10px}
+.cenum .in{width:72px;text-align:center;padding:9px 6px}.cenum button{width:38px;height:38px;border:0;border-radius:11px;background:var(--s2,#20232f);color:inherit;font:inherit;font-size:20px;font-weight:600;cursor:pointer}
+.cesw{display:flex;align-items:center;gap:12px;margin-top:12px}.cesw .tx{flex:1;font-size:13px;color:var(--mu)}
 .dvsec{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mu);margin:16px 4px 8px}
+.sephint{margin:4px 6px 12px}[data-sepk]{position:relative;-webkit-touch-callout:none}
+[data-sepk]:not(input):not(textarea){-webkit-user-select:none;user-select:none}
+[data-sepk].sepon{box-shadow:inset 3px 0 0 var(--ac);background:linear-gradient(90deg,rgba(139,123,255,.16),rgba(139,123,255,.04))}
+[data-sepk].sepon .tx>b{display:flex;align-items:center;gap:8px}
+.sepi{display:inline-flex;align-items:center;justify-content:center;flex:none;width:22px;height:22px;border-radius:50%;background:var(--ac);color:#fff;box-shadow:0 2px 8px rgba(139,123,255,.45);pointer-events:none}.sepi svg{width:13px;height:13px;display:block}
 .dvhint{font-size:12.5px;color:var(--mu);margin:6px 4px 10px}.dvbtns{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
 .dmh{display:flex;gap:13px;align-items:center;padding:4px 4px 12px;margin-bottom:6px;border-bottom:1px solid #ffffff14}
 .dmh .tx{display:flex;flex-direction:column;gap:3px;min-width:0}.dmh b{font-size:17px}.dmh .d{font-size:12px;color:var(--mu)}
@@ -11090,7 +11398,8 @@ button:active,.card:active,.btn:active,.ib:active,#tabs a:active,.dchip:active{t
 .grid.c3 .badge .i{width:10px;height:10px}
 .grid.c3 .card .cd{font-size:9.5px;padding:2px 6px;max-width:100%;overflow:hidden}
 .grid.c3 .card .cd span{overflow:hidden;text-overflow:ellipsis}
-.grid.c3 .card .cd .i{display:none}
+.grid.c3 .card .cd{gap:4px}
+.grid.c3 .card .cd .i{width:10px;height:10px}
 .grid.c3 .card .sn{font-size:10.5px;padding:1px 6px}
 .card .cd{overflow:hidden}
 .cd{display:inline-flex;align-items:center;gap:7px;margin-top:10px;padding:6px 12px;border-radius:12px;background:#ffffff1c;color:#fff;font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;max-width:100%}
@@ -11356,6 +11665,13 @@ html[data-pc] .tpf{width:200px;border-radius:13px}
 html[data-pc] #stage:has(#vc.off){cursor:none}
 .osd{position:absolute;left:50%;top:18%;transform:translate(-50%,-6px) scale(.96);z-index:9;display:flex;align-items:center;gap:9px;padding:9px 16px;border-radius:14px;background:linear-gradient(135deg,#2a2e46ee,#171a29ee);border:1px solid #ffffff2a;color:#fff;font-weight:700;font-size:15px;opacity:0;pointer-events:none;transition:opacity .16s,transform .16s;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
 .osd.on{opacity:1;transform:translate(-50%,0) scale(1)}.osd .i{width:20px;height:20px}
+/* ===== ПК: власні курсори (клас curx на <html>; решту робить JS — inline cursor під наведеним елементом) ===== */
+html.curx,html.curx body{cursor:url('/cur/default.svg') 4 2,auto}
+html.curx body.dragging,html.curx body.dragging *,html.curx.cgrab,html.curx.cgrab *,html.curx.hsd,html.curx.hsd *,html.curx #rcbar.drag,html.curx #rcbar.drag *{cursor:url('/cur/grabbing.svg') 16 16,auto!important}
+html.curx #stage:has(#vc.off),html.curx #stage:has(#vc.off) *{cursor:none!important}
+html[data-pc] .card.reo{cursor:grab}
+html[data-pc] #oppage{cursor:progress}
+html[data-pc] button:disabled,html[data-pc] input:disabled,html[data-pc] select:disabled,html[data-pc] [aria-disabled=true]{cursor:not-allowed}
 /* ===== ПК: наведення миші, великі вікна, прокрутка озвучок ===== */
 @media (hover:hover){
 html[data-pc] .card .poster{transition:transform .22s cubic-bezier(.2,.8,.2,1),box-shadow .22s,filter .22s}
@@ -11962,6 +12278,7 @@ async function waitTask(tid, limitMs) {
 function morphInto(root, html) { const t = document.createElement('template'); t.innerHTML = html; morphKids(root, t.content); }
 function render() {
   document.documentElement.classList.toggle('nosb', S.set.show_scrollbar !== true);
+  if (PC_APP && window.__curApply) window.__curApply();
   if (DR.on) return;  // триває перетягування картки
   if (S.ps) { const r0 = route(); if (r0.name === 'detail' && r0.id === S.ps.id) psTouch(); }  // поки ви в цьому аніме — сеанс живий
   if (S.reorder && !LAY.cur) { LAY.cur = laySnap(); LAY.undo = []; LAY.redo = []; } else if (!S.reorder && LAY.cur) layCommit();
@@ -12002,6 +12319,7 @@ function render() {
   }
   const tab = r.name === 'detail' ? S.origTab : r.name === 'storage' ? 'settings' : r.name === 'group' ? 'home' : r.name === 'remote' ? 'devices' : r.name;
   if (r.name === 'settings' || r.name === 'storage') storLoad();
+  if (r.name === 'settings') sepPaint();
   if (S.tabKey !== tab) { S.tabKey = tab; $('#tabs').innerHTML = tabsHTML(tab); }
   root.classList.toggle('detail', r.name === 'detail');
   root.classList.toggle('settings-pg', r.name === 'settings' || r.name === 'storage' || r.name === 'devices');
@@ -12475,84 +12793,94 @@ function storageHTML() {
   ${backupBox()}
   <div style="height:24px"></div>`;
 }
+const stSel = (key, cur, opts, label, cls) => `<div class="stsel${cls ? ' ' + cls : ''}"><select data-ss="${key}" aria-label="${label}">${opts.map(([v, tx]) => `<option value="${v}"${String(v) === String(cur) ? ' selected' : ''}>${tx}</option>`).join('')}</select></div>`;
+const npCover = () => (S.set && S.set.np_cover) || (S.set && S.set.np_ep_cover === false ? 'anime' : 'ep');
 function settingsHTML() {
-  return pageHead('Налаштування') + stBlockHTML() + `
-  <div class="set"><div class="tx"><b>Качати через мобільний інтернет</b>
-    <span>Якщо вимкнено, завантаження працюють лише через Wi‑Fi. Перегляд онлайн це не обмежує.</span></div>
-    <label class="sw"><input type="checkbox" id="mobsw" ${S.set.mobile_download ? 'checked' : ''}></label></div>
+  const lvRow = ([k, tt, d]) => `<div class="row"><div class="tx"><b>${tt}</b><span class="d">${d}</span></div><label class="sw"><input type="checkbox" data-lv="${k}" ${S.view[k] ? 'checked' : ''}></label></div>`;
+  const ovOn = PC_APP || !!S.set.own_vol, volOpts = [[100, 'до 100%'], [200, 'до 200%']];
+  const ovRow = PC_APP
+    ? `<div class="row"><div class="tx"><b>Гучність</b><span class="d">Максимум повзунка в плеєрі. Понад 100% підсилює звук.</span></div>${stSel('vol_max', volMax(), volOpts, 'Максимальна гучність')}</div>`
+    : `<div class="row" id="ovrow"><div class="tx"><b>Власна гучність</b><span class="d">Повзунок у плеєрі. Вимкнено — кнопки iPhone.</span></div>${stSel('vol_max', volMax(), volOpts, 'Максимальна гучність', ovOn ? '' : 'offd')}<label class="sw"><input type="checkbox" id="ovmaster" ${ovOn ? 'checked' : ''}></label></div>`;
+  return pageHead('Налаштування') + stBlockHTML() + sepHint() + `
+  <div class="stcap">Вигляд</div>
   <div class="grp ${S.lvOpen ? 'open' : ''}" id="lvgrp">
-    <button class="gh" data-act="lvtog"><div class="tx"><b>Вигляд бібліотеки</b><span>Що показувати на картках аніме</span></div>${ico('chev')}</button>
+    <button class="gh" data-act="lvtog"><div class="tx"><b>Вигляд</b><span>Картки, значки сайтів, сітка${PC_APP ? ', курсор' : ''}</span></div>${ico('chev')}</button>
     <div class="fold"><div>
       <div class="lvprev" id="lvprev">${lvPrevHTML()}</div>
-      ${[['timer', 'Таймер до наступної серії', 'Скільки лишилось до виходу (якщо сайт знає).'], ['title', 'Назва аніме', 'Вимкніть, щоб лишився лише постер.'],
-         ['seasonOnly', 'Лише номер сезону', 'Показувати «Сезон N» над назвою.'], ['site', 'Значок сайту', 'Де йде аніме (і кількість інших сайтів).'],
-         ['stats', 'Прогрес і розмір', 'Переглянуто / скачано / розмір / озвучка.'], ['badge', 'Позначка нових серій', 'Бейдж із кількістю нових.'], ['gtitle', 'Назви груп', 'Показувати назву на стопці груп (групу можна створити й без назви).']]
-        .map(([k, t, d]) => `<div class="row"><div class="tx"><b>${t}</b><span class="d">${d}</span></div><label class="sw"><input type="checkbox" data-lv="${k}" ${S.view[k] ? 'checked' : ''}></label></div>`).join('')}
-      <div class="row"><div class="tx"><b>Логотипи сайтів</b><span class="d">Замість літер на значках показувати справжні лого.</span></div><label class="sw"><input type="checkbox" data-lv="logo" ${S.view.logo !== false ? 'checked' : ''}></label></div>
-      <div class="row lgopt${S.view.logo !== false ? '' : ' dis'}"><div class="tx"><b>AnimeVost</b></div><div class="pch">${[['a', 'Лисиця'], ['b', 'Знак']].map(([k, t]) => `<button data-act="lgv" data-k="logoVost" data-v="${k}" class="${(S.view.logoVost === 'b' ? 'b' : 'a') === k ? 'on' : ''}">${t}</button>`).join('')}</div></div>
-      <div class="row lgopt${S.view.logo !== false ? '' : ' dis'}"><div class="tx"><b>AniLiberty</b></div><div class="pch">${[['red', 'Червоний'], ['purple', 'Фіолетовий']].map(([k, t]) => `<button data-act="lgv" data-k="logoLib" data-v="${k}" class="${(S.view.logoLib === 'purple' ? 'purple' : 'red') === k ? 'on' : ''}">${t}</button>`).join('')}</div></div>
+      <div class="lvsub">Картка аніме</div>
+      ${[['timer', 'Таймер до наступної серії', 'Скільки лишилось до виходу.'], ['title', 'Назва аніме', 'Вимкнено — лише постер.'],
+         ['seasonOnly', 'Лише номер сезону', '«Сезон N» над назвою.'], ['site', 'Значок сайту', 'Де йде аніме.'],
+         ['stats', 'Прогрес і розмір', 'Переглянуто, скачано, озвучка.'], ['badge', 'Позначка нових серій', 'Бейдж із кількістю.'], ['gtitle', 'Назви груп', 'Підпис на стопці груп.']].map(lvRow).join('')}
       <div class="row"><div class="tx"><b>Колонок у сітці</b></div><div class="pch">${[2, 3].map(n => `<button data-act="lvcols" data-v="${n}" class="${S.view.cols === n ? 'on' : ''}">${n}</button>`).join('')}</div></div>
+      <div class="lvsub">Значки сайтів</div>
+      <div class="row"><div class="tx"><b>Логотипи сайтів</b><span class="d">Справжні лого замість літер.</span></div><label class="sw"><input type="checkbox" data-lv="logo" ${S.view.logo !== false ? 'checked' : ''}></label></div>
+      <div class="row lgopt${S.view.logo !== false ? '' : ' dis'}"><div class="tx"><b>AnimeVost</b></div><div class="pch">${[['a', 'Лисиця'], ['b', 'Знак']].map(([k, tt]) => `<button data-act="lgv" data-k="logoVost" data-v="${k}" class="${(S.view.logoVost === 'b' ? 'b' : 'a') === k ? 'on' : ''}">${tt}</button>`).join('')}</div></div>
+      <div class="row lgopt${S.view.logo !== false ? '' : ' dis'}"><div class="tx"><b>AniLiberty</b></div><div class="pch">${[['red', 'Червоний'], ['purple', 'Фіолетовий']].map(([k, tt]) => `<button data-act="lgv" data-k="logoLib" data-v="${k}" class="${(S.view.logoLib === 'purple' ? 'purple' : 'red') === k ? 'on' : ''}">${tt}</button>`).join('')}</div></div>
+      <div class="lvsub">Серії</div>
+      <div class="row"><div class="tx"><b>Розмивати скріншоти серій</b><span class="d">Захист від спойлерів у картках серій.</span></div><label class="sw"><input type="checkbox" data-set="blur_thumbs" ${S.set.blur_thumbs ? 'checked' : ''}></label></div>
+      ${PC_APP ? `<div class="lvsub">Програма</div>
+      <div class="row"><div class="tx"><b>Власний курсор</b><span class="d">Фірмові курсори програми. Вимкнено — звичайні Windows.</span></div><label class="sw"><input type="checkbox" data-set="pc_cursor" ${S.set.pc_cursor !== false ? 'checked' : ''}></label></div>` : ''}
     </div></div>
   </div>
+
+  <div class="stcap">Плеєр</div>
   <div class="grp ${S.pOpen ? 'open' : ''}" id="pgrp">
-    <button class="gh" data-act="ptog"><div class="tx"><b>Плеєр</b><span>Наступна серія, автопропуск, гучність</span></div>${ico('chev')}</button>
+    <button class="gh" data-act="ptog"><div class="tx"><b>Плеєр</b><span>Наступна серія, автопропуск, гучність, обкладинка</span></div>${ico('chev')}</button>
     <div class="fold"><div>
-      <div class="row"><div class="tx"><b>Автоматично наступна серія</b><span class="d">Сама вмикає наступну серію.</span></div>
+      <div class="row"><div class="tx"><b>Автоматично наступна серія</b><span class="d">Сама вмикає наступну.</span></div>
         <label class="sw"><input type="checkbox" data-set="auto_next" ${S.set.auto_next !== false ? 'checked' : ''}></label></div>
-      <div class="row"><div class="tx"><b>Сховати «Зберегти для аніме»</b><span class="d">Прибирає кнопку з налаштувань плеєра. Зміни озвучки й якості діють лише на сеанс.</span></div>
-        <label class="sw"><input type="checkbox" data-set="hide_psave" ${S.set.hide_psave === true ? 'checked' : ''}></label></div>
-      <div class="row"><div class="tx"><b>Переглянуте — автоматично</b><span class="d">Лише коли сайт каже, що аніме вийшло повністю, і ти переглянув усі серії. Воно лишається на місці, доки не повернешся в бібліотеку. Якщо серії таки з'являться — саме повернеться з «Переглянутого».</span></div>
-        <label class="sw"><input type="checkbox" data-set="auto_arc" ${S.set.auto_arc !== false ? 'checked' : ''}></label></div>
-      <div class="row"><div class="tx"><b>Обкладинка серії на екрані блокування</b><span class="d">Кадр серії замість обкладинки аніме.</span></div>
-        <label class="sw"><input type="checkbox" data-set="np_ep_cover" ${S.set.np_ep_cover !== false ? 'checked' : ''}></label></div>
-      ${IOS_APP ? `<div class="row"><div class="tx"><b>Сайт аніме у програмі</b><span class="d">Кнопка «Сайт» відкриває вбудований браузер зі кнопкою «Закрити» й поверненням до цієї сторінки. Вимкнено — одразу відкривається Safari. Подвійний тап копіює посилання.</span></div>
-        <label class="sw"><input type="checkbox" data-set="web_inapp" ${S.set.web_inapp !== false ? 'checked' : ''}></label></div>` : ''}
-      ${IOS_APP ? `<div class="row"><div class="tx"><b>Віддавати перевагу плеєру iOS</b><span class="d">Стандартний плеєр iOS: PiP, AirPlay, екран блокування.</span></div>
-        <label class="sw"><input type="checkbox" data-set="ios_player" ${S.set.ios_player === true ? 'checked' : ''}></label></div>` : ''}
       <div class="skg ${S.skOpen === true && S.set.auto_skip ? 'open' : ''}" id="skg">
-        <div class="skh" data-act="sktog"><div class="tx"><b>Автопропуск</b><span class="d">Пропускає інтро та аутро.</span></div>
+        <div class="skh" data-act="sktog"><div class="tx"><b>Автопропуск</b><span class="d">Інтро та аутро.</span></div>
+          ${stSel('skip_mode', S.set.skip_mode === 'soft' ? 'soft' : 'instant', [['instant', 'Миттєва'], ['soft', 'Лагідна']], 'Тип перемотки', S.set.auto_skip ? '' : 'offd')}
           <label class="sw"><input type="checkbox" id="skmaster" ${S.set.auto_skip ? 'checked' : ''}></label>
           <button class="arr" aria-label="Розгорнути">${ico('chev')}</button></div>
         <div class="fold"><div>
           <label class="row sub ${S.set.auto_skip ? '' : 'dis'}"><input type="checkbox" data-set="auto_skip_opening" ${S.set.auto_skip_opening ? 'checked' : ''}><div class="tx"><b>Пропускати інтро</b><span class="d">Одразу перемотує опенінг.</span></div></label>
-          <label class="row sub ${S.set.auto_skip ? '' : 'dis'}"><input type="checkbox" data-set="auto_skip_ending" ${S.set.auto_skip_ending ? 'checked' : ''}><div class="tx"><b>Пропускати аутро</b><span class="d">Перемотує до уривку або далі.</span></div></label>
-          <div class="row col ${S.set.auto_skip ? '' : 'dis'}"><b>Тип перемотки</b>
-            <div class="pch"><button data-act="skmode" data-m="instant" class="${S.set.skip_mode === 'soft' ? '' : 'on'}">Миттєва</button><button data-act="skmode" data-m="soft" class="${S.set.skip_mode === 'soft' ? 'on' : ''}">Лагідна</button></div>
-            <span class="d">Лагідна — кнопка «Пропустити» з відліком.</span></div>
+          <label class="row sub ${S.set.auto_skip ? '' : 'dis'}"><input type="checkbox" data-set="auto_skip_ending" ${S.set.auto_skip_ending ? 'checked' : ''}><div class="tx"><b>Пропускати аутро</b><span class="d">До уривку або далі.</span></div></label>
+          <div class="row"><span class="d">Лагідна перемотка — кнопка «Пропустити» з відліком.</span></div>
         </div></div>
       </div>
-      <div class="row col"><b>«Недавній перегляд» рахувати після</b>
-        <div class="pch">${[[0, 'Одразу'], [3, '3 хв'], [10, '10 хв'], [20, '20 хв']].map(([m, l]) => `<button data-act="recmin" data-m="${m}" class="${Number(S.set.recent_min == null ? 3 : S.set.recent_min) === m ? 'on' : ''}">${l}</button>`).join('')}</div>
-        <span class="d">Нагору списку — коли реально дивились цей час.</span></div>
-      <div class="skg ${S.ovOpen === true && S.set.own_vol ? 'open' : ''}" id="ovg">
-        <div class="skh" data-act="ovtog"><div class="tx"><b>Власна гучність</b><span class="d">Повзунок гучності в плеєрі.</span></div>
-          <label class="sw"><input type="checkbox" id="ovmaster" ${S.set.own_vol ? 'checked' : ''}></label>
-          <button class="arr" aria-label="Розгорнути">${ico('chev')}</button></div>
-        <div class="fold"><div>
-          <div class="row col ${S.set.own_vol ? '' : 'dis'}"><b>Максимальна гучність</b>
-            <div class="pch"><button data-act="volmax" data-m="100" class="${volMax() === 100 ? 'on' : ''}">100%</button><button data-act="volmax" data-m="200" class="${volMax() === 200 ? 'on' : ''}">200%</button></div>
-            <span class="d">200% підсилює звук (може хрипіти). Вимкнено — гучність регулюють кнопки iPhone.</span></div>
-        </div></div>
-      </div>
+      ${ovRow}
+      <div class="row"><div class="tx"><b>Екран блокування</b><span class="d">Обкладинка: аніме, серія чи останній кадр перегляду.</span></div>
+        ${stSel('np_cover', npCover(), [['anime', 'Аніме'], ['ep', 'Серія'], ['last', 'Останній кадр']], 'Обкладинка на екрані блокування')}</div>
+      <div class="row"><div class="tx"><b>Недавній перегляд</b><span class="d">Нагору списку — після стількох хвилин перегляду.</span></div>
+        ${stSel('recent_min', Number(S.set.recent_min == null ? 3 : S.set.recent_min), [[0, 'Одразу'], [3, '3 хв'], [10, '10 хв'], [20, '20 хв']], 'Недавній перегляд')}</div>
+      <div class="row"><div class="tx"><b>Переглянуте — автоматично</b><span class="d">Коли аніме завершене й усі серії переглянуто.</span></div>
+        <label class="sw"><input type="checkbox" data-set="auto_arc" ${S.set.auto_arc !== false ? 'checked' : ''}></label></div>
+      <div class="row"><div class="tx"><b>Сховати «Зберегти для аніме»</b><span class="d">Зміни озвучки й якості діють лише на сеанс.</span></div>
+        <label class="sw"><input type="checkbox" data-set="hide_psave" ${S.set.hide_psave === true ? 'checked' : ''}></label></div>
+      ${IOS_APP ? `<div class="row"><div class="tx"><b>Плеєр iOS</b><span class="d">Стандартний: PiP, AirPlay, екран блокування.</span></div>
+        <label class="sw"><input type="checkbox" data-set="ios_player" ${S.set.ios_player === true ? 'checked' : ''}></label></div>` : ''}
     </div></div>
   </div>
+
+  <div class="stcap">Сайти</div>
+  ${siteGroupHTML()}
+  ${IOS_APP ? `<div class="set"><div class="tx"><b>Відкривати сайт аніме</b><span>Кнопка «Сайт»: у вбудованому вікні чи в Safari.</span></div>
+    ${stSel('web_inapp', S.set.web_inapp !== false ? 'app' : 'safari', [['app', 'У програмі'], ['safari', 'У Safari']], 'Відкривати сайт аніме')}</div>` : ''}
+
+  <div class="stcap">Завантаження</div>
+  ${PC_APP ? '' : `<div class="set"><div class="tx"><b>Качати через мобільний інтернет</b><span>Вимкнено — завантаження лише через Wi‑Fi.</span></div>
+    <label class="sw"><input type="checkbox" id="mobsw" ${S.set.mobile_download ? 'checked' : ''}></label></div>`}
   <div class="grp ${S.acOpen ? 'open' : ''}" id="acgrp">
     <button class="gh" data-act="actog"><div class="tx"><b>Автоперевірка нових серій</b><span id="acsub">${acSub()}</span></div>${ico('chev')}</button>
     <div class="fold"><div>
-      <div class="row"><div class="tx"><b>Перевіряти автоматично</b><span class="d">Працює, поки додаток відкритий.</span></div>
+      <div class="row"><div class="tx"><b>Перевіряти автоматично</b><span class="d">Поки додаток відкритий.</span></div>
         <label class="sw"><input type="checkbox" data-set="auto_check" ${S.set.auto_check ? 'checked' : ''}></label></div>
       <div class="row col"><b>Як часто</b>
         <div class="pch">${AC_PRESETS.map(([h, t]) => `<button data-act="achours" data-h="${h}" class="${Number(S.set.auto_check_hours) === h ? 'on' : ''}">${t}</button>`).join('')}</div>
-        <span class="d">Перевірка розумна: аніме, чия наступна серія ще не вийшла за таймером, чекає її часу; давно завершені — раз на тиждень (на випадок нових серій після «12/12»). Перевірки йдуть по одній, з паузами.</span></div>
+        <span class="d">Розумна перевірка: чекає часу виходу серії, завершені аніме — раз на тиждень.</span></div>
       <div class="row"><div class="tx"><span class="d" id="acstat">${acStat()}</span></div></div>
     </div></div>
   </div>
-  ${siteGroupHTML()}
+  ${PC_APP ? '' : `<div class="set"><div class="tx"><b>Мережа зараз</b><span>Wi‑Fi, мобільна мережа чи офлайн.</span></div>${netHTML()}</div>`}
+
+  ${IOS_APP && !PC_APP ? '<div class="stcap">Система</div>' : ''}
   ${IOS_APP ? `<div class="grp ${S.bgOpen ? 'open' : ''}" id="bggrp">
-    <button class="gh" data-act="grptog" data-g="bgOpen" data-id="bggrp"><div class="tx"><b>Робота у фоні</b><span>Щоб серії докачувались, а перегляд зберігався при заблокованому екрані та в PiP.</span></div>${ico('chev')}</button>
+    <button class="gh" data-act="grptog" data-g="bgOpen" data-id="bggrp"><div class="tx"><b>Робота у фоні</b><span>Докачування й перегляд при заблокованому екрані та в PiP.</span></div>${ico('chev')}</button>
     <div class="fold"><div>
-      <label class="row sub"><input type="checkbox" data-set="bg_keep" ${S.set.bg_keep !== false ? 'checked' : ''}><div class="tx"><b>Не давати iOS приспати програму</b><span class="d">Поки йдуть завантаження або відтворюється відео (після відео ще ~1,5 хв, щоб зберегти місце, де зупинились).</span></div></label>
-      <label class="row sub"><input type="checkbox" data-set="bg_check" ${S.set.bg_check ? 'checked' : ''}><div class="tx"><b>Також для перевірки нових серій</b><span class="d">Програма працює постійно, поки є зв'язок із Python (помітніше розряджає батарею). Потрібна автоперевірка вище.</span></div></label>
+      <label class="row sub"><input type="checkbox" data-set="bg_keep" ${S.set.bg_keep !== false ? 'checked' : ''}><div class="tx"><b>Не давати iOS приспати програму</b><span class="d">Поки йдуть завантаження або відео (після відео ще ~1,5 хв).</span></div></label>
+      <label class="row sub"><input type="checkbox" data-set="bg_check" ${S.set.bg_check ? 'checked' : ''}><div class="tx"><b>Також для перевірки нових серій</b><span class="d">Працює постійно (швидше сідає батарея). Потрібна автоперевірка.</span></div></label>
     </div></div>
   </div>
   ${S.set.island_ok ? `<div class="grp"><div class="skg ${S.isOpen === true && S.set.island !== false ? 'open' : ''}" id="isg">
@@ -12564,10 +12892,8 @@ function settingsHTML() {
       <label class="row sub ${S.set.island !== false ? '' : 'dis'}"><input type="checkbox" data-set="island_check" ${S.set.island_check ? 'checked' : ''}><div class="tx"><b>Таймер перевірки</b><span class="d">Відлік до наступної перевірки.</span></div></label>
     </div></div>
   </div></div>` : ''}` : ''}
-  <div class="set"><div class="tx"><b>Розмивати скріншоти серій</b><span>Захист від спойлерів у картковому вигляді серій.</span></div>
-    <label class="sw"><input type="checkbox" data-set="blur_thumbs" ${S.set.blur_thumbs ? 'checked' : ''}></label></div>
-  <div class="set"><div class="tx"><b>Мережа зараз</b><span>Визначається автоматично: Wi‑Fi, мобільна мережа чи офлайн.</span></div>${netHTML()}</div>
 
+  <div class="stcap">Розробник</div>
   <div class="grp ${S.devOpen ? 'open' : ''}" id="devgrp">
     <button class="gh" data-act="grptog" data-g="devOpen" data-id="devgrp"><div class="tx"><b>Функції розробника</b><span>Журнали, діагностика, експериментальні перемикачі</span></div>${ico('chev')}</button>
     <div class="fold"><div>
@@ -12595,6 +12921,23 @@ function seasonOf(title) {
   m = t.match(/\s([2-9])(?:\s*[\[(].*)?$/); if (m) return Number(m[1]);
   return 1;
 }
+const SEASON_RE = [/(первый|второй|третий|четв[её]ртый|пятый|шестой|седьмой)\s+сезон/g, /(\d+)\s*-?\s*(?:й|ой|ый)?\s*сезон/g, /сезон\s*\d+/g, /\d+(?:st|nd|rd|th)\s+season/g, /season\s*\d+/g];
+const seasonExplicit = title => SEASON_RE.some(r => { r.lastIndex = 0; return r.test(String(title || '').toLowerCase()); });
+const baseTitle = title => { let s = String(title || '').toLowerCase().replace(/[\[(].*?[\])]/g, ' '); SEASON_RE.forEach(r => { s = s.replace(r, ' '); }); return s.replace(/\s[2-9]$/, ' ').replace(/[^a-zа-яёіїєґ0-9]+/g, ' ').trim(); };
+function seasonAuto(it) {  // «Сезон 1» показуємо лише коли точно відомо, що сезонів щонайменше два: у назві явно вказано сезон або в бібліотеці є наступний
+  const n = seasonOf(it.title);
+  if (n > 1) return n;
+  if (seasonExplicit(it.title)) return 1;
+  const b = baseTitle(it.title);
+  return b && S.items.some(x => x !== it && !x.temp && seasonOf(x.title) > 1 && baseTitle(x.title) === b) ? 1 : null;
+}
+function seasonShow(it) {  // власний підпис (it.season: 0 — без, число — своє) або автоматичний
+  const o = it.season;
+  if (o === 0) return null;
+  if (o > 0) return o;
+  return seasonAuto(it);
+}
+const covUrl = x => { const c = x && x.cover; return c && c.on ? `/cover/${x.id}?v=${c.v}` : ((x && x.meta && x.meta.poster) || ''); };
 const arcTab = () => route().name !== 'group' && S.libTab === 'arc';
 function visibleItems() {
   const rt = route(); if (rt.name === 'group') return groupMembers(rt.id);
@@ -12757,7 +13100,7 @@ const LOGO_OK = {yummyani: 1, aniliberty: 1, animru: 1, animevost: 1};
 const lname = it => it.alias || it.title;
 function gstats(m) { return {watched: m.reduce((a, x) => a + x.stats.watched, 0), total: m.reduce((a, x) => a + x.stats.total, 0), downloaded: m.reduce((a, x) => a + x.stats.downloaded, 0), size: m.reduce((a, x) => a + (x.stats.size || 0), 0), new: m.reduce((a, x) => a + (x.stats.new || 0), 0)}; }
 function cardHTML(it, i, demo, go, G) {
-  const st = G ? gstats(G.m) : it.stats, p = it.meta.poster, V = S.view;
+  const st = G ? gstats(G.m) : it.stats, p = covUrl(it), V = S.view;
   const key = G ? G.m[0].id : it.id, arch = G ? G.m.every(x => x.archived) : it.archived;
   const sel = reo => reo && (G ? G.m.every(x => S.libSel.has(x.id)) : S.libSel.has(it.id));
   const ratio = st.total ? st.watched / st.total : 0;
@@ -12766,7 +13109,7 @@ function cardHTML(it, i, demo, go, G) {
   const ejb = '';
   const cd = V.timer && nx && nx.ts ? `<div class="cd" data-c="1" data-ts="${nx.ts}" data-ep="${esc(nx.ep ?? '')}" data-approx="${nx.approx ? 1 : 0}" data-date="${nx.date_only ? 1 : 0}">${ico('clock')}<span></span></div>` : '';
   const dv = reo || demo || go || G, SEL = sel(reo);
-  const psx = x => { const q = x.meta && x.meta.poster; return q ? `background-image:url('${esc(q)}')` : ''; };
+  const psx = x => { const q = covUrl(x); return q ? `background-image:url('${esc(q)}')` : ''; };
   const rest = G ? G.m.filter(x => x !== it) : [];
   const lay = (x, c) => x ? `<i class="gl ${c}${x.archived ? ' arch' : ''}" style="${psx(x)}"></i>` : '';  // шарів стільки, скільки аніме в групі (2 аніме — 1 шар позаду)
   const layers = G ? lay(rest[1], 'l2') + lay(rest[0], 'l1') : '';
@@ -12780,7 +13123,7 @@ function cardHTML(it, i, demo, go, G) {
       ${V.site ? siteIcon(it.site) + ((it.sources || []).length > 1 ? `<span class="srcn">+${it.sources.length - 1}</span>` : '') : ''}
       ${V.badge && st.new ? `<b class="badge">${ico('spark')}${newW(st.new)}</b>` : ''}
       <div class="grad"></div>
-      <div class="ct">${cd}${V.seasonOnly ? `<div class="sn">Сезон ${seasonOf(it.title)}</div>` : ''}<div class="t">${esc(ttl)}</div>
+      <div class="ct">${cd}${V.seasonOnly && seasonShow(it) ? `<div class="sn">Сезон ${seasonShow(it)}</div>` : ''}<div class="t">${esc(ttl)}</div>
         ${V.stats ? `<div class="s">${st.watched}/${st.total} · ${ico('download')} ${st.downloaded}<span class="sx">${st.size ? ' · ' + fmtSize(st.size) : ''}${G ? ' · ' + G.m.length + ' аніме' : it.dubbing ? ' · ' + esc(it.dubbing) : ''}</span></div>` : ''}</div>
       <i class="pb"><i style="width:${(ratio * 100).toFixed(0)}%"></i></i>
     </div>${G ? '</div>' : ''}
@@ -13262,6 +13605,7 @@ function renderSheet() {
   else if (s.kind === 'dmenu') inner = dmenuHTML(s);
   else if (s.kind === 'cast') inner = `<h3>Перекинути на…</h3><div class="cm">${((S.sync && S.sync.peers) || []).map(p => `<button data-act="castgo" data-id="${esc(p.id)}" ${p.online ? '' : 'disabled'}>${dico(p.kind)} ${esc(p.name)} <span class="d" style="margin-left:auto">${p.online ? 'онлайн' : 'офлайн'}</span></button>`).join('')}</div>`;
   else if (s.kind === 'gpick') inner = gpickHTML();
+  else if (s.kind === 'cedit') inner = ceditHTML(s);
   else if (s.kind === 'cmenu' && s.gid) { const m = groupMembers(s.gid), nm = S.view.gtitle === false ? '' : gname(m); inner = `<h3>${esc(nm || 'Група')}</h3><div class="cm">
      <button data-act="gmshare" data-g="${esc(s.gid)}">${ico('share')} Поділитись</button>
      <button data-act="gmrename" data-g="${esc(s.gid)}">${ico('edit')} Перейменувати</button>
@@ -13270,7 +13614,7 @@ function renderSheet() {
   else if (s.kind === 'cmenu') { const it = item(s.id) || {}; inner = `<h3>${esc(lname(it))}</h3><div class="cm">
      <button data-act="cmshare" data-id="${s.id}">${ico('share')} Поділитись</button>
      ${castTargets().length ? `<button data-act="cmcast">${ico('xfer')} Відкрити на іншому пристрої</button>` : ''}
-     <button data-act="cmrename" data-id="${s.id}">${ico('edit')} Перейменувати</button>
+     <button data-act="cmedit" data-id="${s.id}">${ico('edit')} Редагувати</button>
      <button data-act="cmarc" data-lp="gpick" data-id="${s.id}">${ico(it.archived ? 'refresh' : 'check')} ${it.archived ? 'У бібліотеку' : 'У переглянуте'}</button>
      ${it.group ? `<button data-act="cmeject" data-id="${s.id}">${ico('undo')} Прибрати з групи</button>` : `<button data-act="cmgroup" data-id="${s.id}">${ico('plus')} Створити групу</button>`}
      <button class="dng" data-act="cmdel" data-id="${s.id}">${ico('trash')} Видалити</button></div>`; }
@@ -13710,11 +14054,24 @@ function gpickHTML() {
   const gs = [], seen = new Set();
   S.items.forEach(x => { if (x.group && !seen.has(x.group)) { seen.add(x.group); gs.push(x.group); } });
   const c = (S.sheet && S.sheet.ctx) || {};
-  const what = c.arch ? 'у переглянуте' : 'у бібліотеку';
-  return `<h3>Додати до групи</h3><p style="color:var(--mu);font-size:13px;margin:0 0 6px">Аніме буде додано ${what} і в обрану групу.</p>` + (gs.length
-    ? `<div class="cm">${gs.map(g => { const m = groupMembers(g), nm = gname(m) || m.slice(0, 2).map(lname).join(' · '); return `<button data-act="gpickgo" data-g="${esc(g)}">${ico('plus')}<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(nm || 'Група')}</span><span style="color:var(--mu);font-weight:500">${m.length}</span></button>`; }).join('')}</div>`
-    : `<p style="color:var(--mu)">У бібліотеці ще немає груп. Групу можна створити в меню аніме в бібліотеці.</p>`)
-    + `<div class="row2" style="margin-top:10px"><button class="btn" data-act="dlg-no" style="flex:1">Скасувати</button></div>`;
+  const what = c.arch ? 'У переглянуте' : 'У бібліотеку';
+  let src;
+  if (c.type === 'res') { const s0 = (c.res.srcs || [])[0] || {}; src = {title: c.res.title, poster: s0.poster || c.res.poster || ''}; }
+  else { const x = item(c.id) || {}; src = {title: lname(x), poster: covUrl(x)}; }
+  const bg = q => q ? `background-image:url('${esc(q)}')` : '';
+  const rows = gs.map(g => {
+    const m = groupMembers(g), top = m.find(x => !x.archived) || m[0], rest = m.filter(x => x !== top);  // обкладинка — та, що в картці групи в бібліотеці
+    const nm = gname(m) || m.slice(0, 2).map(lname).join(' · ') || 'Група';
+    return `<button class="gpr" data-act="gpickgo" data-g="${esc(g)}" data-q="${esc((nm + ' ' + m.map(lname).join(' ')).toLowerCase())}">
+      <span class="gps">${m.length > 2 ? `<i class="g2" style="${bg(covUrl(rest[1]))}"></i>` : ''}${m.length > 1 ? `<i class="g1" style="${bg(covUrl(rest[0]))}"></i>` : ''}<i class="gc" style="${bg(covUrl(top))}"></i></span>
+      <span class="gpt"><b>${esc(nm)}</b><span>${m.length} аніме · ${esc(m.slice(0, 3).map(lname).join(', '))}</span></span><span class="gpa">${ico('plus')}</span></button>`;
+  }).join('');
+  return `<h3>Додати до групи</h3>
+    <div class="gpx"><i class="th" style="${bg(src.poster)}"></i><div class="tx"><b>${esc(src.title || '')}</b><span>${what} · і в групу</span></div></div>
+    <button class="gpr gpn" data-act="gpicknew"><span class="gps">${ico('plus')}</span><span class="gpt"><b>Нова група</b><span>Створити групу з цим аніме</span></span></button>
+    ${gs.length > 5 ? `<input class="in" id="gpq" type="search" placeholder="Знайти групу…" autocomplete="off" style="margin-top:8px">` : ''}
+    ${gs.length ? `<div class="gpl" id="gpl">${rows}</div>` : `<p style="color:var(--mu);font-size:13px;margin:10px 2px 0">Груп ще немає — створіть першу.</p>`}
+    <div class="row2" style="margin-top:10px"><button class="btn" data-act="dlg-no" style="flex:1">Скасувати</button></div>`;
 }
 async function resolveAnime(r0) {  // знаходимо/створюємо запис аніме без переходу на його сторінку
   const r = await api('/api/open', {url: r0.srcs[0].url, explicit: r0.explicit, sources: r0.srcs});
@@ -13727,7 +14084,7 @@ async function resolveAnime(r0) {  // знаходимо/створюємо за
   }
   return id;
 }
-async function addTo(ctx, gid) {  // ctx: {type: res|tmp|item, ...}; arch — додати в «Переглянуте»; gid — ще й у наявну групу
+async function addTo(ctx, gid, newName) {  // ctx: {type: res|tmp|item, ...}; arch — додати в «Переглянуте»; gid — ще й у наявну групу
   try {
     let id;
     if (ctx.type === 'res') { toast('Додаю…', false, 'spinner'); id = await resolveAnime(ctx.res); await loadLib(true); } else id = ctx.id;
@@ -13735,8 +14092,9 @@ async function addTo(ctx, gid) {  // ctx: {type: res|tmp|item, ...}; arch — д
     if (it && it.temp) await api('/api/keep', {id, archived: !!ctx.arch});
     else if (it && !!it.archived !== !!ctx.arch) await api('/api/archive', {id, value: !!ctx.arch});
     if (gid) await api('/api/group', {ids: [id], gid});
+    else if (newName !== undefined) await api('/api/group', {ids: [id], name: newName});
     await loadLib();
-    toast((ctx.arch ? 'У переглянутих' : 'У бібліотеці') + (gid ? ' · у групі' : ''), false, 'check');
+    toast((ctx.arch ? 'У переглянутих' : 'У бібліотеці') + (gid ? ' · у групі' : newName !== undefined ? ' · нова група' : ''), false, 'check');
   } catch (e) { toast(e.message, true); try { await loadLib(); } catch (e2) {} }
 }
 async function copyText(t) {
@@ -13744,6 +14102,99 @@ async function copyText(t) {
     try { const x = document.createElement('textarea'); x.value = t; x.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(x); x.select(); const ok = document.execCommand('copy'); x.remove(); return ok; } catch (e2) { return false; }
   }
 }
+/* ---------- редактор картки: назва, обкладинка, сезон ---------- */
+function ceditHTML(s) {
+  const it = item(s.id) || {};
+  if (s.fit) return `<h3>Підігнати обкладинку</h3><p style="color:var(--mu);font-size:13px;margin:0 0 8px;text-align:center">Перетягніть зображення, колесом або повзунком змініть масштаб.</p>
+    <div class="cfr" id="cfr"><canvas id="cfc" width="400" height="600"></canvas></div>
+    <input class="cfz" id="cfz" type="range" min="1" max="3" step="0.01" value="${s.fp.z}">
+    <div class="row2" style="margin-top:10px"><button class="btn" data-act="cefitno" style="flex:1">Скасувати</button><button class="btn pri" data-act="cefitok" style="flex:1">Готово</button></div>`;
+  const sn = s.sn.m === 'none' ? null : s.sn.m === 'own' ? (Number(s.sn.n) > 0 ? Number(s.sn.n) : null) : seasonAuto(it);
+  const ttl = s.name.trim() || it.title || '';
+  const lab = sn ? `<div class="sn">Сезон ${sn}</div>` : '';
+  const stdBg = it.meta && it.meta.poster ? `background-image:url('${esc(it.meta.poster)}')` : '';
+  const cusBg = s.cov.fitUrl ? `background-image:url('${esc(s.cov.fitUrl)}')` : '';
+  const mini = (k, bg, cap, extra) => `<div class="cep ${k}${s.mode === k ? ' on' : ''}" data-act="cemode" data-m="${k}"><span class="ck">${ico('check')}</span>
+    <div class="card"><div class="poster" style="${bg}${bg ? '' : 'background-image:linear-gradient(160deg,#2b2f4d,#171926)'}">${k === 'cus' && !bg ? `<div class="cepa"><div>${ico('plus')}Додати зображення<br>або перетягніть сюди</div></div>` : ''}<div class="grad"></div>
+      <div class="ct">${S.view.title ? `${lab}<div class="t">${esc(ttl)}</div>` : lab}</div></div></div><b>${cap}</b>${extra || ''}</div>`;
+  return `<h3>Редагувати</h3>
+    <div class="cet">Назва</div>
+    <input class="in" id="cename" type="text" maxlength="120" autocomplete="off" placeholder="${esc(it.title || '')}" value="${esc(s.name)}">
+    <p style="color:var(--mu);font-size:12px;margin:6px 2px 0">Лише в бібліотеці. Порожнє поле — оригінальна назва.</p>
+    <div class="cet">Обкладинка</div>
+    <div class="ceps">${mini('std', stdBg, 'Стандартна')}${mini('cus', cusBg, 'Своя', s.cov.has ? `<div class="cesub"><button data-act="cepick">Замінити</button><button data-act="cefit">Підігнати</button></div>` : '')}</div>
+    <div class="cet">Підпис сезону</div>
+    <div class="seg">${[['auto', 'Авто' + (seasonAuto(it) ? ' · ' + seasonAuto(it) : '')], ['own', 'Свій'], ['none', 'Без']].map(([m, tt]) => `<button data-act="cesn" data-m="${m}" class="${s.sn.m === m ? 'on' : ''}">${tt}</button>`).join('')}</div>
+    ${s.sn.m === 'own' ? `<div class="cenum"><button data-act="cenum" data-d="-1">−</button><input class="in" id="cenum" type="number" min="1" max="30" inputmode="numeric" value="${s.sn.n}"><button data-act="cenum" data-d="1">+</button></div>` : ''}
+    <div class="cesw"><div class="tx">Показувати «Сезон N» на картках бібліотеки</div><label class="sw"><input type="checkbox" data-lv="seasonOnly" ${S.view.seasonOnly ? 'checked' : ''}></label></div>
+    <input type="file" id="cefile" accept="image/*" hidden>
+    <div class="row2" style="margin-top:16px"><button class="btn" data-act="dlg-no" style="flex:1">Скасувати</button><button class="btn pri" data-act="cesave" style="flex:1">Зберегти</button></div>`;
+}
+function ceLive() {  // миттєве оновлення підписів на картках-прикладах без перемальовування шторки
+  const s = S.sheet; if (!s || s.kind !== 'cedit') return;
+  const it = item(s.id) || {}, sn = s.sn.m === 'none' ? null : s.sn.m === 'own' ? (Number(s.sn.n) > 0 ? Number(s.sn.n) : null) : seasonAuto(it), ttl = (($('#cename') || {}).value || '').trim() || it.title || '';
+  document.querySelectorAll('.cep .ct').forEach(ct => { ct.innerHTML = (sn ? `<div class="sn">Сезон ${sn}</div>` : '') + (S.view.title ? `<div class="t">${esc(ttl)}</div>` : ''); });
+}
+function ceImgReady(s) {
+  if (s.cov.img) return Promise.resolve(s.cov.img);
+  return new Promise((res, rej) => { const im = new Image(); im.onload = () => { s.cov.img = im; res(im); }; im.onerror = rej; im.src = s.cov.orig || `/cover/${s.id}?o=1&v=${((item(s.id) || {}).cover || {}).v || 0}`; });
+}
+function ceRegion(im, z, cx, cy) {  // ділянка оригіналу 2:3, яку видно в картці: z — масштаб, (cx, cy) — центр у частках зображення
+  const iw = im.naturalWidth || im.width, ih = im.naturalHeight || im.height;
+  let rw, rh; if (iw / ih > 2 / 3) { rh = ih; rw = ih * 2 / 3; } else { rw = iw; rh = iw * 1.5; }
+  rw /= z; rh /= z;
+  return {sx: Math.max(0, Math.min(iw - rw, cx * iw - rw / 2)), sy: Math.max(0, Math.min(ih - rh, cy * ih - rh / 2)), rw, rh, iw, ih};
+}
+function ceDraw(cv, im, p) { const r = ceRegion(im, p.z, p.cx, p.cy), x = cv.getContext('2d'); x.fillStyle = '#0d0e13'; x.fillRect(0, 0, cv.width, cv.height); x.drawImage(im, r.sx, r.sy, r.rw, r.rh, 0, 0, cv.width, cv.height); return r; }
+function ceFitPaint() { const s = S.sheet, cv = $('#cfc'); if (!s || !s.fit || !cv || !s.cov.img) return; const r = ceRegion(s.cov.img, s.fp.z, s.fp.cx, s.fp.cy); s.fp.cx = (r.sx + r.rw / 2) / r.iw; s.fp.cy = (r.sy + r.rh / 2) / r.ih; ceDraw(cv, s.cov.img, s.fp); }
+async function ceLoadFile(f) {
+  const s = S.sheet; if (!s || s.kind !== 'cedit' || !f) return;
+  if (!/^image\//.test(f.type) && !/\.(jpe?g|png|webp|gif|heic|heif|avif|bmp)$/i.test(f.name || '')) { toast('Це не зображення', true); return; }
+  try {
+    const url = URL.createObjectURL(f);
+    const im = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    const k = Math.min(1, 1400 / Math.max(im.naturalWidth, im.naturalHeight)), cv = document.createElement('canvas');
+    cv.width = Math.round(im.naturalWidth * k); cv.height = Math.round(im.naturalHeight * k);
+    const x = cv.getContext('2d'); x.fillStyle = '#0d0e13'; x.fillRect(0, 0, cv.width, cv.height); x.drawImage(im, 0, 0, cv.width, cv.height); URL.revokeObjectURL(url);
+    const orig = cv.toDataURL('image/jpeg', .9), img2 = new Image();
+    await new Promise((res, rej) => { img2.onload = res; img2.onerror = rej; img2.src = orig; });
+    if (S.sheet !== s) return;
+    s.cov.orig = orig; s.cov.img = img2; s.cov.p = {z: 1, cx: .5, cy: .5};
+    const c2 = document.createElement('canvas'); c2.width = 400; c2.height = 600; ceDraw(c2, img2, s.cov.p);
+    s.cov.fitUrl = c2.toDataURL('image/jpeg', .88); s.cov.has = true; s.cov.dirty = true; s.mode = 'cus';
+    A.cefit();  // одразу відкриваємо підгонку
+  } catch (e) { toast('Не вдалося відкрити зображення', true); }
+}
+document.addEventListener('change', ev => { if (ev.target.id === 'cefile') { const f = ev.target.files && ev.target.files[0]; ev.target.value = ''; ceLoadFile(f); } });
+document.addEventListener('input', ev => {
+  const t = ev.target;
+  if (t.id === 'cename') { if (S.sheet) S.sheet.name = t.value; ceLive(); }
+  else if (t.id === 'cenum') { if (S.sheet) S.sheet.sn.n = Number(t.value) || 1; ceLive(); }
+  else if (t.id === 'cfz') { const s = S.sheet; if (s && s.fit) { s.fp.z = Number(t.value); ceFitPaint(); } }
+  else if (t.id === 'gpq') { const q = t.value.trim().toLowerCase(); document.querySelectorAll('#gpl .gpr').forEach(b => { b.hidden = !!q && !(b.dataset.q || '').includes(q); }); }
+});
+(function ceDrag() {  // перетягування зображення в підгонці та файл, кинутий на «Свою» картку
+  let d = null;
+  document.addEventListener('pointerdown', ev => {
+    const fr = ev.target.closest && ev.target.closest('#cfr'), s = S.sheet; if (!fr || !s || !s.fit) return;
+    d = {x: ev.clientX, y: ev.clientY, id: ev.pointerId}; try { fr.setPointerCapture(ev.pointerId); } catch (e) {}
+  });
+  document.addEventListener('pointermove', ev => {
+    const s = S.sheet, fr = $('#cfr'); if (!d || !s || !s.fit || !fr || ev.pointerId !== d.id) return;
+    const r = ceRegion(s.cov.img, s.fp.z, s.fp.cx, s.fp.cy), dx = ev.clientX - d.x, dy = ev.clientY - d.y; d.x = ev.clientX; d.y = ev.clientY;
+    s.fp.cx -= dx * (r.rw / fr.clientWidth) / r.iw; s.fp.cy -= dy * (r.rh / fr.clientHeight) / r.ih; ceFitPaint();
+  });
+  ['pointerup', 'pointercancel'].forEach(e => document.addEventListener(e, () => { d = null; }));
+  document.addEventListener('wheel', ev => {
+    const s = S.sheet; if (!s || !s.fit || !ev.target.closest || !ev.target.closest('#cfr')) return;
+    ev.preventDefault(); s.fp.z = Math.max(1, Math.min(3, s.fp.z - ev.deltaY * 0.002)); const z = $('#cfz'); if (z) z.value = s.fp.z; ceFitPaint();
+  }, {passive: false});
+  const over = ev => { const s = S.sheet, c = ev.target.closest && ev.target.closest('.cep.cus'); if (!s || s.kind !== 'cedit' || !c) return false; ev.preventDefault(); return c; };
+  document.addEventListener('dragenter', ev => { const c = over(ev); if (c) c.classList.add('dz'); });
+  document.addEventListener('dragover', ev => { over(ev); });
+  document.addEventListener('dragleave', ev => { const c = ev.target.closest && ev.target.closest('.cep.cus'); if (c && !c.contains(ev.relatedTarget)) c.classList.remove('dz'); });
+  document.addEventListener('drop', ev => { const c = over(ev); if (!c) return; c.classList.remove('dz'); const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0]; if (f) ceLoadFile(f); });
+})();
 const A = {
   gpick(el) {
     const m = el.dataset.m;
@@ -13754,6 +14205,13 @@ const A = {
     openSheet('gpick', {ctx});
   },
   async gpickgo(el) { const c = S.sheet && S.sheet.ctx; closeSheet(); if (c) await addTo(c, el.dataset.g); },
+  async gpicknew() {
+    const c = S.sheet && S.sheet.ctx; closeSheet(); if (!c) return;
+    await new Promise(r => setTimeout(r, 200));
+    const v = await askText('Нова група', '', 'Назва необов’язкова: можна лишити порожньою.');
+    if (v === null) return;
+    await addTo(c, null, v);
+  },
   async rsshare() { const r = S.sheet && S.sheet.res; closeSheet(); if (!r) return; const ok = await copyText(r.srcs[0].url); toast(ok ? 'Посилання скопійовано' : 'Не вдалося скопіювати: ' + r.srcs[0].url, !ok, ok ? 'check' : null); },
   async rslib() { const r = S.sheet && S.sheet.res; closeSheet(); if (r) await addTo({type: 'res', res: r, arch: false}); },
   async rsseen() { const r = S.sheet && S.sheet.res; closeSheet(); if (r) await addTo({type: 'res', res: r, arch: true}); },
@@ -14322,6 +14780,49 @@ const A = {
     }
     toast(ok ? 'Посилання скопійовано' : 'Не вдалося скопіювати: ' + it.url, !ok, ok ? 'check' : null);
   },
+  cmedit(el) {
+    const id = el.dataset.id, it = item(id); if (!it) return;
+    const c = it.cover, o = it.season;
+    openSheet('cedit', {id, name: it.alias || '', mode: c && c.on ? 'cus' : 'std',
+      sn: {m: o === 0 ? 'none' : o > 0 ? 'own' : 'auto', n: o > 0 ? o : (seasonAuto(it) || 1)},
+      cov: {has: !!c, fitUrl: c ? `/cover/${id}?v=${c.v}` : '', p: c && c.p && c.p.z ? c.p : null, img: null, orig: null, dirty: false}, fit: null});
+  },
+  cemode(el) {
+    const s = S.sheet; if (!s || s.kind !== 'cedit') return;
+    if (el.dataset.m === 'cus' && !s.cov.has) { $('#cefile').click(); return; }
+    s.name = ($('#cename') || {}).value ?? s.name; s.mode = el.dataset.m; renderSheet();
+  },
+  cepick() { const f = $('#cefile'); if (f) f.click(); },
+  async cefit() {
+    const s = S.sheet; if (!s || s.kind !== 'cedit') return;
+    s.name = ($('#cename') || {}).value ?? s.name;
+    try { await ceImgReady(s); } catch (e) { toast('Оригінал недоступний — виберіть зображення знову', true); return; }
+    const p = s.cov.p || {z: 1, cx: .5, cy: .5};
+    s.fitBack = s.cov.p ? {...s.cov.p} : null; s.fp = {z: p.z || 1, cx: p.cx ?? .5, cy: p.cy ?? .5}; s.fit = true; renderSheet(); ceFitPaint();
+  },
+  cefitno() { const s = S.sheet; if (!s) return; s.fit = false; if (!s.cov.dirty && !s.cov.has) s.mode = 'std'; renderSheet(); },
+  cefitok() {
+    const s = S.sheet; if (!s || !s.cov.img) return;
+    const cv = document.createElement('canvas'); cv.width = 400; cv.height = 600; ceDraw(cv, s.cov.img, s.fp);
+    s.cov.fitUrl = cv.toDataURL('image/jpeg', .88); s.cov.p = {...s.fp}; s.cov.dirty = true; s.cov.has = true; s.mode = 'cus'; s.fit = false; renderSheet();
+  },
+  cesn(el) { const s = S.sheet; if (!s) return; s.name = ($('#cename') || {}).value ?? s.name; s.sn.m = el.dataset.m; renderSheet(); },
+  cenum(el) { const s = S.sheet; if (!s) return; s.sn.n = Math.max(1, Math.min(30, Number(s.sn.n || 1) + Number(el.dataset.d))); const i = $('#cenum'); if (i) i.value = s.sn.n; ceLive(); },
+  async cesave() {
+    const s = S.sheet; if (!s || s.kind !== 'cedit') return;
+    const it = item(s.id); if (!it) return closeSheet();
+    const name = (($('#cename') || {}).value ?? s.name).trim(), id = s.id;
+    closeSheet();
+    try {
+      if (name !== (it.alias || '')) { const r = await api('/api/rename', {id, name}); it.alias = r.alias || ''; }
+      const sv = s.sn.m === 'none' ? 'none' : s.sn.m === 'own' ? Math.max(1, Number(s.sn.n) || 1) : null;
+      if ((sv === null ? undefined : sv === 'none' ? 0 : sv) !== (it.season === null ? undefined : it.season)) await api('/api/season', {id, value: sv});
+      const had = it.cover, on = s.mode === 'cus' && s.cov.has;
+      if (s.cov.dirty) await api('/api/cover', {id, fit: s.cov.fitUrl, orig: s.cov.orig || undefined, p: s.cov.p, on});
+      else if (had && !!had.on !== on) await api('/api/cover', {id, on});
+      await loadLib(); render(); toast('Збережено', false, 'check');
+    } catch (e) { toast(e.message, true); try { await loadLib(); } catch (e2) {} }
+  },
   async cmrename(el) {
     const id = el.dataset.id, it = item(id); closeSheet(); if (!it) return;
     const v = await askText('Перейменувати', lname(it), 'Назва зміниться лише в бібліотеці — в самому аніме лишиться оригінальна. Порожнє поле поверне оригінальну назву.');
@@ -14397,7 +14898,7 @@ const A = {
   grptog(el) { const g = document.getElementById(el.dataset.id); if (!g) return; S[el.dataset.g] = !g.classList.contains('open'); g.classList.toggle('open', S[el.dataset.g]); },
   istog(el, ev) { if (ev && ev.target.closest('.sw')) return; S.isOpen = !$('#isg').classList.contains('open'); $('#isg').classList.toggle('open', S.isOpen); },
   ovtog(el, ev) { if (ev && ev.target.closest('.sw')) return; S.ovOpen = !$('#ovg').classList.contains('open'); $('#ovg').classList.toggle('open', S.ovOpen); },
-  sktog(el, ev) { if (ev && ev.target.closest('.sw')) return; S.skOpen = !$('#skg').classList.contains('open'); $('#skg').classList.toggle('open', S.skOpen); },
+  sktog(el, ev) { if (ev && ev.target.closest('.sw, .stsel')) return; S.skOpen = !$('#skg').classList.contains('open'); $('#skg').classList.toggle('open', S.skOpen); },
   ptog() { S.pOpen = !S.pOpen; const g = $('#pgrp'); if (g) g.classList.toggle('open', S.pOpen); },
   pprev() { stepPlayer(-1); },
   pnxnow() { nxNow(); },
@@ -14713,7 +15214,10 @@ document.addEventListener('dragstart', ev => { if (PC_APP && ev.target.closest &
 document.addEventListener('contextmenu', ev => {
   const t = ev.target; if (!t || !t.closest) return;
   if (t.closest('.card[data-id]')) ev.preventDefault();
-  if (!PC_APP || S.cur || S.sheet || DR.on || t.closest('input,textarea')) return;
+  if (!PC_APP || S.cur || DR.on || t.closest('input,textarea')) return;
+  const lp0 = t.closest('[data-lp]');  // правий клік = утримання (вибір групи тощо), у т.ч. всередині відкритого меню
+  if (lp0 && A[lp0.dataset.lp]) { ev.preventDefault(); GP.t = Date.now(); A[lp0.dataset.lp](lp0); return; }
+  if (S.sheet) return;
   const rn = route().name, c = t.closest('.card[data-id]');
   if (c && ['home', 'group'].includes(rn) && !S.reorder) { ev.preventDefault(); gpHaptic(); LP.t = Date.now(); openSheet('cmenu', c.dataset.gid ? {gid: c.dataset.gid, rect: c.getBoundingClientRect()} : {id: c.dataset.id, rect: c.getBoundingClientRect()}); return; }
   const sc = (rn === 'search' || rn === 'new') ? t.closest('.card.sr') : null;
@@ -14746,10 +15250,10 @@ document.addEventListener('keydown', ev => {  // Ctrl+Z — скасувати, 
   }, true);
   document.addEventListener('pointermove', ev => {
     if (!d) return; const dx = ev.clientX - d.x;
-    if (!d.m && Math.abs(dx) > 5) d.m = true;
+    if (!d.m && Math.abs(dx) > 5) { d.m = true; document.documentElement.classList.add('hsd'); }
     if (d.m) d.el.scrollLeft = d.l - dx;
   }, true);
-  ['pointerup', 'pointercancel'].forEach(t => document.addEventListener(t, () => { if (d && d.m) { const m = d; setTimeout(() => {}, 0); window.__hsDrag = Date.now(); } d = null; }, true));
+  ['pointerup', 'pointercancel'].forEach(t => document.addEventListener(t, () => { document.documentElement.classList.remove('hsd'); if (d && d.m) { const m = d; setTimeout(() => {}, 0); window.__hsDrag = Date.now(); } d = null; }, true));
   document.addEventListener('click', ev => { if (window.__hsDrag && Date.now() - window.__hsDrag < 250) { ev.preventDefault(); ev.stopPropagation(); ev.stopImmediatePropagation(); window.__hsDrag = 0; } }, true);
 })();
 document.addEventListener('submit', ev => { if (ev.target.dataset && ev.target.dataset.form === 'search') { ev.preventDefault(); A.dosearch(); } });
@@ -14834,7 +15338,6 @@ document.addEventListener('change', ev => {
     const t = ev.target, k = t.dataset.ck, v = t.checked; t.blur();
     if (k === 'rc_in' || k === 'rc_out') { api('/api/settings', {[k]: v}).then(() => { if (S.set) S.set[k] = v; return syncFetch(); }).catch(e => toast(e.message, true)); return; }
     (async () => {
-      if (k === 'sy_other' && v && !(await askConfirm('Синхронізувати всі інші налаштування?', 'Вони передаватимуться між пристроями й можуть перезаписати значення на іншому.', 'Увімкнути', false))) { t.checked = false; return; }
       try { S.sync = await api('/api/sync_cfg', {['sync_' + k.slice(3)]: v}); paintSync(); } catch (e) { toast(e.message, true); }
     })();
     return;
@@ -14854,6 +15357,15 @@ document.addEventListener('change', ev => {
     return;
   }
   if (ev.target.id === 'qsel') { S.q = ev.target.value; ls.set('q', S.q); }
+  if (ev.target.dataset && ev.target.dataset.ss) {  // меню вибору в налаштуваннях
+    const k = ev.target.dataset.ss, v = ev.target.value;
+    if (k === 'np_cover') { setOpt('np_cover', v); setOpt('np_ep_cover', v !== 'anime'); NPF.t = 0; }
+    else if (k === 'web_inapp') setOpt('web_inapp', v === 'app');
+    else if (k === 'skip_mode') setOpt('skip_mode', v);
+    else if (k === 'vol_max') { setOpt('vol_max', Number(v)); if (volMax() < 200 && volGet() > 100) volApply(100); }
+    else if (k === 'recent_min') setOpt('recent_min', Number(v));
+    return;
+  }
   if (ev.target.id === 'mobsw') {
     const v = ev.target.checked; S.set.mobile_download = v;
     api('/api/settings', {mobile_download: v}).catch(e => { toast(e.message, true); });
@@ -14861,12 +15373,12 @@ document.addEventListener('change', ev => {
   if (ev.target.id === 'pauto') setOpt('auto_next', ev.target.checked);
   if (ev.target.id === 'skmaster') {
     const v = ev.target.checked; setOpt('auto_skip', v);
-    const g = $('#skg'); if (g) { g.classList.toggle('open', v); S.skOpen = v; g.querySelectorAll('.row.sub').forEach(r => r.classList.toggle('dis', !v)); }
+    const g = $('#skg'); if (g) { g.classList.toggle('open', v); S.skOpen = v; g.querySelectorAll('.row.sub').forEach(r => r.classList.toggle('dis', !v)); const ss = g.querySelector('.stsel'); if (ss) ss.classList.toggle('offd', !v); }
     return;
   }
   if (ev.target.id === 'ovmaster') {
     const v = ev.target.checked; setOpt('own_vol', v);
-    const g = $('#ovg'); if (g) { g.classList.toggle('open', v); S.ovOpen = v; g.querySelectorAll('.row').forEach(r => r.classList.toggle('dis', !v)); }
+    const g = $('#ovrow .stsel'); if (g) g.classList.toggle('offd', !v);
     if (!v) { const vp = $('#vvp'); if (vp) vp.classList.add('hide'); }
     return;
   }
@@ -14883,6 +15395,7 @@ document.addEventListener('change', ev => {
     if (ev.target.dataset.set === 'blur_thumbs') document.querySelectorAll('.ec .th img, .rme .thi').forEach(i => i.classList.toggle('bl', ev.target.checked));
     if (ev.target.dataset.set === 'auto_next') { const c = $('#pauto'); if (c) c.checked = ev.target.checked; }
     if (ev.target.dataset.set === 'ios_player') applyPlayerMode();
+    if (ev.target.dataset.set === 'pc_cursor' && window.__curApply) window.__curApply();
     if (ev.target.dataset.set === 'old_cards' && !ev.target.checked && S.epView === 'cards') { S.epView = 'list'; try { localStorage.setItem('epv', 'list'); } catch (e) {} }
   }
 });
@@ -15001,9 +15514,19 @@ window.__pipMsg = m => {
 };
 /* ---------- власна гучність (окрема від системної; до 200%) ---------- */
 let AUD = null;  // Web Audio створюємо лише коли користувач змінив гучність (за 100% звук іде як є, найнадійніше для фону й PiP)
-const ownVol = () => !!(S.set && S.set.own_vol);
+const ownVol = () => PC_APP || !!(S.set && S.set.own_vol);  // на ПК гучність плеєра завжди власна (вимкнути не можна)
 function volMax() { return S.set && S.set.vol_max >= 200 ? 200 : 100; }
 function volGet() { let v = 100; try { v = parseInt(localStorage.getItem('pvol') || '100', 10); } catch (e) {} return Math.max(0, Math.min(volMax(), isNaN(v) ? 100 : v)); }
+function volCtx() {  // Web Audio створюємо лише коли справді міняють гучність
+  if (AUD) return AUD;
+  const C = window.AudioContext || window.webkitAudioContext; if (!C) return null;
+  const ctx = new C(), src = ctx.createMediaElementSource(V), g = ctx.createGain();
+  src.connect(g); g.connect(ctx.destination); AUD = {ctx, g}; return AUD;
+}
+function volWake() {  // iOS дозволяє створити/запустити аудіоконтекст лише в жесті користувача: робимо це в момент торкання повзунка
+  if (!ownVol()) return;
+  try { const a = volCtx(); if (a && a.ctx.state !== 'running') a.ctx.resume().catch(() => {}); } catch (e) {}
+}
 function volApply(p) {
   if (!ownVol()) return;  // власна гучність (Web Audio) вимкнена: звук іде напряму, як у старих стабільних версіях
   p = Math.max(0, Math.min(volMax(), p));
@@ -15011,11 +15534,7 @@ function volApply(p) {
   if (PCPIP.on && PCPIP.hooked && !PCPIP.vol) pcPipSend({t: 'vol', p});  // вікно PiP грає з тією ж гучністю
   if (!AUD && p === 100) return;
   try {
-    if (!AUD) {
-      const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
-      const ctx = new C(), src = ctx.createMediaElementSource(V), g = ctx.createGain();
-      src.connect(g); g.connect(ctx.destination); AUD = {ctx, g};
-    }
+    if (!volCtx()) return;
     AUD.g.gain.value = p / 100;
     if (AUD.ctx.state !== 'running') AUD.ctx.resume().catch(() => {});
   } catch (e) { /* без Web Audio лишається системна гучність */ }
@@ -15035,6 +15554,7 @@ function vvPlace() {  // вікно гучності стоїть над кно�
   v.style.bottom = Math.max(10, pr.bottom - br.top + 8) + 'px';
 }
 $('#vvol').addEventListener('click', ev => { ev.stopPropagation(); const v = $('#vvp'); v.classList.toggle('hide'); if (!v.classList.contains('hide')) { volPaint(); vvPlace(); } vcShow(); });
+['pointerdown', 'touchstart', 'touchend', 'pointerup', 'mousedown'].forEach(e => $('#vvr').addEventListener(e, volWake, {passive: true}));
 $('#vvr').addEventListener('input', () => {
   const r = $('#vvr'); let p = parseInt(r.value, 10);
   if (volMax() > 100 && Math.abs(p - 100) <= 4) { p = 100; r.value = 100; }  // «магніт» на 100%: ловить значення поряд зі стандартною гучністю
@@ -15468,13 +15988,49 @@ function applyPlayerMode() {  // без playsinline iPhone сам відкрив
   const native = IOS_APP && S.set.ios_player === true && !S.mirror && !S.awp;  // під час трансляції екрана системний плеєр йде на інший екран і гасить телефон — тоді свій
   ['playsinline', 'webkit-playsinline'].forEach(a => native ? V.removeAttribute(a) : V.setAttribute(a, ''));
 }
+/* обкладинка екрана блокування: аніме / серія / останній кадр перегляду */
+const NPF = {ctx: null, id: 0, n: 0, v: 0, t: 0, busy: false};
+function npPoster() {
+  const c = NPF.ctx; if (!c) return '';
+  const {it, e, n} = c, mode = npCover();
+  try {
+    if (mode === 'last' && NPF.id === it.id && NPF.n === n && NPF.v) return new URL(`/npframe?v=${NPF.v}`, location.href).href;
+    if (mode !== 'anime' && e && e.th) return new URL(`/thumb/${it.id}/${encodeURIComponent(e.n)}?v=${e.downloaded ? 1 : 0}`, location.href).href;
+    if (it.meta && it.meta.poster) return new URL(it.meta.poster, location.href).href;
+  } catch (er) {}
+  return '';
+}
+function npArt() {
+  try {
+    const ms = navigator.mediaSession; if (!ms || !ms.metadata || !window.MediaMetadata) return;
+    const u = npPoster(), m = ms.metadata;
+    ms.metadata = new MediaMetadata({title: m.title, artist: m.artist, album: m.album, artwork: u ? [{src: u, sizes: '480x270'}] : []});
+  } catch (er) {}
+}
+function npCapture(force) {  // зрідка знімаємо поточний кадр (малий JPEG) і ставимо як обкладинку; жодних помилок назовні
+  try {
+    if (npCover() !== 'last' || !S.cur || !NPF.ctx || NPF.busy || V.readyState < 2 || !V.videoWidth || V.currentTime < 5) return;
+    if (!force && Date.now() - NPF.t < 90000) return;
+    const w = 480, h = Math.max(1, Math.round(w * V.videoHeight / V.videoWidth)), c = document.createElement('canvas'); c.width = w; c.height = h;
+    const x = c.getContext('2d'); x.drawImage(V, 0, 0, w, h);
+    const d = x.getImageData(0, 0, w, h).data; let s = 0, k = 0;
+    for (let i = 0; i < d.length; i += 4 * 97) { s += d[i] + d[i + 1] + d[i + 2]; k++; }
+    if (s / k / 3 < 6) return;  // порожній/чорний кадр (декодер ще не намалював або заборонено) — лишаємо попередню обкладинку
+    const img = c.toDataURL('image/jpeg', 0.72).split(',')[1], id = S.cur.id, n = S.cur.n;
+    NPF.busy = true; NPF.t = Date.now();
+    api('/api/npframe', {img}).then(j => { NPF.id = id; NPF.n = n; NPF.v = j.v; npArt(); }).catch(() => {}).finally(() => { NPF.busy = false; });
+  } catch (er) { NPF.t = Date.now(); }
+}
+V.addEventListener('timeupdate', () => { if (!V.paused && NPF.ctx && Date.now() - NPF.t > 90000) npCapture(); });
+V.addEventListener('pause', () => { if (!V.ended) npCapture(true); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && !V.paused) npCapture(true); });
 function setNowPlaying(it, e, n) {
   const title = `${n} Серія • ${it.title || ''}`, sub = (e && e.title) ? String(e.title) : '';
   document.title = title;
   let poster = '';
   try {
-    if (S.set.np_ep_cover !== false && e && e.th) poster = new URL(`/thumb/${it.id}/${encodeURIComponent(e.n)}?v=${e.downloaded ? 1 : 0}`, location.href).href;  // обкладинка самої серії
-    else if (it.meta && it.meta.poster) poster = new URL(it.meta.poster, location.href).href;
+    NPF.ctx = {it, e, n}; NPF.t = 0;
+    poster = npPoster();
   } catch (er) {}
   V.removeAttribute('poster');  // під час завантаження — чистий чорний фон, без обкладинки
   try {
@@ -15806,7 +16362,7 @@ function devBody() {
     h += '<div class="dvsec">Можливості</div>';
     let hb = '';
     const g = (S.set && S.set.xgest) || 'both';
-    hb += `<div class="dvsub">Жест перекидання</div>
+    if (!PC_APP) hb += `<div class="dvsub">Жест перекидання</div>
       <div class="seg" role="tablist">${[['both', 'Обидва'], ['top', 'Зверху'], ['edge', 'Справа']].map(([m, t]) => `<button data-act="xgest" data-m="${m}" class="${g === m ? 'on' : ''}">${t}</button>`).join('')}</div>
       <div class="dvcard gest ${g === 'edge' ? 'dim' : ''}"><div class="gdemo"><div class="gph"><i class="gglow"></i><i class="gb b1"></i><i class="gb b2"></i><i class="gb b3"></i><i class="gf"></i></div></div>
       <div class="tx"><b>Затиснути зверху</b><span class="d">Затисніть верх екрана — екран затремтить і засяє. Продовжуйте тримати, і відкрите перелетить на інший пристрій.</span></div></div>
@@ -15821,9 +16377,13 @@ function devBody() {
       <button class="dvxc" data-act="dvx" data-k="ho" aria-label="Розгорнути">${ico('chev')}</button><label class="sw"><input type="checkbox" id="hosw" ${y.handoff_on ? 'checked' : ''}></label></div>
       <div class="dvxb ${y.handoff_on ? '' : 'off'}">${hb}</div></div>`;
     h += dvxHTML('sync', 'refresh', 'Синхронізація', 'Бібліотека, перегляд, позиція, архів і видалення. Увімкніть на обох.', 'sysw', y.sync, [
-      ['sy_view', 'Вид бібліотеки', y.sync_view, 'Сортування, групи й вигляд карток'],
-      ['sy_player', 'Налаштування плеєра', y.sync_player, 'Автопропуск, автоперехід, гучність'],
-      ['sy_other', 'Усі інші налаштування', y.sync_other, 'Автоперевірка, розмиття, порядок сайтів тощо. Функції розробника не передаються']]);
+      ['sy_view', 'Вигляд', y.sync_view, 'Картки, сортування, групи, розмиття скріншотів'],
+      ['sy_player', 'Плеєр', y.sync_player, 'Автоперехід, автопропуск, гучність, обкладинка на екрані блокування'],
+      ['sy_library', 'Бібліотека', y.sync_library, 'Недавній перегляд, автоматичне «Переглянуте»'],
+      ['sy_auto', 'Автоперевірка', y.sync_auto, 'Перевірка нових серій'],
+      ['sy_sites', 'Сайти й озвучка', y.sync_sites, 'Порядок сайтів, улюблені озвучки'],
+      ['sy_covers', 'Власні обкладинки', y.sync_covers, 'Свої картинки карток аніме разом із підгонкою'],
+      ['sy_device', 'Системні', y.sync_device, 'Робота у фоні, острів, мобільний інтернет, жести, курсор. Передаються, щоб відновитись на іншому пристрої']]);
     h += dvxHTML('rc', 'cast', 'Пульт', 'Керуйте серією, що грає на іншому пристрої, прямо з цього.', 'rcsw', y.rc_on, [
       ['rc_in', 'Дозволити керувати цим пристроєм', y.rc_in, 'Інший пристрій зможе ставити паузу, перемотувати й міняти серію тут'],
       ['rc_out', 'Керувати іншими з цього пристрою', y.rc_out, 'Показувати пульт, коли на іншому пристрої грає серія']]);
@@ -15840,7 +16400,7 @@ function dmenuHTML(s) {
     <span class="d">${esc(DKIND[p.kind] || '')}${p.sync && p.last ? ' · синхр. ' + syAgo(p.last) : ''}</span></div></div>
     <div class="cm">${p.online && S.sync && S.sync.sync ? `<button data-act="dsync" data-id="${esc(p.id)}">${ico('refresh')} Синхронізувати зараз</button>` : ''}
     ${p.online ? `<button data-act="dpx" class="${s.px ? 'xo' : ''}">${ico('download')} Передати налаштування <span class="chv">${ico('chev')}</span></button>
-    <div class="px ${s.px ? 'o' : ''}">${[['all', 'Усе'], ['view', 'Вид бібліотеки'], ['player', 'Налаштування плеєра'], ['other', 'Інші налаштування']].map(([m, t]) => `<button data-act="dpush" data-id="${esc(p.id)}" data-sc="${m}">${t}</button>`).join('')}</div>` : ''}
+    <div class="px ${s.px ? 'o' : ''}">${[['all', 'Усе'], ['view', 'Вигляд'], ['player', 'Плеєр'], ['library', 'Бібліотека'], ['auto', 'Автоперевірка'], ['sites', 'Сайти й озвучка'], ['device', 'Системні']].map(([m, t]) => `<button data-act="dpush" data-id="${esc(p.id)}" data-sc="${m}">${t}</button>`).join('')}</div>` : ''}
     <div class="xf"><span class="xl">Перекидання на цей пристрій</span><div class="seg sm">${[['std', 'Звичайне'], ['only', 'Єдиний'], ['never', 'Ніколи']].map(([m, t]) => `<button data-act="dxfer" data-id="${esc(p.id)}" data-x="${m}" class="${(p.xfer || 'std') === m ? 'on' : ''}">${t}</button>`).join('')}</div></div>
     ${p.online ? `<button data-act="dremote" data-id="${esc(p.id)}">${ico('cast')} Відкрити пульт</button>` : ''}
     <button data-act="drename" data-id="${esc(p.id)}">${ico('edit')} Змінити назву</button>
@@ -15929,7 +16489,63 @@ function fxMini(k) {
   if (k === 'edge') return '<i class="mf"></i>';
   return '<i class="mb m1"></i><i class="mb m2"></i><i class="mb m3"></i>';
 }
+// ───────── Окремі налаштування під тип пристрою (утримання / Ctrl+клік) ─────────
+const SEP_KEYS = {skmaster: ['auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'skip_mode'], mobsw: ['mobile_download'], ovmaster: ['own_vol', 'vol_max']};
+function sepHint() {
+  const y = S.sync; if (!y || !y.peers || !y.peers.length) return '';
+  return `<p class="dvhint sephint">Синхронізація: щоб налаштувати параметр окремо для типу пристрою (${DKIND[myKind()]} і подібні), ${PC_APP ? 'утримуйте Ctrl і клікніть по ньому' : 'довго утримуйте його'}. Повторне ${PC_APP ? 'Ctrl+клік' : 'утримання'} повертає спільне значення.</p>`;
+}
+function sepLabel() { const k = myKind(); return 'Лише ' + (k === 'pc' ? 'ПК' : k === 'tablet' ? 'iPad' : 'iPhone'); }
+function sepPaint() {
+  const root = $('#root'); if (!root) return;
+  const y = S.sync, able = new Set((y && y.sepable) || []), me = myKind(), sep = (y && y.sep) || {};
+  const tag = (el, keys) => {
+    keys = keys.filter(k => able.has(k)); if (!keys.length) return;
+    const c = el.closest('.skh,.row,.set,.gh') || el; if (c.dataset.sepk && c.dataset.sepk !== keys.join(',')) return;
+    c.dataset.sepk = keys.join(',');
+  };
+  if (!y) { if (!S._sepAsk) { S._sepAsk = true; syncFetch().then(() => { S._sepAsk = false; if (S.sync) sepPaint(); }); } return; }
+  root.querySelectorAll('[data-sepk]').forEach(c => { delete c.dataset.sepk; });
+  root.querySelectorAll('[data-set],[data-ss]').forEach(el => tag(el, [el.dataset.set || el.dataset.ss]));
+  root.querySelectorAll('[data-lv],#lvgrp>.gh').forEach(el => tag(el, ['view']));
+  Object.keys(SEP_KEYS).forEach(id => { const el = $('#' + id); if (el) tag(el, SEP_KEYS[id]); });
+  root.querySelectorAll('[data-sepk]').forEach(c => {
+    const ks = c.dataset.sepk.split(','), on = ks.every(k => (sep[k] || []).includes(me));
+    c.classList.toggle('sepon', on);
+    const host = c.querySelector('.tx>b,b') || c;
+    let b = c.querySelector('.sepi');
+    if (on) { if (!b || b.parentNode !== host) { if (b) b.remove(); b = document.createElement('i'); b.className = 'sepi'; host.appendChild(b); } b.innerHTML = dico(me); b.title = sepLabel(); } else if (b) b.remove();
+  });
+}
+async function sepToggle(el) {
+  if (!S.sync) await syncFetch();
+  const y = S.sync; if (!y) return;
+  const ks = el.dataset.sepk.split(','), me = myKind(), on = !ks.every(k => ((y.sep || {})[k] || []).includes(me));
+  try {
+    S.sync = await api('/api/sync_sep', {keys: ks, on}); sepPaint();
+    try { if (navigator.vibrate) navigator.vibrate(12); } catch (e) {}
+    toast(on ? `Окремо для: ${DKIND[me]}. Спільне значення цей пристрій більше не змінює.` : 'Знову спільне значення для всіх пристроїв.');
+    if (!on) { try { const j = await api('/api/settings'); if (S.set) Object.assign(S.set, j); if (j.view) { S.view = {...VIEW_DEF, ...j.view}; } render(); } catch (e) {} }
+  } catch (e) { toast(e.message, true); }
+}
+(function sepGesture() {
+  let t = 0, fired = 0, x0 = 0, y0 = 0, tgt = null;
+  const find = ev => { if (route().name !== 'settings' || !ev.target.closest) return null; return ev.target.closest('[data-sepk]'); };
+  document.addEventListener('pointerdown', ev => {
+    clearTimeout(t); if (ev.pointerType === 'mouse' || PC_APP) return;
+    const el = find(ev); if (!el) return; x0 = ev.clientX; y0 = ev.clientY; tgt = el;
+    t = setTimeout(() => { fired = Date.now(); sepToggle(tgt); }, 650);
+  }, true);
+  document.addEventListener('pointermove', ev => { if (t && Math.hypot(ev.clientX - x0, ev.clientY - y0) > 10) { clearTimeout(t); t = 0; } }, true);
+  ['pointerup', 'pointercancel'].forEach(n => document.addEventListener(n, () => { clearTimeout(t); t = 0; }, true));
+  document.addEventListener('click', ev => {
+    if (fired && Date.now() - fired < 700) { ev.preventDefault(); ev.stopPropagation(); ev.stopImmediatePropagation(); return; }
+    if ((ev.ctrlKey || ev.metaKey) && PC_APP) { const el = find(ev); if (el) { ev.preventDefault(); ev.stopPropagation(); ev.stopImmediatePropagation(); sepToggle(el); } }
+  }, true);
+  document.addEventListener('contextmenu', ev => { if (Date.now() - fired < 900 && find(ev)) ev.preventDefault(); }, true);
+})();
 function paintSync() {
+  if (route().name === 'settings') sepPaint();
   paintPair(); castSync();
   const o = S.sync && S.sync.offer; if (o && o.hid !== S.lastOffer) askOffer(o);
   const b = $('#dvbox');
@@ -17011,6 +17627,35 @@ if (PC_APP) (function () {
   const onBar = e => { const bar = e.target.closest && e.target.closest('#root .bar'); return bar && !e.target.closest('button,a,input,select,textarea,.ib,[data-act]'); };
   document.addEventListener('mousedown', e => { if (e.button === 0 && onBar(e)) post('drag'); }, true);
   document.addEventListener('dblclick', e => { if (onBar(e)) post('max'); }, true);
+})();
+
+/* ПК: власні курсори. Під наведеним елементом читаємо «природний» cursor і підставляємо відповідний SVG-курсор */
+if (PC_APP) (function () {
+  const H = document.documentElement;
+  const HS = {default: [4, 2], pointer: [12, 3], text: [16, 16], wait: [16, 16], progress: [4, 2], help: [4, 2], crosshair: [16, 16], 'not-allowed': [4, 2], 'resize-ns': [16, 16], 'resize-ew': [16, 16], 'resize-nesw': [16, 16], 'resize-nwse': [16, 16], move: [16, 16], grab: [16, 16], grabbing: [16, 16], 'zoom-in': [13, 13], 'zoom-out': [13, 13], copy: [4, 2]};
+  const MAP = {auto: 'default', default: 'default', pointer: 'pointer', text: 'text', 'vertical-text': 'text', wait: 'wait', progress: 'progress', help: 'help', crosshair: 'crosshair', 'not-allowed': 'not-allowed', 'no-drop': 'not-allowed', grab: 'grab', grabbing: 'grabbing', 'zoom-in': 'zoom-in', 'zoom-out': 'zoom-out', move: 'move', 'all-scroll': 'move', 'col-resize': 'resize-ew', 'ew-resize': 'resize-ew', 'e-resize': 'resize-ew', 'w-resize': 'resize-ew', 'row-resize': 'resize-ns', 'ns-resize': 'resize-ns', 'n-resize': 'resize-ns', 's-resize': 'resize-ns', 'nesw-resize': 'resize-nesw', 'ne-resize': 'resize-nesw', 'sw-resize': 'resize-nesw', 'nwse-resize': 'resize-nwse', 'nw-resize': 'resize-nwse', 'se-resize': 'resize-nwse', copy: 'copy', alias: 'copy', 'context-menu': 'default', cell: 'crosshair'};
+  const url = k => `url('/cur/${k}.svg') ${HS[k][0]} ${HS[k][1]}, auto`;
+  let last = null, prev = '';
+  const clear = () => { if (last) { try { last.style.cursor = prev; } catch (e) {} last = null; prev = ''; } };
+  const on = () => H.classList.contains('curx');
+  const set = t => {
+    if (t === last) return;
+    clear();
+    if (!(t instanceof Element) || !on()) return;
+    const cs = getComputedStyle(t); let c = cs.cursor.split(',').pop().trim();
+    if (c === 'none') return;
+    let k = MAP[c] || 'default';
+    if (c === 'auto' && cs.userSelect !== 'none' && [...t.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())) k = 'text';
+    if (/^(INPUT|TEXTAREA)$/.test(t.tagName) && !/^(checkbox|radio|range|button|submit|color|file)$/.test(t.type || '') && k === 'default') k = 'text';
+    prev = t.style.cursor; last = t; t.style.cursor = url(k);
+  };
+  document.addEventListener('mouseover', e => set(e.target), true);
+  document.addEventListener('mousemove', e => { if (e.target !== last) set(e.target); }, true);
+  document.addEventListener('mouseleave', clear, true);
+  document.addEventListener('pointerdown', e => { if (e.pointerType === 'mouse' && e.button === 0 && e.target.closest && e.target.closest('input[type=range]')) H.classList.add('cgrab'); }, true);
+  ['pointerup', 'pointercancel', 'blur'].forEach(t => addEventListener(t, () => H.classList.remove('cgrab'), true));
+  window.__curApply = () => { const v = !(S.set && S.set.pc_cursor === false); if (H.classList.contains('curx') !== v) { clear(); H.classList.toggle('curx', v); } };
+  window.__curApply();
 })();
 
 /* ПК: власне меню вибору замість системного списку (як на iPhone) */
