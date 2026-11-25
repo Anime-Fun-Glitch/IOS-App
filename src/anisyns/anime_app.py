@@ -234,6 +234,12 @@ body.wait .mid .cb.big{opacity:0}
   document.addEventListener('mouseleave', () => { clearTimeout(hideT); hideT = setTimeout(() => document.body.classList.remove('show'), 700); });
   document.addEventListener('contextmenu', e => e.preventDefault());
   document.addEventListener('dragstart', e => e.preventDefault());
+
+  // невидимі краї для зміни розміру (системної смуги по краях більше немає)
+  const RZ = [['l',10,'left:0;top:10px;bottom:10px;width:5px;cursor:ew-resize'],['r',11,'right:0;top:10px;bottom:10px;width:5px;cursor:ew-resize'],['t',12,'top:0;left:10px;right:10px;height:4px;cursor:ns-resize'],['b',15,'bottom:0;left:10px;right:10px;height:5px;cursor:ns-resize'],['tl',13,'left:0;top:0;width:10px;height:10px;cursor:nwse-resize'],['tr',14,'right:0;top:0;width:10px;height:10px;cursor:nesw-resize'],['bl',16,'left:0;bottom:0;width:10px;height:10px;cursor:nesw-resize'],['br',17,'right:0;bottom:0;width:10px;height:10px;cursor:nwse-resize']];
+  const rzs = document.createElement('style'); rzs.textContent = '.rzh{position:fixed;z-index:2147483647;background:transparent}html.pcfs .rzh,html.pcmax .rzh{display:none!important}';
+  document.head.appendChild(rzs);
+  RZ.forEach(([n, ht, css]) => { const d = document.createElement('div'); d.className = 'rzh'; d.style.cssText = css; d.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); try { wv.postMessage('rz:' + ht); } catch (x) {}; }); document.body.appendChild(d); });
   // перетягування вікна: за будь-яке місце, крім елементів керування
   let pd = null;
   document.addEventListener('pointerdown', e => { if (e.button !== 0) return; pd = e.target.closest('button,.tr,.vsl,.skb') ? null : {x: e.clientX, y: e.clientY}; });
@@ -18148,7 +18154,13 @@ if (PC_APP) (function () {
   w.innerHTML = '<button data-w="min" aria-label="Згорнути"><svg viewBox="0 0 14 14"><path d="M2 7h10"/></svg></button><button data-w="max" aria-label="Розгорнути">' + SVG_MAX + '</button><button class="cl" data-w="close" aria-label="Закрити"><svg viewBox="0 0 14 14"><path d="M2.5 2.5l9 9M11.5 2.5l-9 9"/></svg></button>';
   document.body.appendChild(w);
   w.addEventListener('click', e => { const b = e.target.closest('button'); if (b) post(b.dataset.w); });
-  window.__wmax = on => { const b = w.querySelector('[data-w=max]'); if (b) b.innerHTML = on ? SVG_RES : SVG_MAX; };
+  window.__wmax = on => { document.documentElement.classList.toggle('pcmax', !!on); const b = w.querySelector('[data-w=max]'); if (b) b.innerHTML = on ? SVG_RES : SVG_MAX; };
+  // невидимі краї для зміни розміру (системної смуги по краях більше немає)
+  const RZ = [['l',10,'left:0;top:10px;bottom:10px;width:5px;cursor:ew-resize'],['r',11,'right:0;top:10px;bottom:10px;width:5px;cursor:ew-resize'],['t',12,'top:0;left:10px;right:10px;height:4px;cursor:ns-resize'],['b',15,'bottom:0;left:10px;right:10px;height:5px;cursor:ns-resize'],['tl',13,'left:0;top:0;width:10px;height:10px;cursor:nwse-resize'],['tr',14,'right:0;top:0;width:10px;height:10px;cursor:nesw-resize'],['bl',16,'left:0;bottom:0;width:10px;height:10px;cursor:nesw-resize'],['br',17,'right:0;bottom:0;width:10px;height:10px;cursor:nwse-resize']];
+  const rzs = document.createElement('style'); rzs.textContent = '.rzh{position:fixed;z-index:2147483647;background:transparent}html.pcfs .rzh,html.pcmax .rzh{display:none!important}';
+  document.head.appendChild(rzs);
+  RZ.forEach(([n, ht, css]) => { const d = document.createElement('div'); d.className = 'rzh'; d.style.cssText = css; d.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); post('rz:' + ht); }); document.body.appendChild(d); });
+
   const onBar = e => { const bar = e.target.closest && e.target.closest('#root .bar'); return bar && !e.target.closest('button,a,input,select,textarea,.ib,[data-act]'); };
   document.addEventListener('mousedown', e => { if (e.button === 0 && onBar(e)) post('drag'); }, true);
   document.addEventListener('dblclick', e => { if (onBar(e)) post('max'); }, true);
