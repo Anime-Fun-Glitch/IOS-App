@@ -12,6 +12,38 @@ using Microsoft.Web.WebView2.WinForms;
 
 namespace AniSyns
 {
+    // Заокруглення вікна: Windows 11 — рідні кути DWM (з відновленням після кожної зміни стану; якщо DWM відмовився — запасна маска),
+    // Windows 10 — як раніше (прямі кути, нічого не чіпаємо).
+    static class Corners
+    {
+        [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int val, int size);
+        [DllImport("gdi32.dll")] static extern IntPtr CreateRoundRectRgn(int l, int t, int r, int b, int w, int h);
+        [DllImport("user32.dll")] static extern int SetWindowRgn(IntPtr hwnd, IntPtr rgn, bool redraw);
+        public static readonly bool Win11 = Environment.OSVersion.Version.Build >= 22000;
+
+        public static void Apply(Form f, bool square)
+        {
+            try
+            {
+                if (!f.IsHandleCreated) return;
+                int one = 1, none = unchecked((int)0xFFFFFFFE);
+                DwmSetWindowAttribute(f.Handle, 19, ref one, 4);
+                DwmSetWindowAttribute(f.Handle, 20, ref one, 4);
+                if (!Win11) return;  // Windows 10: старий вигляд
+                int pref = square ? 1 : 2;  // DWMWCP_DONOTROUND / DWMWCP_ROUND
+                int hr = DwmSetWindowAttribute(f.Handle, 33, ref pref, 4);
+                DwmSetWindowAttribute(f.Handle, 34, ref none, 4);  // без кольорової рамки
+                if (hr != 0 && !square)
+                {
+                    int d = (int)(16 * f.DeviceDpi / 96.0);
+                    SetWindowRgn(f.Handle, CreateRoundRectRgn(0, 0, f.Width + 1, f.Height + 1, d, d), true);
+                }
+                else if (hr != 0) SetWindowRgn(f.Handle, IntPtr.Zero, true);
+            }
+            catch { }
+        }
+    }
+
     static class Program
     {
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern int SetCurrentProcessExplicitAppUserModelID(string id);
@@ -71,7 +103,7 @@ namespace AniSyns
             catch { try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { } }
             wv.Dock = DockStyle.Fill;
             wv.DefaultBackgroundColor = Bg;
-            wv.AllowExternalDrop = false;
+            wv.AllowExternalDrop = true; // файл можна кинути на картку «Своя обкладинка»; поза нею сторінка скидання блокує
             Controls.Add(wv);
             Padding = new Padding(Edge);
             SetStyle(ControlStyles.ResizeRedraw | ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint, true);
@@ -155,27 +187,13 @@ namespace AniSyns
 
         void Style()
         {
-            try
-            {
-                int one = 1, round = 2, none = unchecked((int)0xFFFFFFFE);
-                DwmSetWindowAttribute(Handle, 19, ref one, 4);
-                DwmSetWindowAttribute(Handle, 20, ref one, 4);
-                DwmSetWindowAttribute(Handle, 33, ref round, 4);  // заокруглені кути (Windows 11)
-                DwmSetWindowAttribute(Handle, 34, ref none, 4);  // без кольорової рамки навколо вікна
-            }
-            catch { }
+            Corners.Apply(this, WindowState == FormWindowState.Maximized || full);
         }
 
         protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); Style(); }
 
-        // Тонка напівпрозора рамка у стилі програми (замість білої системної)
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            base.OnPaint(e);
-            if (WindowState == FormWindowState.Maximized || full) return;
-            using (var pen = new Pen(Color.FromArgb(255, 44, 46, 60)))
-                e.Graphics.DrawRectangle(pen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
-        }
+        // Без лінії обводки: смуга по краях (для зміни розміру) має колір програми, тож зливається з нею;
+        // заокруглення дає сама Windows 11 (DWM), системну кольорову рамку вимкнено.
 
         // Поки вікно згорнуте, не міняємо розмір сторінки — інакше вона «перебудовується» при відкритті
         protected override void OnLayout(LayoutEventArgs levent)
@@ -184,13 +202,57 @@ namespace AniSyns
             base.OnLayout(levent);
         }
 
+        FormWindowState lastWs = FormWindowState.Normal;
+
+        // Повна перебудова після зміни стану вікна (розгорнути/повернути): розмір WebView, відступи, кути, стан сторінки
+        void Reconcile()
+        {
+            try
+            {
+                if (WindowState == FormWindowState.Minimized) return;
+                bool mx = WindowState == FormWindowState.Maximized;
+                Padding = (mx || full) ? Padding.Empty : new Padding(Edge);
+                wv.Dock = DockStyle.None;
+                wv.Bounds = new Rectangle(Padding.Left, Padding.Top, Math.Max(1, ClientSize.Width - Padding.Horizontal), Math.Max(1, ClientSize.Height - Padding.Vertical));
+                wv.Dock = DockStyle.Fill;
+                PerformLayout();
+                wv.Invalidate();
+                Style();
+                SyncUi();
+            }
+            catch { }
+        }
+
+        async void ReconcileSoon()
+        {
+            foreach (int d in new[] { 30, 150, 500, 1200 })
+            {
+                await Task.Delay(d);
+                Reconcile();
+            }
+        }
+
         void OnState()
         {
             if (WindowState == FormWindowState.Minimized) return;
+            if (WindowState != lastWs) { lastWs = WindowState; ReconcileSoon(); }
+            Style();
             Invalidate();
             bool mx = WindowState == FormWindowState.Maximized;
             Padding = (mx || full) ? Padding.Empty : new Padding(Edge);
-            try { if (wv.CoreWebView2 != null) wv.CoreWebView2.ExecuteScriptAsync("window.__wmax&&window.__wmax(" + (mx ? "true" : "false") + ")"); } catch { }
+            SyncUi();
+        }
+
+        // Єдине джерело правди для сторінки: стан «на весь екран» і «розгорнуто» беремо з вікна, а не з пам'яті сторінки
+        void SyncUi()
+        {
+            try
+            {
+                if (wv.CoreWebView2 == null) return;
+                bool mx = WindowState == FormWindowState.Maximized;
+                wv.CoreWebView2.ExecuteScriptAsync("window.__wmax&&window.__wmax(" + (mx ? "true" : "false") + ");window.__fs&&window.__fs(" + (full ? "true" : "false") + ");window.dispatchEvent(new Event('resize'))");
+            }
+            catch { }
         }
 
         static string DataDir()
@@ -284,6 +346,7 @@ namespace AniSyns
                 if (left > 0) await Task.Delay(left);
                 await c.AddScriptToExecuteOnDocumentCreatedAsync("window.__hostsplash=1");
                 c.Navigate(Url);
+                StartWatchdog();
             }
             catch (Exception ex)
             {
@@ -292,6 +355,55 @@ namespace AniSyns
                     m = "Не знайдено WebView2 Runtime (компонент Windows). Встановіть його з microsoft.com/edge/webview2 або перевстановіть AniSyns.";
                 MessageBox.Show(m, "AniSyns", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 Close();
+            }
+        }
+
+        // Сторож сервера: якщо Python-процес помер або не відповідає ~15 с — перезапускаємо його й оновлюємо сторінку
+        System.Windows.Forms.Timer wd;
+        int wdFails;
+        bool wdBusy;
+
+        static async Task<bool> PingApi()
+        {
+            try
+            {
+                using (var h = new HttpClient { Timeout = TimeSpan.FromSeconds(2.5) })
+                { var r = await h.GetAsync(Url + "api/ping"); return r.IsSuccessStatusCode; }
+            }
+            catch { return false; }
+        }
+
+        void StartWatchdog()
+        {
+            if (wd != null) return;
+            wd = new System.Windows.Forms.Timer { Interval = 5000 };
+            wd.Tick += async (s, e) =>
+            {
+                if (wdBusy) return;
+                wdBusy = true;
+                try
+                {
+                    if (await PingApi()) { wdFails = 0; return; }
+                    if (++wdFails < 3) return;
+                    wdFails = 0;
+                    await RestartServer();
+                }
+                catch { }
+                finally { wdBusy = false; }
+            };
+            wd.Start();
+        }
+
+        async Task RestartServer()
+        {
+            try { if (server != null && !server.HasExited) server.Kill(true); } catch { }
+            string exe = Path.Combine(AppContext.BaseDirectory, "server", "AniSynsServer.exe");
+            server = Process.Start(new ProcessStartInfo(exe, "--parent " + Process.GetCurrentProcess().Id)
+            { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetDirectoryName(exe) });
+            for (int i = 0; i < 100; i++)
+            {
+                if (await Ping()) { try { wv.CoreWebView2.Reload(); } catch { } return; }
+                await Task.Delay(300);
             }
         }
 
@@ -325,6 +437,7 @@ namespace AniSyns
                 WindowState = FormWindowState.Normal;
                 Bounds = Screen.FromControl(this).Bounds;
                 Tell(true);
+                Nudge();
             }
             else
             {
@@ -333,6 +446,7 @@ namespace AniSyns
                 WindowState = prevState;
                 OnState();
                 Tell(false);
+                SyncUi();
                 Nudge();
             }
         }
@@ -343,20 +457,7 @@ namespace AniSyns
         }
 
         // WebView2 після виходу з повного екрана може лишити старий розмір сторінки — підштовхуємо розмір
-        async void Nudge()
-        {
-            foreach (int d in new[] { 120, 450 })
-            {
-                await Task.Delay(d);
-                try
-                {
-                    var p0 = Padding;
-                    Padding = new Padding(p0.Left + 1, p0.Top, p0.Right, p0.Bottom);
-                    Padding = p0;
-                }
-                catch { }
-            }
-        }
+        void Nudge() { ReconcileSoon(); }
 
         void StopServer()
         {
@@ -459,23 +560,10 @@ namespace AniSyns
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
-            try
-            {
-                int one = 1, round = 2, none = unchecked((int)0xFFFFFFFE);
-                DwmSetWindowAttribute(Handle, 19, ref one, 4);
-                DwmSetWindowAttribute(Handle, 20, ref one, 4);
-                DwmSetWindowAttribute(Handle, 33, ref round, 4);
-                DwmSetWindowAttribute(Handle, 34, ref none, 4);
-            }
-            catch { }
+            Corners.Apply(this, false);
         }
 
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            base.OnPaint(e);
-            using (var pen = new Pen(Color.FromArgb(255, 44, 46, 60)))
-                e.Graphics.DrawRectangle(pen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
-        }
+        protected override void OnResize(EventArgs e) { base.OnResize(e); Corners.Apply(this, false); }
 
         protected override void WndProc(ref Message m)
         {

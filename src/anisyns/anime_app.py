@@ -403,12 +403,17 @@ def _make_session():
 
 
 SESS = _make_session()
+_ASEM_ALL = []
+
+
 class _ASem:
   """Семафор зі змінним лімітом — потрібен, щоб режим «Багатозадачність» вмикався й вимикався без перезапуску."""
 
   def __init__(self, n):
     self._c = threading.Condition()
     self._n, self._used = n, 0
+    self._t = 0.0  # коли семафор став «повним» (для сторожа: якщо надто довго — власник завис)
+    _ASEM_ALL.append(self)
 
   def acquire(self, blocking=True, timeout=None):
     end = None if timeout is None else time.time() + timeout
@@ -421,16 +426,27 @@ class _ASem:
           return False
         self._c.wait(rem)
       self._used += 1
+      if self._used >= self._n and not self._t:
+        self._t = time.time()
       return True
 
   def release(self):
     with self._c:
       self._used = max(0, self._used - 1)
+      if self._used < self._n:
+        self._t = 0.0
       self._c.notify()
 
   def set_limit(self, n):
     with self._c:
       self._n = n
+      if self._used < self._n:
+        self._t = 0.0
+      self._c.notify_all()
+
+  def force_reset(self):
+    with self._c:
+      self._used, self._t = 0, 0.0
       self._c.notify_all()
 
   def __enter__(self):
@@ -4493,8 +4509,11 @@ class _acq:
     self.lk = lk
 
   def __enter__(self):
+    t0 = time.time()
     while not self.lk.acquire(timeout=0.4):
       _chk()
+      if time.time() - t0 > 150:  # попередній запит завис — не стоїмо в черзі вічно
+        raise ValueError('Сервер зайнятий попередніми запитами. Спробуйте за хвилину.')
     return self
 
   def __exit__(self, *a):
@@ -6878,7 +6897,10 @@ def _worker_loop():
         b = dict(_BATCH)
         _BATCH.update(t0=None, done=0, bytes=0, err=0)
         if b['done'] or b['err']:  # черга спорожніла — підсумок
-          notif_add('dl', count=b['done'], err=b['err'], bytes=b['bytes'], secs=int(time.time() - (b['t0'] or time.time())), dev=_sync_state().get('name'), devid=_sync_state().get('id'))
+          def _nt(b=b):  # поза JOB_LOCK: _sync_state() бере SYNC_LOCK, а синхронізація бере SYNC_LOCK → JOB_LOCK (взаємне блокування)
+            st0 = _sync_state()
+            notif_add('dl', count=b['done'], err=b['err'], bytes=b['bytes'], secs=int(time.time() - (b['t0'] or time.time())), dev=st0.get('name'), devid=st0.get('id'))
+          threading.Thread(target=_nt, daemon=True).start()
         return
       if j:
         j['status'] = 'running'
@@ -7531,7 +7553,11 @@ def _cm_liberty_html(html):
     nick = re.search(r'data-nickname[^>]*>([^<]*)<', seg)
     tm = re.search(r'<time[^>]*datetime="([^"]*)"', seg)
     body = seg.split('data-like', 1)[0]
-    ps = re.findall(r'<p(?:\s[^>]*)?>(.*?)</p>', body, re.S)
+    ps = []
+    for ch in body.split('</p>')[:-1]:  # лінійно (регулярний (.*?)</p> на «битому» HTML міг би тримати весь Python десятки секунд)
+      pm = re.search(r'<p(?:\s[^>]*)?>', ch)
+      if pm:
+        ps.append(ch[pm.end():])
     text = _cm_text('\n'.join(ps))
     lk = re.search(r'aria-label="Нравится:\s*(\d+)"', seg)
     av = re.search(r'data-slot="avatar-image"[^>]*\ssrc="([^"]+)"', seg) or re.search(r'<img[^>]+\ssrc="([^"]+)"[^>]*data-slot="avatar-image"', seg)
@@ -7860,6 +7886,8 @@ class Handler(BaseHTTPRequestHandler):
         px = max(16, min(128, round(32 * sc / 100)))  # розмір курсора = розмір зображення (SVG масштабується сам)
         svg = CURSORS[p[5:-4]].replace('width="32" height="32"', f'width="{px}" height="{px}"', 1)
         return self._bytes(svg.encode('utf8'), 'image/svg+xml', extra={'Cache-Control': 'public, max-age=86400'})
+      if p == '/api/ping':  # без жодних блокувань: так сторож відрізняє «сервер живий» від «завис»
+        return self._json({'ok': True, 't': int(time.time())})
       if p == '/pip' and PC_APP:
         return self._bytes(PIP_HTML.encode('utf8'), 'text/html; charset=utf-8', extra={'Cache-Control': 'no-store'})
       if p in ('/', '/index.html'):
@@ -9390,6 +9418,14 @@ def _sync_cover_pull(kid, dev=None):
       with open(fp + '.tmp', 'wb') as f:
         f.write(raw)
       os.replace(fp + '.tmp', fp)
+      try:
+        ro = base64.b64decode(r.get('orig') or '')
+        if ro[:2] == b'\xff\xd8' and len(ro) <= 1200 * 1024:
+          with open(_cover_path(kid, True) + '.tmp', 'wb') as f:
+            f.write(ro)
+          os.replace(_cover_path(kid, True) + '.tmp', _cover_path(kid, True))
+      except Exception:
+        pass
       SYNC['gen'] += 1
       return True
     except Exception:
@@ -9785,13 +9821,16 @@ def _sync_exchange(pid, _retry=True):
   body = {'regs': regs, 'since': int(peer.get('in_seq', 0)), 'epoch': peer.get('epoch', ''), 'name': st['name'], 'kind': st['kind'], 'port': SYNC_PORT}
   resp = _sync_http(peer['addr'], peer.get('port', SYNC_PORT), '/sync/exchange', body, peer)
   with SYNC_LOCK:
+    redo = False
     if peer.get('epoch') != resp.get('epoch'):
       had = bool(peer.get('epoch'))
       peer['epoch'] = resp.get('epoch')
       peer['in_seq'], peer['out_seq'] = 0, 0  # співрозмовник скинув стан — звіряємось з нуля
       _sync_save()
-      if had and _retry:
-        return _sync_exchange(pid, False)
+      redo = had and _retry
+  if redo:  # повтор — ПОЗА SYNC_LOCK: інакше мережевий запит тримав би блокування, поки інший пристрій не відповість
+    return _sync_exchange(pid, False)
+  with SYNC_LOCK:
     _sync_apply(st, resp.get('regs') or {})
     peer['out_seq'] = snap_seq
     peer['in_seq'] = int(resp.get('seq', 0))
@@ -9914,7 +9953,15 @@ def _sync_command(body, pid=None):
     try:
       fp = _cover_path(str(body.get('kid') or ''))
       with open(fp, 'rb') as f:
-        return {'ok': True, 'fit': base64.b64encode(f.read()).decode()}
+        res = {'ok': True, 'fit': base64.b64encode(f.read()).decode()}
+      try:
+        op = _cover_path(str(body.get('kid') or ''), True)
+        if os.path.getsize(op) <= 1200 * 1024:
+          with open(op, 'rb') as f2:
+            res['orig'] = base64.b64encode(f2.read()).decode()
+      except Exception:
+        pass
+      return res
     except Exception:
       return {'ok': False, 'error': 'Немає обкладинки'}
   if body.get('type') == 'settings_offer':
@@ -10553,6 +10600,7 @@ def api_sync_dl(pid, kid, eps, quality):
 
 class _Server(ThreadingHTTPServer):
   daemon_threads = True
+  request_queue_size = 128  # типово 5: сітка постерів відкриває десятки зʼєднань одразу, і зайві SYN губились → «зависання» на секунди
 
   def get_request(self):
     conn, addr = super().get_request()
@@ -10674,6 +10722,92 @@ def server_alive():
     return False
 
 
+_WD = {'bad': {}, 'on': False, 'n': 0}
+_WD_LOCKS = ('LOCK', 'SYNC_LOCK', 'JOB_LOCK', '_NOTIF_LOCK', '_SAVE_LOCK')
+
+
+def _hang_dump(why):
+  """Стеки всіх потоків + останні запити — у файл hang_dump.txt поруч із бібліотекою (є завжди, не залежить від налаштування логів)."""
+  try:
+    import traceback
+    names = {t.ident: t.name for t in threading.enumerate()}
+    out = [time.strftime('=== %Y-%m-%d %H:%M:%S ') + why]
+    for nm in _WD_LOCKS:
+      out.append(f'{nm}: {globals().get(nm)!r}')
+    for tid, fr in sys._current_frames().items():
+      out.append(f'--- потік {names.get(tid, "?")} ({tid})')
+      out.append(''.join(traceback.format_stack(fr)[-12:]))
+    out.append('--- останні запити:\n' + '\n'.join(list(RECENT)[-25:]))
+    fp = os.path.join(BASE_DIR, 'hang_dump.txt')
+    try:
+      old = open(fp, encoding='utf8').read()[-150000:]
+    except Exception:
+      old = ''
+    with open(fp, 'w', encoding='utf8') as f:
+      f.write(old + '\n'.join(out) + '\n\n')
+    crash_report('hang', '\n'.join(out))
+  except Exception:
+    pass
+
+
+def _watchdog_loop():
+  """Сторож: кожні ~6 с пробує взяти головні блокування. Якщо якесь недоступне 4 рази поспіль (~35 с) — це взаємне блокування
+  потоків: записуємо дамп і підміняємо блокування на нове (нові запити знову працюють; застряглі потоки лишаються осторонь).
+  Заодно (поза iOS, де це робить обгортка) перевіряє, що сервер відповідає, і піднімає його заново."""
+  g = globals()
+  fh = None
+  try:  # faulthandler працює без GIL: якщо весь Python «замерзне» (довгий regex, мертве блокування), стеки потоків запишуться самі
+    import faulthandler
+    fh = open(os.path.join(BASE_DIR, 'hang_trace.txt'), 'a', encoding='utf8')
+  except Exception:
+    faulthandler = None
+  last = time.time()
+  while True:
+    try:
+      if fh is not None:
+        faulthandler.dump_traceback_later(40, repeat=False, file=fh)
+    except Exception:
+      pass
+    time.sleep(6)
+    try:
+      if time.time() - last > 25:  # цикл сторожа «проспав» — Python був заморожений (GIL тримав довгий виклик)
+        _hang_dump('Python був заморожений ~%d с' % (time.time() - last))
+      last = time.time()
+      stuck = []
+      for nm in _WD_LOCKS:
+        lk = g.get(nm)
+        if lk.acquire(timeout=2.5):
+          lk.release()
+          _WD['bad'][nm] = 0
+        else:
+          _WD['bad'][nm] = _WD['bad'].get(nm, 0) + 1
+          stuck.append(nm)
+      hard = [nm for nm in stuck if _WD['bad'][nm] >= 4]
+      if hard:
+        _hang_dump('блокування зависли: ' + ', '.join(hard))
+        for nm in hard:
+          g[nm] = threading.RLock()
+          _WD['bad'][nm] = 0
+        _WD['n'] += 1
+      now = time.time()
+      for sm in list(_ASEM_ALL):
+        if sm._t and now - sm._t > 240:
+          _hang_dump('семафор повний >4 хв (завис власник): used=%s/%s' % (sm._used, sm._n))
+          sm.force_reset()
+      if not IOS_APP and not server_alive():
+        _hang_dump('сервер не відповідає — перезапуск')
+        restart_server()
+    except Exception:
+      pass
+
+
+def watchdog_start():
+  if _WD['on']:
+    return
+  _WD['on'] = True
+  threading.Thread(target=_watchdog_loop, daemon=True, name='watchdog').start()
+
+
 def restart_server():
   """Піднімає HTTP-сервер заново на тому ж порту (бібліотека, завантаження й налаштування в пам'яті лишаються)."""
   old = _SRV.get('srv')
@@ -10737,6 +10871,7 @@ def start():
     _sync_boot()
   except Exception:
     pass
+  watchdog_start()
   threading.Thread(target=_meta_refresh_loop, daemon=True).start()
   AC['gen'] += 1
   threading.Thread(target=_autocheck_loop, args=(AC['gen'],), daemon=True).start()
@@ -10981,6 +11116,12 @@ html[data-pc] .net:not(.offline){display:none}
 .cep .cepa{position:absolute;inset:0;display:grid;place-items:center;text-align:center;font-size:12px;line-height:1.3;color:var(--mu);border:1.5px dashed #ffffff40;border-radius:inherit;padding:10px;z-index:1}
 .cep .cepa .i{width:26px;height:26px;display:block;margin:0 auto 6px;color:var(--ac2,#a99cff)}
 .cep.dz{border-color:var(--ac2,#a99cff);background:#8174e62a}
+.ceps{justify-content:center}.cep{flex:0 1 200px}
+label.cep{display:block}
+.cepl{border:0;background:var(--s2,#20232f);color:inherit;font:inherit;font-size:12px;font-weight:600;padding:6px 10px;border-radius:9px;cursor:pointer;display:inline-block}
+.sheet[data-kind=cedit]{max-width:600px;margin-left:auto;margin-right:auto}
+@media (min-width:700px){.sheet[data-kind=cedit]{border-radius:22px;margin-bottom:4vh}.ceps{gap:18px}.cep{flex:0 1 170px}.cep b{font-size:14px}}
+@media (max-height:520px){.cep{flex:0 1 120px}.cet{margin-top:12px}}
 .cesub{display:flex;gap:6px;justify-content:center;margin-top:8px}
 .cesub button{border:0;background:var(--s2,#20232f);color:inherit;font:inherit;font-size:12px;font-weight:600;padding:6px 10px;border-radius:9px;cursor:pointer}
 .cfr{width:min(240px,62vw);aspect-ratio:2/3;margin:6px auto 12px;border-radius:16px;overflow:hidden;touch-action:none;cursor:grab;position:relative;box-shadow:0 8px 30px #000a}
@@ -10990,8 +11131,8 @@ html[data-pc] .net:not(.offline){display:none}
 .cenum .in{width:72px;text-align:center;padding:9px 6px}.cenum button{width:38px;height:38px;border:0;border-radius:11px;background:var(--s2,#20232f);color:inherit;font:inherit;font-size:20px;font-weight:600;cursor:pointer}
 .cesw{display:flex;align-items:center;gap:12px;margin-top:12px}.cesw .tx{flex:1;font-size:13px;color:var(--mu)}
 .dvsec{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--mu);margin:16px 4px 8px}
-.cus{display:flex;align-items:center;gap:12px}.cus .tx{flex:1;min-width:0}.cuv{width:72px;height:72px;flex:none;border-radius:12px;background:#ffffff0d;display:grid;place-items:center}.cuv img{display:block;pointer-events:none}
-.cus input[type=range]{width:130px;flex:none;accent-color:var(--ac)}.cun{width:44px;text-align:right;font-size:12px;color:var(--mu);font-variant-numeric:tabular-nums}
+.curr{display:flex;align-items:center;gap:12px}.curr .tx{flex:1;min-width:0}.cuv{width:72px;height:72px;flex:none;border-radius:12px;background:#ffffff0d;display:grid;place-items:center}.cuv img{display:block;pointer-events:none}
+.curr input[type=range]{width:130px;flex:none;accent-color:var(--ac)}.cun{width:44px;text-align:right;font-size:12px;color:var(--mu);font-variant-numeric:tabular-nums}
 .sephint{margin:4px 6px 12px}[data-sepk]{position:relative;-webkit-touch-callout:none}
 [data-sepk]:not(input):not(textarea){-webkit-user-select:none;user-select:none}
 [data-sepk].sepon{box-shadow:inset 3px 0 0 var(--ac);background:linear-gradient(90deg,rgba(139,123,255,.16),rgba(139,123,255,.04))}
@@ -14442,20 +14583,19 @@ function ceditHTML(s) {
   const lab = sn ? `<div class="sn">Сезон ${sn}</div>` : '';
   const stdBg = it.meta && it.meta.poster ? `background-image:url('${esc(it.meta.poster)}')` : '';
   const cusBg = s.cov.fitUrl ? `background-image:url('${esc(s.cov.fitUrl)}')` : '';
-  const mini = (k, bg, cap, extra) => `<div class="cep ${k}${s.mode === k ? ' on' : ''}" data-act="cemode" data-m="${k}"><span class="ck">${ico('check')}</span>
+  const mini = (k, bg, cap, extra) => `<${k === 'cus' && !s.cov.has ? 'label for="cefile"' : 'div data-act="cemode"'} class="cep ${k}${s.mode === k ? ' on' : ''}" data-m="${k}"><span class="ck">${ico('check')}</span>
     <div class="card"><div class="poster" style="${bg}${bg ? '' : 'background-image:linear-gradient(160deg,#2b2f4d,#171926)'}">${k === 'cus' && !bg ? `<div class="cepa"><div>${ico('plus')}Додати зображення<br>або перетягніть сюди</div></div>` : ''}<div class="grad"></div>
-      <div class="ct">${S.view.title ? `${lab}<div class="t">${esc(ttl)}</div>` : lab}</div></div></div><b>${cap}</b>${extra || ''}</div>`;
+      <div class="ct">${S.view.title ? `${lab}<div class="t">${esc(ttl)}</div>` : lab}</div></div></div><b>${cap}</b>${extra || ''}</${k === 'cus' && !s.cov.has ? 'label' : 'div'}>`;
   return `<h3>Редагувати</h3>
     <div class="cet">Назва</div>
     <input class="in" id="cename" type="text" maxlength="120" autocomplete="off" placeholder="${esc(it.title || '')}" value="${esc(s.name)}">
     <p style="color:var(--mu);font-size:12px;margin:6px 2px 0">Лише в бібліотеці. Порожнє поле — оригінальна назва.</p>
     <div class="cet">Обкладинка</div>
-    <div class="ceps">${mini('std', stdBg, 'Стандартна')}${mini('cus', cusBg, 'Своя', s.cov.has ? `<div class="cesub"><button data-act="cepick">Замінити</button><button data-act="cefit">Підігнати</button></div>` : '')}</div>
+    <div class="ceps">${mini('std', stdBg, 'Стандартна')}${mini('cus', cusBg, 'Своя', s.cov.has ? `<div class="cesub"><label class="cepl" for="cefile">Замінити</label><button data-act="cefit">Підігнати</button></div>` : '')}</div>
     <div class="cet">Підпис сезону</div>
     <div class="seg">${[['auto', 'Авто' + (seasonAuto(it) ? ' · ' + seasonAuto(it) : '')], ['own', 'Свій'], ['none', 'Без']].map(([m, tt]) => `<button data-act="cesn" data-m="${m}" class="${s.sn.m === m ? 'on' : ''}">${tt}</button>`).join('')}</div>
     ${s.sn.m === 'own' ? `<div class="cenum"><button data-act="cenum" data-d="-1">−</button><input class="in" id="cenum" type="number" min="1" max="30" inputmode="numeric" value="${s.sn.n}"><button data-act="cenum" data-d="1">+</button></div>` : ''}
     <div class="cesw"><div class="tx">Показувати «Сезон N» на картках бібліотеки</div><label class="sw"><input type="checkbox" data-lv="seasonOnly" ${S.view.seasonOnly ? 'checked' : ''}></label></div>
-    <input type="file" id="cefile" accept="image/*" hidden>
     <div class="row2" style="margin-top:16px"><button class="btn" data-act="dlg-no" style="flex:1">Скасувати</button><button class="btn pri" data-act="cesave" style="flex:1">Зберегти</button></div>`;
 }
 function ceLive() {  // миттєве оновлення підписів на картках-прикладах без перемальовування шторки
@@ -14475,6 +14615,11 @@ function ceRegion(im, z, cx, cy) {  // ділянка оригіналу 2:3, я
 }
 function ceDraw(cv, im, p) { const r = ceRegion(im, p.z, p.cx, p.cy), x = cv.getContext('2d'); x.fillStyle = '#0d0e13'; x.fillRect(0, 0, cv.width, cv.height); x.drawImage(im, r.sx, r.sy, r.rw, r.rh, 0, 0, cv.width, cv.height); return r; }
 function ceFitPaint() { const s = S.sheet, cv = $('#cfc'); if (!s || !s.fit || !cv || !s.cov.img) return; const r = ceRegion(s.cov.img, s.fp.z, s.fp.cx, s.fp.cy); s.fp.cx = (r.sx + r.rw / 2) / r.iw; s.fp.cy = (r.sy + r.rh / 2) / r.ih; ceDraw(cv, s.cov.img, s.fp); }
+(function ceInput() {  // один постійний вибір файлу поза шторкою: перемальовування шторки його не знищує
+  const mk = () => { if (document.getElementById('cefile')) return; const i = document.createElement('input'); i.type = 'file'; i.id = 'cefile'; i.accept = 'image/*';
+    i.style.cssText = 'position:fixed;left:-300px;top:0;width:2px;height:2px;opacity:0;pointer-events:none'; document.body.appendChild(i); };
+  if (document.body) mk(); else document.addEventListener('DOMContentLoaded', mk);
+})();
 async function ceLoadFile(f) {
   const s = S.sheet; if (!s || s.kind !== 'cedit' || !f) return;
   if (!/^image\//.test(f.type) && !/\.(jpe?g|png|webp|gif|heic|heif|avif|bmp)$/i.test(f.name || '')) { toast('Це не зображення', true); return; }
@@ -14521,6 +14666,9 @@ document.addEventListener('input', ev => {
   document.addEventListener('dragenter', ev => { const c = over(ev); if (c) c.classList.add('dz'); });
   document.addEventListener('dragover', ev => { over(ev); });
   document.addEventListener('dragleave', ev => { const c = ev.target.closest && ev.target.closest('.cep.cus'); if (c && !c.contains(ev.relatedTarget)) c.classList.remove('dz'); });
+  const isF = ev => ev.dataTransfer && Array.from(ev.dataTransfer.types || []).includes('Files');
+  document.addEventListener('dragover', ev => { if (isF(ev) && !over(ev)) { ev.preventDefault(); ev.dataTransfer.dropEffect = 'none'; } }, true);  // файл поза «Своєю» карткою не відкриває сторінку
+  document.addEventListener('drop', ev => { if (isF(ev) && !(ev.target.closest && ev.target.closest('.cep.cus'))) ev.preventDefault(); }, true);
   document.addEventListener('drop', ev => { const c = over(ev); if (!c) return; c.classList.remove('dz'); const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0]; if (f) ceLoadFile(f); });
 })();
 const A = {
@@ -15117,7 +15265,7 @@ const A = {
   },
   cemode(el) {
     const s = S.sheet; if (!s || s.kind !== 'cedit') return;
-    if (el.dataset.m === 'cus' && !s.cov.has) { $('#cefile').click(); return; }
+    if (el.dataset.m === 'cus' && !s.cov.has) { const f = $('#cefile'); if (f) f.click(); return; }
     s.name = ($('#cename') || {}).value ?? s.name; s.mode = el.dataset.m; renderSheet();
   },
   cepick() { const f = $('#cefile'); if (f) f.click(); },
@@ -15641,6 +15789,7 @@ document.addEventListener('click', ev => {
   const f = A[el.dataset.act];
   if (!f) return;
   if (el.tagName === 'A') return;
+  if (ev.target.closest('label[for]') && !ev.target.closest('label[for]').dataset.act) return;  // <label for=…> (вибір файлу) має спрацювати рідною дією
   if ((el.dataset.act === 'sktog' || el.dataset.act === 'istog' || el.dataset.act === 'ovtog') && ev.target.closest('.sw')) return;
   ev.preventDefault();
   f(el, ev);
@@ -16187,7 +16336,7 @@ function curScale() { const v = +S.set.cursor_scale; return v >= 50 && v <= 150 
 function curEff(k) { return Math.round((CUR_DEF[k] || 100) * curScale() / 100); }
 function curPanel() {
   const z = curScale(), off = S.set.pc_cursor === false;
-  return `<div class="row sub cus ${off ? 'dis' : ''}"><div class="tx"><b>Розмір курсорів</b><span class="d">Один повзунок для всіх видів.</span></div>
+  return `<div class="row sub curr ${off ? 'dis' : ''}"><div class="tx"><b>Розмір курсорів</b><span class="d">Один повзунок для всіх видів.</span></div>
     <input type="range" min="50" max="150" step="5" value="${z}" data-cscale aria-label="Розмір курсорів"><span class="cun">${z}%</span></div>
     <div class="row sub cuprev ${off ? 'dis' : ''}">${CUR_PREV.map(k => `<div class="cuv" data-curk="${k}"><img alt="" src="/cur/${k}.svg?s=100" style="width:${32 * curEff(k) / 100}px;height:${32 * curEff(k) / 100}px"></div>`).join('')}</div>
     <div class="row"><button class="btn" data-act="cureset" style="margin-left:auto">Скинути розмір</button></div>`;
@@ -16890,7 +17039,7 @@ document.addEventListener('auxclick', ev => { if (ev.button === 1 && ev.target.c
 document.addEventListener('input', ev => {  // повзунок розміру курсорів: живий перегляд, збереження — з паузою
   const r = ev.target.closest && ev.target.closest('[data-cscale]'); if (!r) return;
   const v = +r.value; S.set.cursor_scale = v;
-  const row = r.closest('.cus'); if (row) row.querySelector('.cun').textContent = v + '%';
+  const row = r.closest('.curr'); if (row) row.querySelector('.cun').textContent = v + '%';
   document.querySelectorAll('.cuprev img').forEach(im => { const k = im.parentNode.dataset.curk; im.style.width = im.style.height = (32 * curEff(k) / 100) + 'px'; });
   if (window.__curApply) window.__curApply();
   clearTimeout(S._cst); S._cst = setTimeout(() => setOpt('cursor_scale', S.set.cursor_scale), 350);
@@ -17982,7 +18131,16 @@ if (PC_APP) (function () {
   });
   if (!wvh) return;
   document.addEventListener('fullscreenchange', () => document.documentElement.classList.toggle('pcfs', !!document.fullscreenElement));
-  window.__fs = on => document.documentElement.classList.toggle('pcfs', !!on);  // повний екран вікна керується з боку програми
+  let fsAt = 0;
+  window.__fs = on => { fsAt = Date.now(); document.documentElement.classList.toggle('pcfs', !!on); };  // повний екран вікна керується з боку програми
+  let rzT = 0;  // самолікування: клас «повний екран» не може лишитись, якщо вікно вже не на весь екран (інакше зникають кнопки вікна)
+  window.addEventListener('resize', () => {
+    clearTimeout(rzT);
+    rzT = setTimeout(() => {
+      const h = document.documentElement;
+      if (h.classList.contains('pcfs') && !document.fullscreenElement && Date.now() - fsAt > 1500 && (innerHeight < screen.height - 10 || innerWidth < screen.width - 10)) h.classList.remove('pcfs');
+    }, 400);
+  });
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.documentElement.classList.contains('pcfs')) post('fsoff'); }, true);
   const SVG_MAX = '<svg viewBox="0 0 14 14"><rect x="2.5" y="2.5" width="9" height="9" rx="1.2"/></svg>';
   const SVG_RES = '<svg viewBox="0 0 14 14"><rect x="2.5" y="4.5" width="7" height="7" rx="1"/><path d="M4.5 4.5v-1a1 1 0 0 1 1-1h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-1"/></svg>';
