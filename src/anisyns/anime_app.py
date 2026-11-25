@@ -951,7 +951,7 @@ def _rel_anilib(url, meta):
   rel = [x for x in rel if _lib_alias(x['url']) != alias]
   if recs:
     seen = {x['url'] for x in rel}
-    rel += [x for x in _rel_clean(conv(recs, 'similar'), None) if x['url'] not in seen and _lib_alias(x['url']) != alias]
+    rel += [x for x in _rel_clean(conv(recs, 'rec'), None) if x['url'] not in seen and _lib_alias(x['url']) != alias]
   if rel:
     meta['related'] = rel
 
@@ -4686,8 +4686,8 @@ def _related_view(e, rel):
     if (x.get('kind') or 'order') == 'order' or sl in seen or sl in me:
       continue
     seen.add(sl)
-    kind = 'similar'
-    if not has_order and any(b in mybase for b, _ in title_keys(x.get('title'))):
+    kind = 'rec' if x.get('kind') == 'rec' else 'similar'
+    if kind == 'similar' and not has_order and any(b in mybase for b, _ in title_keys(x.get('title'))):
       kind = 'order'  # сайт не віддав порядок (Anim-RU): сезони цього ж аніме серед «Похожие»
     rows.append((x, kind, sl))
 
@@ -4696,9 +4696,10 @@ def _related_view(e, rel):
     return int(m.group(0)) if m else 9999
   order = [r for r in rows if r[1] == 'order']
   order = [order[i] for i in sorted(range(len(order)), key=lambda i: (year(order[i][0]), i))]  # порядок виходу: за роком, при рівних — як на сайті
-  sim = [r for r in rows if r[1] != 'order']
+  sim = [r for r in rows if r[1] == 'similar']
+  rec = [r for r in rows if r[1] == 'rec']
   out = []
-  for x, kind, sl in order[:40] + sim[:24]:
+  for x, kind, sl in order[:40] + sim[:24] + rec[:24]:
     out.append({'url': x['url'], 'title': x['title'], 'note': x.get('note') or '', 'kind': kind,
                 'cur': sl in me, 'lib': lib.get(sl),
                 'poster': ('/img?u=' + quote(x['poster'], safe='')) if x.get('poster') else ('/relposter?u=' + quote(x['url'], safe='')),
@@ -7533,46 +7534,107 @@ def _cm_liberty_html(html):
   return out
 
 
+_CM_LRID = {}
+
+
+def _cm_lib_item(c, host):
+  """Один коментар AniLiberty з JSON (форма поля різниться — беремо все, що знаємо)."""
+  if not isinstance(c, dict):
+    return None
+  u = c.get('user') or c.get('author') or c.get('profile') or {}
+  if not isinstance(u, dict):
+    u = {'nickname': str(u)}
+  av = u.get('avatar') or u.get('avatars') or c.get('avatar') or ''
+  if isinstance(av, dict):
+    av = av.get('src') or av.get('preview') or av.get('thumbnail') or av.get('optimized') or next((v for v in av.values() if isinstance(v, str) and v), '')
+    if isinstance(av, dict):
+      av = av.get('src') or av.get('preview') or ''
+  av = av if isinstance(av, str) else ''
+  if av.startswith('/'):
+    av = ('https://cdn.anilibria.top' if '/storage/' in av else f'https://{host}') + av
+  txt = c.get('message') or c.get('text') or c.get('body') or c.get('content') or ''
+  likes = c.get('likes')
+  if likes is None:
+    likes = c.get('votes') if c.get('votes') is not None else c.get('rating')
+  if isinstance(likes, dict):
+    likes = likes.get('total') or likes.get('count')
+  return {'id': str(c.get('id') or c.get('uuid') or ''),
+          'author': u.get('nickname') or u.get('login') or u.get('name') or c.get('nickname') or 'Гість',
+          'avatar': av, 'date': str(c.get('created_at') or c.get('createdAt') or c.get('date') or '')[:16].replace('T', ' '),
+          'text': _cm_text(str(txt)), 'likes': likes if isinstance(likes, int) else None}
+
+
+def _cm_lib_list(j):
+  if isinstance(j, list):
+    return j
+  if isinstance(j, dict):
+    for k in ('data', 'comments', 'items', 'results', 'threads'):
+      v = j.get(k)
+      if isinstance(v, list):
+        return v
+      if isinstance(v, dict):
+        r = _cm_lib_list(v)
+        if r is not None:
+          return r
+  return None
+
+
 def _cm_liberty(url, page):
   host = urlparse(url).netloc
   alias = _lib_alias(url) or ''
   if not alias:
     raise RuntimeError('не розпізнав адресу релізу')
-  last = None
-  if page == 0:  # новий сайт віддає перші коментарі прямо на сторінці релізу
+  tried = []
+  html = ''
+  try:
+    html = http_get(_lib_url(host, alias), headers=HEADERS, timeout=15, retries=0).text
+  except Cancelled:
+    raise
+  except Exception as ex:
+    tried.append('сторінка: %s' % ex)
+  if html and page == 0:  # якщо сервер усе ж віддав коментарі в готовому HTML
+    items = _cm_liberty_html(html)
+    if items:
+      return {'items': items, 'more': 'Показать ещё комментар' in html}
+  rid = _CM_LRID.get(alias)
+  if not rid and html:
     try:
-      html = http_get(_lib_url(host, alias), headers=HEADERS, timeout=15, retries=0).text
-      items = _cm_liberty_html(html)
-      if items:
-        return {'items': items, 'more': 'Показать ещё комментар' in html}
+      rid = (parse_page(html, _lib_url(host, alias))[2] or {}).get('rid')
     except Cancelled:
       raise
-    except Exception as ex:
-      last = ex
-  for path in (f'/api/v1/anime/releases/{alias}/comments', f'/api/v1/comments/releases/{alias}', f'/api/v1/anime/comments/{alias}'):
-    try:
-      r = http_get(f'https://{host}{path}', params={'page': page + 1, 'limit': 20}, headers={**HEADERS, 'Accept': 'application/json'}, timeout=12, retries=0)
-      if r.status_code != 200:
-        last = r.status_code
-        continue
-      j = r.json()
-      lst = j.get('data') if isinstance(j, dict) else j
-      if isinstance(lst, dict):
-        lst = lst.get('comments') or lst.get('items') or []
-      if not isinstance(lst, list):
-        continue
-      out = []
-      for c in lst:
-        u = c.get('user') or {}
-        out.append({'id': str(c.get('id') or ''), 'author': u.get('login') or u.get('nickname') or c.get('author') or 'Гість',
-                    'avatar': '', 'date': str(c.get('created_at') or '')[:16].replace('T', ' '),
-                    'text': _cm_text(c.get('message') or c.get('text') or ''), 'likes': c.get('votes') if isinstance(c.get('votes'), int) else None})
-      return {'items': [x for x in out if x['text']], 'more': len(lst) >= 20}
-    except Cancelled:
-      raise
-    except Exception as ex:
-      last = ex
-  raise RuntimeError('AniLiberty не віддає коментарі через відомі мені адреси (останнє: %s)' % (last,))
+    except Exception:
+      rid = None
+    if not rid:
+      m = re.search(r'anime:comments:release:(\d+)', html)
+      rid = int(m.group(1)) if m else None
+    if rid:
+      _CM_LRID[alias] = rid
+  ids = [x for x in (rid, alias) if x]
+  cands = []
+  for i in ids:
+    cands += [(f'/api/v1/anime/comments/release/{i}', {}), (f'/api/v1/comments/release/{i}', {}), (f'/api/v1/anime/releases/{i}/comments', {}),
+              (f'/api/v1/comments/releases/{i}', {}), (f'/api/v1/anime/comments/releases/{i}', {})]
+  if rid:
+    cands += [('/api/v1/anime/comments', {'release_id': rid}), ('/api/v1/comments', {'release_id': rid}), ('/api/v1/anime/releases/comments', {'release_id': rid})]
+  for path, extra in cands:
+    for pp in ({'page': page + 1, 'limit': 20}, {'offset': page * 20, 'limit': 20}) if page else ({'page': 1, 'limit': 20},):
+      try:
+        r = http_get(f'https://{host}{path}', params={**extra, **pp}, headers={**HEADERS, 'Accept': 'application/json'}, timeout=12, retries=0)
+        if r.status_code != 200:
+          tried.append('%s→%s' % (path, r.status_code))
+          break
+        lst = _cm_lib_list(r.json())
+        if lst is None:
+          tried.append('%s→незнайома відповідь' % path)
+          break
+        out = [x for x in (_cm_lib_item(c, host) for c in lst) if x and x['text']]
+        return {'items': out, 'more': len(lst) >= 20}
+      except Cancelled:
+        raise
+      except Exception as ex:
+        tried.append('%s→%s' % (path, str(ex)[:60]))
+        break
+  raise RuntimeError('AniLiberty не віддав коментарі. Спроби: ' + '; '.join(dict.fromkeys(tried))[:600])
 
 
 def api_comments(kid, page, parent=None):
@@ -13414,13 +13476,14 @@ function detailHTML(id) {
   const sel = S.sel.size, sm = S.selMode;
   const dlN = dlActiveN();
   const cardsMode = epMode() === 'cards', rmMode = epMode() === 'rm';
-    const rc = relCounts(it), hasRel = rc.ord + rc.sim > 0;
+    const rc = relCounts(it), hasRel = rc.ord + rc.sim + rc.rec > 0;
   const canCm = !!(it.site && ['yummyani', 'aniliberty', 'animru', 'animevost'].includes(it.site.id));
-  if (S.dtab === 'cm' ? !canCm : (!(hasRel || canCm) || (S.dtab === 'sim' && !rc.sim) || (S.dtab === 'ord' && !rc.ord))) S.dtab = 'eps';
+  if (S.dtab === 'cm' ? !canCm : (!(hasRel || canCm) || (S.dtab === 'sim' && !rc.sim) || (S.dtab === 'rec' && !rc.rec) || (S.dtab === 'ord' && !rc.ord))) S.dtab = 'eps';
   const onEps = S.dtab === 'eps';
   const tabsHTML = (hasRel || canCm) ? `<div class="dtabs"><button class="${onEps ? 'on' : ''}" data-act="dtab" data-t="eps">Серії<small>${it.episodes.length}</small></button>
     ${rc.ord ? `<button class="${S.dtab === 'ord' ? 'on' : ''}" data-act="dtab" data-t="ord">Пов'язане<small>${rc.ord}</small></button>` : ''}
     ${rc.sim ? `<button class="${S.dtab === 'sim' ? 'on' : ''}" data-act="dtab" data-t="sim">Схожі<small>${rc.sim}</small></button>` : ''}
+    ${rc.rec ? `<button class="${S.dtab === 'rec' ? 'on' : ''}" data-act="dtab" data-t="rec">Рекомендовані<small>${rc.rec}</small></button>` : ''}
     ${canCm ? `<button class="${S.dtab === 'cm' ? 'on' : ''}" data-act="dtab" data-t="cm">Коментарі</button>` : ''}</div>` : '';
   const checking = S.busy.has('check:' + id);
   const srcs = it.sources || [];
@@ -13580,7 +13643,7 @@ function openPoster(src) {
 }
 function relCounts(it) {
   const rel = (it.meta && it.meta.related) || [];
-  return {ord: rel.filter(x => x.kind === 'order').length, sim: rel.filter(x => x.kind !== 'order').length};
+  return {ord: rel.filter(x => x.kind === 'order').length, rec: rel.filter(x => x.kind === 'rec').length, sim: rel.filter(x => x.kind !== 'order' && x.kind !== 'rec').length};
 }
 function relHTML(it) {
   const rel = (it.meta && it.meta.related) || [];
@@ -13592,8 +13655,9 @@ function relHTML(it) {
       ${x.cur ? '<span class="rb">Зараз</span>' : x.lib ? '<span class="rb">У бібліотеці</span>' : ''}</div>
       <div class="rt">${esc(x.title)}</div>${x.note ? `<div class="rm">${esc(x.note)}</div>` : ''}</button>`;
   };
-  const list = rel.filter(x => (S.dtab === 'sim') === (x.kind !== 'order'));
-  return `<div class="rgrid">${list.map((x, i) => card(x, S.dtab === 'sim' ? 0 : i + 1)).join('')}</div>`;
+  const tk = S.dtab === 'rec' ? 'rec' : S.dtab === 'sim' ? 'similar' : 'order';
+  const list = rel.filter(x => (x.kind === 'rec' ? 'rec' : x.kind === 'order' ? 'order' : 'similar') === tk);
+  return `<div class="rgrid">${list.map((x, i) => card(x, tk === 'order' ? i + 1 : 0)).join('')}</div>`;
 }
 
 function dlbarInner(it) {
