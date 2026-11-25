@@ -1,52 +1,162 @@
-name: Build PC
+name: Build IPA
 
 on:
   workflow_dispatch:
+    inputs:
+      island:
+        description: 'Додати Dynamic Island (вимкніть, щоб зібрати просту версію)'
+        type: boolean
+        default: true
   push:
     branches: [main, master]
-    paths: ['src/anisyns/anime_app.py', 'pc/**', '.github/workflows/build-pc.yml']
+    paths: ['src/**', 'LiveIsland/**', 'resources/**', 'pyproject.toml', '.github/workflows/build-ipa.yml']
 
-# Вимикач: GitHub → Settings → Secrets and variables → Actions → Variables → BUILD_PC = false
-# (ручний запуск «Run workflow» працює завжди; вимикач стосується лише автозапуску після push)
+# Вимикач: GitHub → Settings → Secrets and variables → Actions → Variables → BUILD_IOS = false
+# (ручний запуск «Run workflow» працює завжди, вимикач стосується лише автозапуску після push)
 jobs:
   build:
-    if: github.event_name == 'workflow_dispatch' || vars.BUILD_PC != 'false'
-    runs-on: windows-latest
-    timeout-minutes: 40
+    if: github.event_name == 'workflow_dispatch' || vars.BUILD_IOS != 'false'
+    runs-on: macos-26
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
-        with: { python-version: '3.12' }
+        with:
+          python-version: '3.13'
 
-      - uses: actions/setup-dotnet@v4
-        with: { dotnet-version: '8.0.x' }
-
-      - name: Сервер (Python → AniSynsServer.exe)
-        shell: bash
+      - name: Select newest Xcode 26
         run: |
-          pip install pyinstaller requests pillow
-          pyinstaller --noconfirm --noconsole --onedir --name AniSynsServer \
-            --icon pc/host/app.ico --version-file pc/version.txt \
-            --collect-all requests --hidden-import PIL \
-            --paths src/anisyns --hidden-import anime_app \
-            --distpath pc/server-dist --workpath pc/build \
-            pc/server_main.py
+          X=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          echo "Using: $X"
+          if [ -n "$X" ]; then sudo xcode-select -s "$X/Contents/Developer"; fi
+          xcodebuild -version
 
-      - name: Splash from iOS animation
-        run: python pc/make_splash.py
-      - name: Вікно (C# + WebView2 → AniSyns.exe)
-        run: dotnet publish pc/host/AniSynsHost.csproj -c Release -r win-x64 --self-contained true -o pc/host/publish
-
-      - name: Інсталятор (Inno Setup)
-        shell: pwsh
+      - name: Install Briefcase
         run: |
-          choco install innosetup --no-progress -y
-          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          & $iscc "/DAppVersion=1.0.${{ github.run_number }}" pc/installer/AniSyns.iss
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install --upgrade pip
+          python -m pip install "briefcase>=0.3.20,<0.4"
+
+      - name: Create Xcode project
+        run: briefcase create iOS --no-input
+
+      - name: Precompile app code (fast first launch)
+        run: |
+          # на iPhone .py компілюється в байт-код при кожному старті (тека програми лише для читання) — великий файл тоді вантажиться секунди.
+          # Кладемо готовий .pyc (без перевірки часу зміни) поруч із кодом.
+          python3 --version
+          for D in $(find build -type f -name anime_app.py -not -path "*/Pods/*" -exec dirname {} \;); do
+            echo "compiling $D"
+            python3 -m compileall -q -f --invalidation-mode unchecked-hash "$D" || true
+            ls "$D/__pycache__" || true
+          done
+
+      - name: Allow local HTTP in WebView (Info.plist)
+        run: |
+          PLIST=$(find build -maxdepth 7 -name "*Info.plist" -not -path "*/Pods/*" -not -path "*/app_packages*" -not -path "*/Python*" -not -path "*/support/*" | head -1)
+          echo "Info.plist: $PLIST"
+          if [ -z "$PLIST" ]; then echo "Info.plist not found; project tree:"; find build -maxdepth 6 -not -path "*/app_packages*" -not -path "*/Python*" | head -80; exit 1; fi
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent bool true" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes array" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :UIBackgroundModes:0 string audio" "$PLIST" || true
+          # екран запуску: якщо він заданий через Info.plist, прибираємо картинку
+          /usr/libexec/PlistBuddy -c "Delete :UILaunchScreen:UIImageName" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Print :UILaunchScreen" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Print :UILaunchStoryboardName" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Print" "$PLIST"
+
+      - name: Dark launch screen (no white flash)
+        run: |
+          python3 - <<'PY'
+          import glob, re
+          dark = '<color key="backgroundColor" red="0.051" green="0.055" blue="0.075" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>'
+          files = [f for f in glob.glob('build/**/*.storyboard', recursive=True) if '/Pods/' not in f and 'app_packages' not in f]
+          print('storyboards:', files)
+          for f in files:
+              s = open(f, encoding='utf8').read()
+              n = len(re.findall(r'<color key="backgroundColor"[^>]*/>', s))
+              s = re.sub(r'<color key="backgroundColor"[^>]*/>', dark, s)
+              if n == 0:  # колір тла не заданий явно (системний білий) — додаємо свій після safeArea
+                  s = re.sub(r'(<viewLayoutGuide key="safeArea"[^>]*/>)', lambda m: m.group(1) + '\n' + dark, s, count=1)
+              h = len(re.findall(r'<imageView\b', s))
+              s = re.sub(r'<imageView\b(?![^>]*\bhidden=)', '<imageView hidden="YES"', s)  # картинку (іконку) на екрані запуску ховаємо
+              s = re.sub(r'<label\b(?![^>]*\bhidden=)', '<label hidden="YES"', s)
+              open(f, 'w', encoding='utf8').write(s)
+              print('patched', f, 'background colors replaced:', n, 'imageViews hidden:', h)
+              print(s)
+          PY
+
+      - name: Remember plain project (fallback)
+        run: |
+          PROJ=$(find build -name "*.xcodeproj" -maxdepth 6 | head -1)
+          PLIST=$(find build -maxdepth 7 -name "*Info.plist" -not -path "*/Pods/*" -not -path "*/app_packages*" -not -path "*/Python*" -not -path "*/support/*" | head -1)
+          echo "PROJ=$PROJ" >> "$GITHUB_ENV"
+          echo "PLIST=$PLIST" >> "$GITHUB_ENV"
+          rm -rf /tmp/plain.xcodeproj && cp -R "$PROJ" /tmp/plain.xcodeproj
+          cp "$PLIST" /tmp/plain.Info.plist
+
+      - name: Add Dynamic Island (optional, falls back to plain build)
+        id: island
+        if: ${{ github.event.inputs.island != 'false' }}
+        continue-on-error: true
+        run: |
+          (gem install xcodeproj --no-document || sudo gem install xcodeproj --no-document)
+          XDIR=$(dirname "$PROJ")
+          rm -rf "$XDIR/LiveIsland" && cp -R LiveIsland "$XDIR/LiveIsland"
+          ruby LiveIsland/add_island.rb "$PROJ" "$(basename "$PROJ" .xcodeproj)"
+          /usr/libexec/PlistBuddy -c "Add :NSSupportsLiveActivities bool true" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :NSSupportsLiveActivitiesFrequentUpdates bool true" "$PLIST" || true
+
+      - name: Build for iPhone (unsigned)
+        run: |
+          SCHEME=$(basename "$PROJ" .xcodeproj)
+          build() {
+            SIGN_ALLOWED="${1:-NO}"   # з Dynamic Island розширення теж має бути підписане ad-hoc, інакше ValidateEmbeddedBinary падає
+            rm -rf build/dd
+            xcodebuild -project "$PROJ" -scheme "$SCHEME" \
+              -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+              -derivedDataPath build/dd \
+              CODE_SIGNING_ALLOWED=$SIGN_ALLOWED CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="-" EXPANDED_CODE_SIGN_IDENTITY="-" \
+              build
+          }
+          if [ "${{ steps.island.outcome }}" = "success" ]; then
+            if build YES; then
+              echo "::notice::Збірка з Dynamic Island успішна"
+            else
+              echo "::warning::Збірка з Dynamic Island не вдалась — збираю звичайну версію без нього"
+              rm -rf "$PROJ" && cp -R /tmp/plain.xcodeproj "$PROJ"
+              cp /tmp/plain.Info.plist "$PLIST"
+              build
+            fi
+          else
+            echo "::warning::Крок Dynamic Island не пройшов — збираю без нього"
+            rm -rf "$PROJ" && cp -R /tmp/plain.xcodeproj "$PROJ"
+            cp /tmp/plain.Info.plist "$PLIST"
+            build
+          fi
+
+      - name: Package .ipa
+        run: |
+          APP=$(find build/dd/Build/Products -path "*Release-iphoneos/*.app" -maxdepth 4 | head -1)
+          echo "App: $APP"
+          rm -rf ipa-out && mkdir -p ipa-out/Payload
+          cp -R "$APP" ipa-out/Payload/
+          (cd ipa-out && zip -qry ../AniSyns.ipa Payload)
+          ls -lh AniSyns.ipa
 
       - uses: actions/upload-artifact@v4
         with:
-          name: AniSyns-Setup
-          path: pc/installer/out/AniSyns-Setup.exe
+          name: AniSyns-ipa
+          path: AniSyns.ipa
+          if-no-files-found: error
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            briefcase.*.log
+          if-no-files-found: ignore
