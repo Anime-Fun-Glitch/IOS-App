@@ -33,6 +33,8 @@ jobs:
             --distpath pc/server-dist --workpath pc/build \
             pc/server_main.py
 
+      - name: Splash from iOS animation
+        run: python pc/make_splash.py
       - name: Вікно (C# + WebView2 → AniSyns.exe)
         run: dotnet publish pc/host/AniSynsHost.csproj -c Release -r win-x64 --self-contained true -o pc/host/publish
 
