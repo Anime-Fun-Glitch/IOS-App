@@ -239,7 +239,7 @@ body.wait .mid .cb.big{opacity:0}
   const RZ = [['l',10,'left:0;top:10px;bottom:10px;width:5px;cursor:ew-resize'],['r',11,'right:0;top:10px;bottom:10px;width:5px;cursor:ew-resize'],['t',12,'top:0;left:10px;right:10px;height:4px;cursor:ns-resize'],['b',15,'bottom:0;left:10px;right:10px;height:5px;cursor:ns-resize'],['tl',13,'left:0;top:0;width:10px;height:10px;cursor:nwse-resize'],['tr',14,'right:0;top:0;width:10px;height:10px;cursor:nesw-resize'],['bl',16,'left:0;bottom:0;width:10px;height:10px;cursor:nesw-resize'],['br',17,'right:0;bottom:0;width:10px;height:10px;cursor:nwse-resize']];
   const rzs = document.createElement('style'); rzs.textContent = '.rzh{position:fixed;z-index:2147483647;background:transparent}html.pcfs .rzh,html.pcmax .rzh{display:none!important}';
   document.head.appendChild(rzs);
-  RZ.forEach(([n, ht, css]) => { const d = document.createElement('div'); d.className = 'rzh'; d.style.cssText = css; d.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); try { wv.postMessage('rz:' + ht); } catch (x) {}; }); document.body.appendChild(d); });
+  RZ.forEach(([n, ht, css]) => { const d = document.createElement('div'); d.className = 'rzh'; d.style.cssText = css; d.dataset.curk = ({l: 'resize-ew', r: 'resize-ew', t: 'resize-ns', b: 'resize-ns', tl: 'resize-nwse', br: 'resize-nwse', tr: 'resize-nesw', bl: 'resize-nesw'})[n]; d.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); try { wv.postMessage('rz:' + ht); } catch (x) {}; }); document.body.appendChild(d); });
   // перетягування вікна: за будь-яке місце, крім елементів керування
   let pd = null;
   document.addEventListener('pointerdown', e => { if (e.button !== 0) return; pd = e.target.closest('button,.tr,.vsl,.skb') ? null : {x: e.clientX, y: e.clientY}; });
@@ -324,14 +324,15 @@ body.wait .mid .cb.big{opacity:0}
     }
   };
   (function () {  // власні курсори (як у головному вікні)
-    const H = document.documentElement, HS = {default: [4, 2], pointer: [12, 3], text: [16, 16], grab: [16, 16], grabbing: [16, 16], 'not-allowed': [4, 2]};
+    const H = document.documentElement, HS = {default: [4, 2], pointer: [12, 3], text: [16, 16], grab: [16, 16], grabbing: [16, 16], 'not-allowed': [4, 2], 'resize-ns': [16, 16], 'resize-ew': [16, 16], 'resize-nesw': [16, 16], 'resize-nwse': [16, 16], move: [16, 16], wait: [16, 16], progress: [4, 2]};
+    const CM = {'ew-resize': 'resize-ew', 'ns-resize': 'resize-ns', 'nesw-resize': 'resize-nesw', 'nwse-resize': 'resize-nwse', move: 'move', wait: 'wait', progress: 'progress'};
     let last = null, prev = '', SZ = 100; const DZ = {default: 90, pointer: 85, text: 85, wait: 90, progress: 100, help: 100, crosshair: 85, 'not-allowed': 100, 'resize-ns': 95, 'resize-ew': 95, 'resize-nesw': 95, 'resize-nwse': 95, move: 95, grab: 85, grabbing: 85, 'zoom-in': 90, 'zoom-out': 90, copy: 100};
     const cu = k => { const z = Math.round((DZ[k] || 100) * SZ / 100), h = HS[k]; return `url('/cur/${k}.svg?s=${z}') ${Math.round(h[0] * z / 100)} ${Math.round(h[1] * z / 100)}, auto`; };
     const set = e => {
       const t = e.target; if (t === last || !(t instanceof Element) || !H.classList.contains('curx')) return;
       if (last) last.style.cursor = prev; last = null;
       let c = getComputedStyle(t).cursor.split(',').pop().trim(); if (c === 'none') return;
-      const k = HS[c] ? c : 'default'; prev = t.style.cursor; last = t; t.style.cursor = cu(k);
+      const k = HS[c] ? c : (CM[c] || 'default'); prev = t.style.cursor; last = t; t.style.cursor = cu(k);
     };
     document.addEventListener('mouseover', set, true); document.addEventListener('mousemove', set, true);
     document.addEventListener('pointerdown', e => { if (e.target.closest && e.target.closest('input[type=range],.tr')) H.classList.add('cgrab'); }, true);
@@ -18231,7 +18232,7 @@ if (PC_APP) (function () {
   const RZ = [['l',10,'left:0;top:10px;bottom:10px;width:5px;cursor:ew-resize'],['r',11,'right:0;top:10px;bottom:10px;width:5px;cursor:ew-resize'],['t',12,'top:0;left:10px;right:10px;height:4px;cursor:ns-resize'],['b',15,'bottom:0;left:10px;right:10px;height:5px;cursor:ns-resize'],['tl',13,'left:0;top:0;width:10px;height:10px;cursor:nwse-resize'],['tr',14,'right:0;top:0;width:10px;height:10px;cursor:nesw-resize'],['bl',16,'left:0;bottom:0;width:10px;height:10px;cursor:nesw-resize'],['br',17,'right:0;bottom:0;width:10px;height:10px;cursor:nwse-resize']];
   const rzs = document.createElement('style'); rzs.textContent = '.rzh{position:fixed;z-index:2147483647;background:transparent}html.pcfs .rzh,html.pcmax .rzh{display:none!important}';
   document.head.appendChild(rzs);
-  RZ.forEach(([n, ht, css]) => { const d = document.createElement('div'); d.className = 'rzh'; d.style.cssText = css; d.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); post('rz:' + ht); }); document.body.appendChild(d); });
+  RZ.forEach(([n, ht, css]) => { const d = document.createElement('div'); d.className = 'rzh'; d.style.cssText = css; d.dataset.curk = ({l: 'resize-ew', r: 'resize-ew', t: 'resize-ns', b: 'resize-ns', tl: 'resize-nwse', br: 'resize-nwse', tr: 'resize-nesw', bl: 'resize-nesw'})[n]; d.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); post('rz:' + ht); }); document.body.appendChild(d); });
 
   const onBar = e => { const bar = e.target.closest && e.target.closest('#root .bar'); return bar && !e.target.closest('button,a,input,select,textarea,.ib,[data-act]'); };
   document.addEventListener('mousedown', e => { if (e.button === 0 && onBar(e)) post('drag'); }, true);

@@ -21,11 +21,16 @@ namespace AniSyns
         [DllImport("user32.dll")] static extern int SetWindowRgn(IntPtr hwnd, IntPtr rgn, bool redraw);
         public static readonly bool Win11 = Environment.OSVersion.Version.Build >= 22000;
 
+        static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Form, string> last = new System.Runtime.CompilerServices.ConditionalWeakTable<Form, string>();
         public static void Apply(Form f, bool square)
         {
             try
             {
                 if (!f.IsHandleCreated) return;
+                // не чіпаємо DWM, якщо нічого не змінилось (зайві виклики викликають мерехтіння)
+                string key = (square ? "s" : "r") + f.DeviceDpi;
+                string old; if (last.TryGetValue(f, out old) && old == key) return;
+                last.Remove(f); last.Add(f, key);
                 int one = 1, none = unchecked((int)0xFFFFFFFE);
                 DwmSetWindowAttribute(f.Handle, 19, ref one, 4);
                 DwmSetWindowAttribute(f.Handle, 20, ref one, 4);
@@ -57,7 +62,8 @@ namespace AniSyns
                     var ctl = f.GetValue(w) as CoreWebView2Controller;
                     if (ctl == null) continue;
                     var sz = w.ClientSize;
-                    ctl.Bounds = new Rectangle(0, 0, Math.Max(1, sz.Width), Math.Max(1, sz.Height));
+                    var nb = new Rectangle(0, 0, Math.Max(1, sz.Width), Math.Max(1, sz.Height));
+                    if (ctl.Bounds != nb) ctl.Bounds = nb;
                     ctl.NotifyParentWindowPositionChanged();
                     break;
                 }
@@ -246,38 +252,25 @@ namespace AniSyns
             try
             {
                 if (WindowState == FormWindowState.Minimized) return;
-                bool mx = WindowState == FormWindowState.Maximized;
-                Padding = (mx || full) ? Padding.Empty : new Padding(Edge);
-                wv.Dock = DockStyle.None;
-                wv.Bounds = new Rectangle(Padding.Left, Padding.Top, Math.Max(1, ClientSize.Width - Padding.Horizontal), Math.Max(1, ClientSize.Height - Padding.Vertical));
-                wv.Dock = DockStyle.Fill;
-                PerformLayout();
-                wv.Invalidate();
-                Wv.Sync(wv);
+                Wv.Sync(wv);   // без перемикання Dock/Padding і без зайвих перемальовувань — саме вони давали мерехтіння
                 Style();
                 SyncUi();
             }
             catch { }
         }
 
-        async void ReconcileSoon()
+        System.Windows.Forms.Timer rcT;
+        void ReconcileSoon()
         {
-            foreach (int d in new[] { 30, 150, 500, 1200 })
-            {
-                await Task.Delay(d);
-                Reconcile();
-            }
+            // один відкладений прохід (після завершення анімації розгортання) замість серії
+            if (rcT == null) { rcT = new System.Windows.Forms.Timer { Interval = 120 }; rcT.Tick += (s, e) => { rcT.Stop(); Reconcile(); }; }
+            rcT.Stop(); rcT.Start();
         }
 
         void OnState()
         {
             if (WindowState == FormWindowState.Minimized) return;
-            if (WindowState != lastWs) { lastWs = WindowState; ReconcileSoon(); }
-            Style();
-            Invalidate();
-            bool mx = WindowState == FormWindowState.Maximized;
-            Padding = (mx || full) ? Padding.Empty : new Padding(Edge);
-            SyncUi();
+            if (WindowState != lastWs) { lastWs = WindowState; Style(); ReconcileSoon(); }
         }
 
         // Єдине джерело правди для сторінки: стан «на весь екран» і «розгорнуто» беремо з вікна, а не з пам'яті сторінки
