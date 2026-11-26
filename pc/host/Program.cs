@@ -184,13 +184,9 @@ namespace AniSyns
             if (m.Msg == WM_NCPAINT) { m.Result = IntPtr.Zero; return; }
             if (m.Msg == WM_NCCALCSIZE && m.WParam != IntPtr.Zero)
             {
-                if (WindowState == FormWindowState.Maximized && !full)
-                {
-                    var p = (NCCALCSIZE_PARAMS)Marshal.PtrToStructure(m.LParam, typeof(NCCALCSIZE_PARAMS));
-                    var wa = Screen.FromHandle(Handle).WorkingArea;
-                    p.r0.left = wa.Left; p.r0.top = wa.Top; p.r0.right = wa.Right; p.r0.bottom = wa.Bottom;
-                    Marshal.StructureToPtr(p, m.LParam, false);
-                }
+                // Клієнтська область = усе вікно. РАНІШЕ тут підставлялась робоча область, коли WindowState ще «Maximized»:
+                // під час повернення з розгорнутого стану це давало клієнтську область розміром на весь екран у вікні нормального
+                // розміру — звідси «інтерфейс лишається розгорнутим, вміст обрізаний». Розмір при розгортанні задає WM_GETMINMAXINFO.
                 m.Result = IntPtr.Zero;
                 return;
             }

@@ -2330,6 +2330,29 @@ def extract_media_links(html):
   return links
 
 
+def _expand_page(html):
+  """Плеєри (Aloha/Alloha, VK, Playerjs) часто ховають посилання: \\uXXXX, \\/, відсотки або base64. Розгортаємо все це в звичайний текст."""
+  t = htmllib.unescape(html or '')
+  t = t.replace('\\/', '/').replace('\\u0026', '&').replace('\\u002F', '/').replace('\\u003D', '=').replace('\\x2F', '/')
+  extra = []
+  for m in re.finditer(r'["\'`]([A-Za-z0-9+/_-]{48,}={0,2})["\'`]', t):
+    b = m.group(1)
+    try:
+      d = base64.b64decode(b.replace('-', '+').replace('_', '/') + '=' * (-len(b) % 4)).decode('utf8', 'ignore')
+    except Exception:
+      continue
+    if 'http' in d and ('.m3u8' in d or '.mp4' in d):
+      extra.append(d.replace('\\/', '/'))
+  for m in re.finditer(r'https?%3A%2F%2F[^\s"\'<>&]+', t):
+    try:
+      d = unquote(m.group(0))
+    except Exception:
+      continue
+    if '.m3u8' in d or '.mp4' in d:
+      extra.append(d)
+  return t + '\n' + '\n'.join(extra) if extra else t
+
+
 def generic_links(iframe_url, referer):
   """Невідомий плеєр: шукаємо в його сторінці прямі m3u8/mp4; якість — з міток, URL або з майстер-плейлиста."""
   url = 'https:' + iframe_url if iframe_url.startswith('//') else iframe_url
@@ -2337,6 +2360,7 @@ def generic_links(iframe_url, referer):
   origin = f'{u.scheme}://{u.netloc}'
   hdrs = {'Referer': origin + '/', 'Origin': origin}
   html = http_get(url, headers={'Referer': referer}, timeout=10, retries=1).text
+  html = _expand_page(html)
   found = extract_media_links(html)
   links = {}
   for q, link in found.items():
@@ -2352,6 +2376,22 @@ def generic_links(iframe_url, referer):
   if not links:
     raise RuntimeError('у плеєрі не знайдено прямих посилань')
   return links, hdrs, skips_anywhere(html, url)
+
+
+def _derive_fhd(url):
+  """AnimeVost: 1080p лежить поруч із 720p (інший каталог/піддомен). Повертає кандидатів — їх перевіряє _valid_media."""
+  if not url:
+    return []
+  out = []
+  for pat, rp in ((r'/(?:720|480|hd|std)/', '/1080/'), (r'/(?:720|480|hd|std)(?=\.)', '/1080'), (r'^(https?://)(?:hd|std)\.', r'\1fhd.'),
+                  (r'(?<=[/_-])(?:720|480)(?=[/_.-])', '1080'), (r'(?<=[/_-])(?:720|480)p(?=[/_.-])', '1080p')):
+    try:
+      v = re.sub(pat, rp, url, count=1)
+    except Exception:
+      continue
+    if v != url and v not in out:
+      out.append(v)
+  return out
 
 
 def _host_of(iframe):
@@ -2374,9 +2414,9 @@ def vk_links(iframe_url, referer, html=None):
   hdrs = {'Referer': 'https://vk.ru/', 'Origin': 'https://vk.ru'}
   if html is None:
     html = http_get(url, headers={'Referer': referer}, timeout=10, retries=1).text
-  t = htmllib.unescape(html).replace('\\/', '/').replace('\\u0026', '&').replace('\\u002F', '/')
+  t = _expand_page(html)
   links = {}
-  for m in re.finditer(r'["\']?(?:url|mp4_)(144|240|360|480|720|1080|1440|2160)["\']?\s*[:=]\s*["\'](https?://[^"\']+)["\']', t):
+  for m in re.finditer(r'["\']?(?:url|mp4_|mp4|src)(144|240|360|480|720|1080|1440|2160)["\']?\s*[:=]\s*["\'](https?://[^"\']+)["\']', t):
     links.setdefault(m.group(1) + 'p', m.group(2))
   hls = re.search(r'https?://[^\s"\'<>\\]+?\.(?:okcdn|mycdn|vkuser)\.[a-z]+/[^\s"\'<>\\]*?(?:video\.m3u8|\.m3u8)[^\s"\'<>\\]*', t) \
       or re.search(r'["\'](?:hls|hls_ondemand|hls_fmp4)["\']\s*:\s*["\'](https?://[^"\']+)["\']', t)
@@ -3009,6 +3049,15 @@ def _fetch_vost(url):
         return {'links': dict(api_links), 'hdrs': {q: hdr for q in api_links}, 'players': {q: 'API' for q in api_links},
                 'pinfo': 'плеєри не дали посилань → API', 'fallback': dict(api_links)}
       cand = {q: lk for q, lk in r['links'].items() if q not in api_links}
+      if '1080p' not in cand and '1080p' not in api_links:  # плеєри не дали 1080p — пробуємо похідні від посилань API (перевіряються нижче)
+        for src_ in (api_links.get('720p'), api_links.get('480p')):
+          for g in _derive_fhd(src_):
+            if _valid_media(g, hdr):
+              cand['1080p'] = g
+              r['hdrs'].setdefault('1080p', hdr)
+              break
+          if '1080p' in cand:
+            break
       ok = {}
       if cand:
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(cand)) as ex2:
@@ -5268,7 +5317,7 @@ def _ac_save():
     pass
 
 
-AC = {'gen': 0, 'last_run': 0, 'next_run': 0, 'running': False, 'seq': 0, 'found': []}
+AC = {'gen': 0, 'last_run': 0, 'next_run': 0, 'running': False, 'seq': 0, 'found': [], 'cur': ''}
 
 
 def _ac_due_at(e, hours):
@@ -5339,6 +5388,7 @@ def _autocheck_loop(gen):
               e = library.get(k)
             if not e:
               continue
+            AC['cur'] = _kid(k)
             try:
               res = api_check(_kid(k), bg=True)
               if res.get('new'):
@@ -5355,6 +5405,7 @@ def _autocheck_loop(gen):
           _ac_save()
           lib_save()
           AC['running'] = False
+          AC['cur'] = ''
           AC_WAKE.wait(10)
           AC_WAKE.clear()
           continue
@@ -5362,6 +5413,7 @@ def _autocheck_loop(gen):
         AC['next_run'] = 0
     except Exception:
       AC['running'] = False
+      AC['cur'] = ''
     AC_WAKE.wait(60)
     AC_WAKE.clear()
 
@@ -5370,7 +5422,7 @@ def api_autocheck(kick=False):
   if kick:
     AC_WAKE.set()  # застосунок відкрито — одразу дивимось, чи не настав час перевірки
   return {'enabled': bool(SETTINGS.get('auto_check')), 'hours': SETTINGS.get('auto_check_hours', 3), 'last_run': AC['last_run'],
-          'next_run': AC['next_run'], 'running': AC['running'], 'seq': AC['seq'], 'found': AC['found'][-5:]}
+          'next_run': AC['next_run'], 'running': AC['running'], 'cur': AC.get('cur') or '', 'seq': AC['seq'], 'found': AC['found'][-5:]}
 
 
 def _meta_refresh_loop():
@@ -8022,7 +8074,7 @@ class Handler(BaseHTTPRequestHandler):
           '/api/sync_pjobact': lambda: api_sync_pjobact(b.get('peer'), b.get('act'), b.get('kid')),
           '/api/sync_ack': lambda: api_sync_ack(b.get('hid')),
           '/api/pstate': lambda: api_pstate(b),
-          '/api/sync_dl': lambda: api_sync_dl(b.get('peer'), b.get('id'), b.get('episodes'), b.get('quality')),
+          '/api/sync_dl': lambda: api_sync_dl(b.get('peer'), b.get('id'), b.get('episodes'), b.get('quality'), b.get('dub')),
           '/api/open_web': lambda: api_open_web(b.get('url'), b.get('ext')),
           '/api/ready': lambda: (READY.__setitem__(0, time.time()), {'ok': True})[1],
           '/api/progress': lambda: api_progress(b.get('id'), b.get('n'), b.get('t', 0)),
@@ -9951,7 +10003,7 @@ def _sync_command(body, pid=None):
     item = body.get('item') or {}
     try:
       kid = _sync_create(item)
-      r = api_download(kid, body.get('eps') or [], body.get('quality') or '720p')
+      r = api_download(kid, body.get('eps') or [], body.get('quality') or '720p', *([body['dub']] if body.get('dub') else []))
       return {'ok': True, 'queued': r.get('queued', 0)}
     except Exception as ex:
       return {'ok': False, 'error': str(ex)[:200]}
@@ -10588,7 +10640,7 @@ def api_sync_ack(hid):
   return {'ok': True}
 
 
-def api_sync_dl(pid, kid, eps, quality):
+def api_sync_dl(pid, kid, eps, quality, dub=None):
   """Просить спарений пристрій скачати серії: передаємо опис аніме (щоб воно з'явилось у його бібліотеці) і список серій."""
   st = _sync_state()
   peer = st['peers'].get(pid)
@@ -10596,7 +10648,7 @@ def api_sync_dl(pid, kid, eps, quality):
     raise ValueError('Пристрій не спарено')
   key, e = _find(kid)
   r = _sync_http(peer['addr'], peer.get('port', SYNC_PORT), '/sync/command',
-                 {'type': 'download', 'item': _sync_base(key, e), 'eps': list(eps or []), 'quality': quality or '720p'}, peer, timeout=20)
+                 {'type': 'download', 'item': _sync_base(key, e), 'eps': list(eps or []), 'quality': quality or '720p', 'dub': (str(dub)[:120] if dub else None)}, peer, timeout=20)
   if not r.get('ok'):
     raise ValueError(r.get('error') or 'Помилка на іншому пристрої')
   SYNC['wake'].set()
@@ -11270,6 +11322,7 @@ body.pl #root *,body.pl #tabs *{animation:none!important;transition:none!importa
 .btn.dng{background:#3a1d24;color:var(--err)}
 .btn.sm{padding:8px 12px;font-size:13px;border-radius:11px}
 .btn:disabled{opacity:.5}
+.ib.busy,.btn.busy{cursor:progress;opacity:.75}.ib.busy .i,.btn.busy .i{animation:spin 1s linear infinite}
 .desc{padding:2px 16px 0;margin-bottom:8px;color:#c9ccdb;font-size:14.5px;white-space:pre-line}
 .desc.cl{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 .hero .pic{cursor:zoom-in}
@@ -12051,6 +12104,7 @@ body.rmpg #rcbar{display:none!important}
 .rme .eq{position:absolute;z-index:2;right:6px;top:6px;max-width:calc(100% - 12px);white-space:nowrap;overflow:hidden;display:flex;align-items:center;gap:4px;background:var(--ac);color:#fff;border-radius:10px;padding:3px 8px;font-size:11.5px;font-weight:700}.rme .eq .i{width:12px;height:12px}
 .rme .nw{display:inline-flex;align-items:center;gap:4px;position:absolute;z-index:2;left:6px;top:6px;white-space:nowrap;background:#0e9f84;color:#fff;border-radius:8px;padding:2px 7px;font-size:11px;font-weight:700}
 .rme .rs{position:absolute;z-index:2;white-space:nowrap;right:8px;bottom:6px;display:flex;align-items:center;gap:3px;font-size:11px;color:#ffffffd0}.rme .rs .i{width:11px;height:11px}
+.rdlo{margin:0 0 10px}.rdlo label{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13px;color:var(--mu)}.rdlo select{background:#ffffff12;color:var(--tx);border:1px solid #ffffff1f;border-radius:10px;padding:8px 10px;font:inherit}.rdlt{display:block;font-size:13px;color:var(--mu);margin-bottom:6px}.rdld{display:flex;flex-wrap:wrap;gap:6px;max-height:34vh;overflow:auto}
 .rdl{display:flex;align-items:center;gap:4px;margin-top:2px;font-size:11.5px;font-weight:600;color:#6fe0a0}.rdl .i{width:12px;height:12px}
 .epr{gap:14px 12px}
 .erm .th{cursor:pointer}.erm.sel .th::before{border-color:var(--ac)}.erm.sel .th{opacity:1}
@@ -12138,6 +12192,7 @@ html.curx #stage:has(#vc.off),html.curx #stage:has(#vc.off) *{cursor:none!import
 html[data-pc] .card.reo{cursor:grab}
 html[data-pc] #oppage{cursor:progress}
 html[data-pc] button:disabled,html[data-pc] input:disabled,html[data-pc] select:disabled,html[data-pc] [aria-disabled=true]{cursor:not-allowed}
+html[data-pc] button.busy:disabled{cursor:progress}
 /* ===== ПК: наведення миші, великі вікна, прокрутка озвучок ===== */
 @media (hover:hover){
 html[data-pc] .card .poster{transition:transform .22s cubic-bezier(.2,.8,.2,1),box-shadow .22s,filter .22s}
@@ -12162,10 +12217,12 @@ html[data-pc] .rgrid>*{transition:transform .2s}
 }
 html[data-pc] .card.reo .arws{display:none}
 @media (min-width:700px){#root .bar .btn[data-act=reorder]{flex:none;width:auto;min-width:150px;padding-left:18px;padding-right:18px}.dlbar.lbr{width:min(440px,calc(100% - 20px))!important;min-width:0!important;max-width:440px}.dlbar:not(.lbr){max-width:640px}}
-html[data-pc] .dubs,html[data-pc] .srcs{flex-wrap:wrap;overflow-x:hidden;overflow-y:auto;max-height:142px;scrollbar-width:thin;scrollbar-color:#ffffff30 transparent}
+html[data-pc] .dubs,html[data-pc] .srcs{flex-wrap:wrap;overflow-x:hidden;overflow-y:auto;max-height:142px;scrollbar-width:auto;scrollbar-color:auto}  /* стандартні scrollbar-* вимикають кастомну смугу й повертають системну стрілку — тому лише ::-webkit-scrollbar */
 html[data-pc] .dubs::-webkit-scrollbar,html[data-pc] .srcs::-webkit-scrollbar{display:block;width:6px}
-html[data-pc] .dubs::-webkit-scrollbar-thumb,html[data-pc] .srcs::-webkit-scrollbar-thumb{background:#ffffff30;border-radius:3px}
-html[data-pc] .dublist{scrollbar-width:thin}
+html[data-pc] .dubs::-webkit-scrollbar-thumb,html[data-pc] .srcs::-webkit-scrollbar-thumb,html[data-pc] .dublist::-webkit-scrollbar-thumb{background:#ffffff30;border-radius:3px}
+html[data-pc] .dubs::-webkit-scrollbar-track,html[data-pc] .srcs::-webkit-scrollbar-track,html[data-pc] .dublist::-webkit-scrollbar-track{background:transparent}
+html[data-pc] .dublist{scrollbar-width:auto}
+html[data-pc] .dublist::-webkit-scrollbar{display:block;width:6px}
 @media (min-width:1400px){
   .grid{grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:20px;padding:20px 28px}
   .grid.c3{grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}
@@ -13178,6 +13235,13 @@ function acStat() {
   return (a.running ? 'Перевіряю зараз… · ' : '') + 'Остання: ' + fmtWhen(a.last_run) + ' · наступна: ' + fmtWhen(a.next_run);
 }
 let acPollT = null;
+const acBusy = () => !!(S.checking || (S.ac && S.ac.running));
+function acBtnSync() {  // кнопки «оновити» крутяться й блокуються, поки йде перевірка (ручна чи автоматична)
+  const b = document.querySelector('#root [data-act=checkall]');
+  if (b) { const on = acBusy(); if (b.classList.contains('busy') !== on) { b.classList.toggle('busy', on); b.disabled = on; b.innerHTML = ico(on ? 'spinner' : 'refresh'); } }
+  const c = document.querySelector('#root .btn[data-act=check]');
+  if (c) { const id = route().id, on = S.busy.has('check:' + id) || !!(S.ac && S.ac.running && S.ac.cur === id); if (c && c.classList.contains('busy') !== on) { c.classList.toggle('busy', on); c.disabled = on; c.innerHTML = ico(on ? 'spinner' : 'refresh') + ' Нові'; } }
+}
 async function pollAC(kick) {
   try {
     const j = await api('/api/autocheck' + (kick === true ? '?kick=1' : '')), prev = S.ac; S.ac = j;
@@ -13187,6 +13251,8 @@ async function pollAC(kick) {
       toast('Нові серії: ' + f.map(x => x.title + ' — ' + x.new.join(', ')).join('; ').slice(0, 140), false, 'spark');
     }
     const st = $('#acstat'); if (st) st.textContent = acStat();
+    acBtnSync();
+    if (j.running && !acPollT) acPollT = setTimeout(() => { acPollT = null; pollAC(); }, 1800);  // поки йде автоперевірка — опитуємо частіше, щоб анімація була вчасно
   } catch (e) { /* сервер недоступний */ }
 }
 function siteOrder() {
@@ -13546,7 +13612,7 @@ function homeHTML() {
   ${S.reorder ? `<div class="bar"><h1>Редагування</h1>${layBtns()}<button class="btn pri sm" data-act="reorder">${ico('check')} Готово</button></div>
   <p style="margin:0 16px 4px;color:var(--mu);font-size:13px">Торкайтесь карток, щоб вибрати кілька. Утримайте й перетягніть — змінити порядок; потримайте картку над серединою іншої — згрупувати (вибрані поїдуть разом; другим пальцем можна додати ще й гортати). Правий кут — «переглянуті», лівий — видалити з бібліотеки. Або користуйтесь стрілками.</p>` : `<div class="bar"><h1>Мої аніме</h1>${netHTML()}
     <button class="ib" data-act="notifs" data-lp="bellall" aria-label="Повідомлення">${ico('bell')}${S.notifs.unread ? `<span class="dot">${S.notifs.unread > 99 ? '99+' : S.notifs.unread}</span>` : ''}</button>
-    <button class="ib" data-act="checkall" aria-label="Перевірити нові серії">${ico(S.checking ? 'spinner' : 'refresh')}</button>
+    <button class="ib${acBusy() ? ' busy' : ''}" data-act="checkall" aria-label="Перевірити нові серії" ${acBusy() ? 'disabled aria-busy="true"' : ''}>${ico(acBusy() ? 'spinner' : 'refresh')}</button>
     <button class="ib" data-act="jobs" aria-label="Завантаження">${ico('download')}${dlBadge ? `<span class="dot">${dlBadge}</span>` : ''}</button>
   </div>`}
   ${hdr2(homeTabsHTML())}
@@ -13692,7 +13758,7 @@ function detailHTML(id) {
     ${rc.sim ? `<button class="${S.dtab === 'sim' ? 'on' : ''}" data-act="dtab" data-t="sim">Схожі<small>${rc.sim}</small></button>` : ''}
     ${rc.rec ? `<button class="${S.dtab === 'rec' ? 'on' : ''}" data-act="dtab" data-t="rec">Рекомендовані<small>${rc.rec}</small></button>` : ''}
     ${canCm ? `<button class="${S.dtab === 'cm' ? 'on' : ''}" data-act="dtab" data-t="cm">Коментарі</button>` : ''}</div>` : '';
-  const checking = S.busy.has('check:' + id);
+  const checking = S.busy.has('check:' + id) || !!(S.ac && S.ac.running && S.ac.cur === id);
   const srcs = it.sources || [];
   return `
   <div class="bar"><button class="back" data-act="${tmp ? 'back' : 'home'}">‹ ${tmp ? 'Назад' : 'Бібліотека'}</button><h1></h1>${netHTML()}
@@ -13718,7 +13784,7 @@ function detailHTML(id) {
   <div class="acts">
     <button class="btn pri" data-act="playnext" ${nx || it.episodes.length ? '' : 'disabled'}>${ico('play')} ${nx ? (nx.pos > 5 ? 'Продовжити · серія ' + esc(nx.n) : 'Дивитись · серія ' + esc(nx.n)) : 'Дивитись спочатку'}</button>
     ${tmp && it.preview_of && item(it.preview_of) ? `<button class="btn ok" data-act="openlib" data-id="${esc(it.preview_of)}">${ico('book')} Відкрити в бібліотеці</button>` : tmp ? `<button class="btn ok" data-act="keep" data-lp="gpick" data-cx="tmp" data-m="lib" ${S.busy.has('keep') ? 'disabled' : ''}>${ico('plus')} В бібліотеку</button><button class="btn" data-act="keepseen" data-lp="gpick" data-cx="tmp" data-m="seen" ${S.busy.has('keep') ? 'disabled' : ''}>${ico('check')} Переглянуте</button>`
-          : `<button class="btn" data-act="check" ${checking ? 'disabled' : ''}>${ico(checking ? 'spinner' : 'refresh')} Нові</button>`}
+          : `<button class="btn${checking ? ' busy' : ''}" data-act="check" ${checking ? 'disabled aria-busy="true"' : ''}>${ico(checking ? 'spinner' : 'refresh')} Нові</button>`}
     <button class="btn" data-act="site" data-id="${it.id}" aria-label="Відкрити сайт (подвійний тап — скопіювати посилання)">${ico('globe')}</button>
   </div>
   ${desc ? `<div class="desc ${S.descOpen ? '' : 'cl'}">${esc(desc)}</div>${desc.length > 220 ? `<button class="more" data-act="more">${S.descOpen ? 'Згорнути' : 'Читати далі'}</button>` : ''}` : ''}
@@ -14101,6 +14167,8 @@ function renderSheet() {
   else if (s.kind === 'opening') inner = `<h3>${esc(s.title || 'Відкриваю…')}</h3><div class="findbox"><span class="spin">${ico('spinner')}</span><div class="tx"><b id="opstage">${esc(s.stage || 'Підключаюсь до сайту…')}</b></div>
      <button class="btn sm" data-act="opencancel">${ico('close')} Скасувати</button></div>`;
   else if (s.kind === 'rdl') inner = `<h3>Скачати на іншому пристрої</h3><p class="hint" style="margin:0 0 10px;font-size:13px">Вибрано серій: ${(s.eps || []).length}. Вони стануть у чергу завантаження там.</p>
+     <div class="rdlo"><label>Якість<select id="rdlq">${(() => { const l = (s.quals && s.quals.length) ? s.quals : ['1080p', '720p', '480p']; let c = s.q; if (c !== 'best' && !l.includes(c)) { const n = parseInt(c) || 0, lo = l.filter(q => parseInt(q) <= n); c = lo.length ? lo[0] : l[l.length - 1]; } s.q = c; return `<option value="best"${c === 'best' ? ' selected' : ''}>Найкраща</option>` + l.map(q => `<option value="${q}"${q === c ? ' selected' : ''}>${q}</option>`).join(''); })()}</select></label></div>
+     ${(s.dubs || []).length > 1 ? `<div class="rdlo"><span class="rdlt">Озвучка</span><div class="dubs rdld">${s.dubs.map(d => `<button class="dchip${d === s.dub ? ' on' : ''}" data-act="rdldub" data-dub="${esc(d)}">${esc(d)}</button>`).join('')}</div></div>` : ''}
      ${((S.sync && S.sync.peers) || []).map(p => `<button class="btn ${p.online ? 'pri' : ''}" data-act="rdlgo" data-id="${esc(p.id)}" ${p.online ? '' : 'disabled'} style="width:100%;margin-bottom:8px;justify-content:flex-start">${esc(p.name)} <span class="d" style="margin-left:auto">${p.online ? 'онлайн' : 'офлайн'}</span></button>`).join('')}
      <div class="row2"><button class="btn" data-act="dlg-no" style="flex:1">Скасувати</button></div>`;
   else if (s.kind === 'report') inner = `<h3>Звіт про запуски</h3><p class="hint" style="margin:0 0 8px;font-size:12px">Pillow: ${s.pillow ? 'є — постери стискаються' : 'немає — постери не стискаються'}. Зробіть знімок екрана й надішліть.</p>
@@ -14261,8 +14329,8 @@ function jgHead(g, kid, arr, cx, G) {
   if (pe.dataset.p !== p) { pe.dataset.p = p; pe.textContent = ''; if (p) { const im = jgImg(p); pe.appendChild(im.parentNode && im.parentNode !== pe ? im.cloneNode(true) : im); } }  // один <img> не може стояти у двох групах: інакше друга група лишалась без обкладинки
   const tb = g.querySelector('.jgt b'), tt = it ? lname(it) : arr[0].title;
   if (tb.textContent !== tt) tb.textContent = tt;
-  const sp = g.querySelector('.jgt span'), st = parts.join(' · '), dsig = (pidG ? G.dn : '') + '|' + st;
-  if (sp.dataset.sig !== dsig) { sp.dataset.sig = dsig; sp.innerHTML = (pidG ? `<em class="jdv">${ico('cast')}${esc(G.dn)}</em> · ` : '') + esc(st); }
+  const sp = g.querySelector('.jgt span'), st = parts.join(' · '), dsig = (pidG ? G.dn + (G.dk || '') : '') + '|' + st;
+  if (sp.dataset.sig !== dsig) { sp.dataset.sig = dsig; sp.innerHTML = (pidG ? `<em class="jdv">${dico(G.dk)}${esc(G.dn)}</em> · ` : '') + esc(st); }
   const pb = g.querySelector('.jgpb'), show = cx || live.length > 0;
   if (pb.hidden !== !show) pb.hidden = !show;
   const ps = cx ? 'x' : (kp ? 'p' : 'r');
@@ -14279,10 +14347,10 @@ function jgHead(g, kid, arr, cx, G) {
 function updateJobs() {
   const list = $('#joblist'); if (!list) return;  // шторка закрита
   const rj = [];  // завантаження, що йдуть на інших пристроях у мережі: бачимо їх і можемо зупинити
-  Object.entries(S.pj || {}).forEach(([pid, o]) => { const pe = peerOf(pid); if (!pe || !pe.online) return; (o.jobs || []).filter(j => j.status === 'running' || j.status === 'queued').forEach(j => rj.push({...j, _pid: pid, _dn: pe.name, id: 'p' + pid + '_' + j.id})); });
+  Object.entries(S.pj || {}).forEach(([pid, o]) => { const pe = peerOf(pid); if (!pe || !pe.online) return; (o.jobs || []).forEach(j => rj.push({...j, _pid: pid, _dn: pe.name, _dk: pe.kind, id: 'p' + pid + '_' + j.id})); });
   const jsL = [...S.jobs].reverse(), js = jsL.concat(rj.reverse());
   const groups = new Map();  // скасоване — окремі групи під рискою
-  js.forEach(j => { const cx = j.status === 'cancelled' || !!j.cancelling, key = j.kid + (j._pid ? '@' + j._pid : '') + (cx ? '~x' : ''); if (!groups.has(key)) groups.set(key, {key, kid: j.kid, cx, pid: j._pid || '', dn: j._dn || '', arr: []}); groups.get(key).arr.push(j); });
+  js.forEach(j => { const cx = j.status === 'cancelled' || !!j.cancelling, key = j.kid + (j._pid ? '@' + j._pid : '') + (cx ? '~x' : ''); if (!groups.has(key)) groups.set(key, {key, kid: j.kid, cx, pid: j._pid || '', dn: j._dn || '', dk: j._dk || '', arr: []}); groups.get(key).arr.push(j); });
   [...list.querySelectorAll('.jg')].forEach(g => { if (!groups.has(g.dataset.k)) g.remove(); });
   const rank = G => G.cx ? 3 : G.arr.some(j => j.status === 'running') ? 0 : G.arr.some(j => j.status === 'queued') ? 1 : 2;  // зверху те, що качається зараз
   const order = [...groups.values()].map(G => (G.arr.reverse(), G)).sort((x, y) => rank(x) - rank(y));
@@ -14457,6 +14525,7 @@ setInterval(() => { if ($('#bkbox') && !document.hidden) bkTick(false); }, 1000)
 
 /* ---------- опитування черги ---------- */
 let pollTimer = null, lastDone = -1;
+let pjBusy = false, pjLast = 0;
 async function pollJobs() {
   try {
     const j = await api('/api/jobs');
@@ -14464,7 +14533,7 @@ async function pollJobs() {
     const done = j.jobs.filter(x => x.status === 'done').length;
     if (lastDone >= 0 && done !== lastDone) await loadLib();
     lastDone = done;
-    if (S.sheet && S.sheet.kind === 'jobs') updateJobs();
+    if (S.sheet && S.sheet.kind === 'jobs') { updateJobs(); if (!pjBusy && Date.now() - pjLast > 1100) { pjBusy = true; pjLast = Date.now(); pjPoll().finally(() => { pjBusy = false; }); } }
     else if (!S.sheet && route().name === 'home') render();
     else if (route().name !== 'home' && route().name !== 'detail') dlHdrSync();
     else if (route().name === 'detail') {  // лічильник завантажень у шапці — на місці, без перемальовування
@@ -14838,12 +14907,14 @@ const A = {
   async syncnow() { try { await api('/api/sync_now', {}); toast('Синхронізую…'); } catch (e) { toast(e.message, true); } setTimeout(syncFetch, 1500); },
   rdl() {
     const y = S.sync, it = item(route().id); if (!y || !it) return;
-    openSheet('rdl', {kid: it.id, eps: [...S.sel].map(Number), q: S.q});
+    const ad = (it.dubs || []).find(d => d.active);
+    openSheet('rdl', {kid: it.id, eps: [...S.sel].map(Number), q: S.q, dub: ad ? ad.name : '', dubs: (it.dubs || []).map(d => d.name), quals: it.quals || []});
   },
+  rdldub(el) { if (S.sheet && S.sheet.kind === 'rdl') { S.sheet.dub = el.dataset.dub; document.querySelectorAll('.rdld .dchip').forEach(b => b.classList.toggle('on', b === el)); } },
   async rdlgo(el) {
     const s = S.sheet; if (!s) return;
     try {
-      const j = await api('/api/sync_dl', {peer: el.dataset.id, id: s.kid, episodes: s.eps, quality: s.q});
+      const j = await api('/api/sync_dl', {peer: el.dataset.id, id: s.kid, episodes: s.eps, quality: s.q, dub: s.dub || ''});
       closeSheet(); S.sel.clear(); S.selMode = false; render();
       toast(j.queued ? `На іншому пристрої в черзі: ${j.queued}` : 'Там усе вже є', false, 'download');
     } catch (e) { toast(e.message, true); }
@@ -15094,7 +15165,7 @@ const A = {
     });
   },
   async checkall() {
-    if (S.checking || !S.items.length) return;
+    if (acBusy() || !S.items.length) return;
     S.checking = true; render();
     const found = [];
     for (const it of S.items.filter(x => !x.archived)) {
@@ -15842,6 +15913,7 @@ document.addEventListener('change', ev => {
     return;
   }
   if (ev.target.id === 'qsel') { S.q = ev.target.value; ls.set('q', S.q); }
+  if (ev.target.id === 'rdlq' && S.sheet) S.sheet.q = ev.target.value;
   if (ev.target.dataset && ev.target.dataset.ss) {  // меню вибору в налаштуваннях
     const k = ev.target.dataset.ss, v = ev.target.value;
     if (k === 'np_cover') { setOpt('np_cover', v); setOpt('np_ep_cover', v !== 'anime'); NPF.t = 0; }
@@ -18191,7 +18263,7 @@ html.curx body.dragging,html.curx body.dragging *,html.curx.cgrab,html.curx.cgra
     if (fk && HS[fk.dataset.curk]) { prev = t.style.cursor; last = t; t.style.cursor = url(fk.dataset.curk); return; }
     const txtIn = /^(INPUT|TEXTAREA)$/.test(t.tagName) && !/^(checkbox|radio|range|button|submit|color|file)$/.test(t.type || '');
     const clk = !txtIn && t.closest('button,a[href],[data-act],[data-lp],label:has(input[type=checkbox],input[type=radio]),select,summary,[role=button],input[type=checkbox],input[type=radio]');
-    if (clk && (k === 'default' || c === 'auto')) k = (clk.disabled || clk.getAttribute('aria-disabled') === 'true') ? 'not-allowed' : 'pointer';  // кнопки, перемикачі, меню: завжди «рука», навіть над текстом чи іконкою всередині
+    if (clk && (k === 'default' || c === 'auto')) k = clk.classList.contains('busy') ? 'progress' : (clk.disabled || clk.getAttribute('aria-disabled') === 'true') ? 'not-allowed' : 'pointer';  // кнопки, перемикачі, меню: завжди «рука», навіть над текстом чи іконкою всередині
     else if (c === 'auto' && cs.userSelect !== 'none' && [...t.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())) k = 'text';
     if (txtIn && k === 'default') k = 'text';
     prev = t.style.cursor; last = t; t.style.cursor = url(k);
