@@ -134,6 +134,25 @@ html[data-pls=solid]{--sb:#00000066;--sbd:0;--sr:50%;--ssh:none;--sbl:blur(8px);
 html[data-pls] .cb:not(.big){background:var(--sb);border:var(--sbd);border-radius:var(--sr);box-shadow:var(--ssh);-webkit-backdrop-filter:var(--sbl);backdrop-filter:var(--sbl);color:var(--sc)}
 html[data-pls] .cb .i{color:inherit}
 html[data-pls] .cb.big{background:var(--mb);border:var(--mbd);border-radius:var(--mr);box-shadow:var(--msh);color:var(--mc)}
+#dtf{position:fixed;top:0;bottom:0;width:44%;overflow:hidden;pointer-events:none;opacity:0;z-index:2;color:var(--dta,#fff);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;transition:opacity .25s ease}
+#dtf.l{left:0}#dtf.r{right:0}#dtf.on{opacity:1;transition:none}
+#dtf .bg{position:absolute;top:-30%;bottom:-30%;width:200%;border-radius:50%;background:var(--dtc,#ffffff26)}
+#dtf.l .bg{left:-100%}#dtf.r .bg{right:-100%}
+#dtf.on .bg{animation:dtbg .32s cubic-bezier(.2,.8,.3,1) both}
+#dtf .rp{position:absolute;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;background:var(--dtr,#ffffff59);transform:scale(0)}
+#dtf.on .rp{animation:dtrp .6s ease-out both}
+#dtf .ar{position:relative;display:flex}#dtf.l .ar{flex-direction:row-reverse}
+#dtf .ar svg{width:20px;height:26px;margin:0 -3px;fill:none;stroke:var(--dta,#fff);stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round;opacity:0;filter:var(--dtf,drop-shadow(0 1px 4px #0008))}
+#dtf.l .ar svg{transform:scaleX(-1)}
+#dtf.on .ar svg{animation:dtar .6s ease-out both}#dtf.on .ar svg:nth-child(2){animation-delay:.08s}#dtf.on .ar svg:nth-child(3){animation-delay:.16s}
+#dtf span{position:relative;font-weight:700;font-size:15px;letter-spacing:.01em;text-shadow:var(--dts,0 1px 8px #000a)}
+html[data-pls=neon]{--dtc:#7c6cff47;--dtr:#a99bff80;--dta:#fff}
+html[data-pls=glass]{--dtc:#9fd8ff2b;--dtr:#d8f0ff70;--dta:#fff}
+html[data-pls=glass] #dtf .bg{-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+html[data-pls=solid]{--dtc:#ffffffe6;--dtr:#00000026;--dta:#0d0e13;--dtf:none;--dts:none}
+@keyframes dtbg{from{transform:scale(.6);opacity:0}to{transform:none;opacity:1}}
+@keyframes dtrp{from{transform:scale(0);opacity:.9}to{transform:scale(8);opacity:0}}
+@keyframes dtar{0%{opacity:0}30%{opacity:1}100%{opacity:.22}}
 html[data-pls] .cb{transition:transform .22s cubic-bezier(.2,.9,.3,1.35),box-shadow .22s,background .2s,filter .2s}
 @media (hover:hover){html[data-pls] .cb:hover{transform:translateY(-1px) scale(1.08)!important;filter:brightness(1.18)}}
 html[data-pls] .cb:active{transform:scale(.88)!important}
@@ -174,7 +193,8 @@ html[data-plb=seek] .mid [data-k=ep],html[data-plb=ep] .mid [data-k=sk]{display:
   const send = o => { try { wv.postMessage('main>' + JSON.stringify(o)); } catch (e) {} };
   const D = {skips: {}, hasPrev: false, hasNext: false, nx: null, sk: null}; let icons = {}, hand = false, loading = true, hideT = 0, start = null, shownKey = '', nxHold = false;
   const fmt = t => { t = Math.max(0, Math.floor(t || 0)); const h = Math.floor(t / 3600), m = Math.floor(t % 3600 / 60), s = t % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0'); };
-  const ico = n => icons[n] || '';
+  let SKS = 10;
+  const ico = n => { const h = icons[n] || ''; return (n === 'back10' || n === 'fwd10') && SKS !== 10 ? h.replace('>10</text>', '>' + SKS + '</text>') : h; };
   function paintIcons() { document.querySelectorAll('[data-i]').forEach(e => { e.innerHTML = ico(e.dataset.i); }); ppIcon(); }
   function ppIcon() { $('#pp').innerHTML = ico(V.paused ? 'play' : 'pause'); document.body.classList.toggle('paused', V.paused && !loading); }
   function wait(on) { document.body.classList.toggle('wait', !!on); }
@@ -257,11 +277,18 @@ html[data-plb=seek] .mid [data-k=ep],html[data-plb=ep] .mid [data-k=sk]{display:
   document.addEventListener('pointerdown', e => { if (e.button !== 0) return; pd = e.target.closest('button,.tr,.vsl,.skb') ? null : {x: e.clientX, y: e.clientY}; });
   document.addEventListener('pointermove', e => { if (pd && Math.hypot(e.clientX - pd.x, e.clientY - pd.y) > 4) { pd = null; try { wv.postMessage('pipdrag'); } catch (x) {} } });
   document.addEventListener('pointerup', () => { pd = null; });
-  V.addEventListener('click', () => { V.paused ? V.play().catch(() => {}) : V.pause(); });
+  let ctP = 0, dtA = 0, dtAt = 0, dtS = 0;
+  V.addEventListener('click', ev => {
+    clearTimeout(ctP); const tg = () => { V.paused ? V.play().catch(() => {}) : V.pause(); };
+    if (!DTP) { tg(); return; }
+    const r = V.getBoundingClientRect(), fx = (ev.clientX - r.left) / (r.width || 1), side = fx < 0.35 ? -1 : fx > 0.65 ? 1 : 0;
+    if (ev.detail >= 2) { if (side) { const n = Date.now(); if (dtS !== side || n - dtAt > 650) dtA = 0; dtS = side; dtAt = n; dtA += SKS; seekTo(V.currentTime + side * SKS); dtFlashX(document.body, side, dtA, ev); } return; }
+    ctP = setTimeout(tg, 230);  // чекаємо другий клік: інакше перший ставив би на паузу
+  });
   $('#top').addEventListener('dblclick', () => send({t: 'cmd', c: 'return'}));
   const seekTo = t => { V.currentTime = Math.max(0, Math.min((V.duration || 1e9) - 0.2, t)); paintTime(); };
   $('#pp').onclick = () => { V.paused ? V.play().catch(() => {}) : V.pause(); };
-  $('#bk').onclick = () => seekTo(V.currentTime - 10); $('#fw').onclick = () => seekTo(V.currentTime + 10);
+  $('#bk').onclick = () => seekTo(V.currentTime - SKS); $('#fw').onclick = () => seekTo(V.currentTime + SKS);
   $('#pv').onclick = () => send({t: 'cmd', c: 'prev'}); $('#nt').onclick = () => send({t: 'cmd', c: 'next'});
   $('#cls').onclick = () => send({t: 'cmd', c: 'close'}); $('#ret').onclick = () => send({t: 'cmd', c: 'fs'});
   $('#vb').onclick = ev => { ev.stopPropagation(); if (!own) { V.muted = !V.muted; return; } $('#vpop').classList.toggle('hide'); paintVol(); showUi(); };
@@ -298,7 +325,15 @@ html[data-plb=seek] .mid [data-k=ep],html[data-plb=ep] .mid [data-k=sk]{display:
   });
   V.addEventListener('canplay', () => { if (start && start.hand && !start.sent) { start.sent = true; send({t: 'cp'}); } });
   V.addEventListener('error', () => { wait(false); send({t: 'error'}); });
-  function plSet(m) { const H = document.documentElement; if (m.pls) H.dataset.pls = m.pls; if (m.plb) H.dataset.plb = m.plb; if (m.plf != null) H.dataset.plfx = m.plf ? '1' : '0'; }
+  let DTP = false;
+  function dtFlashX(host, side, acc, ev) {
+    let b = host.querySelector('#dtf'); if (!b) { b = document.createElement('div'); b.id = 'dtf'; host.appendChild(b); }
+    const left = side < 0; b.className = left ? 'l' : 'r';
+    const r = b.getBoundingClientRect(), x = ev ? ev.clientX - r.left : r.width / 2, y = ev ? ev.clientY - r.top : r.height / 2, ch = '<svg viewBox="0 0 16 24"><path d="M4 5l8 7-8 7"/></svg>';
+    b.innerHTML = '<div class="bg"></div><i class="rp" style="left:' + x + 'px;top:' + y + 'px"></i><div class="ar">' + ch + ch + ch + '</div><span>' + (left ? '−' : '+') + acc + ' с</span>';
+    void b.offsetWidth; b.classList.add('on'); clearTimeout(b._t); b._t = setTimeout(() => b.classList.remove('on'), 650);
+  }
+  function plSet(m) { if (m.dtp != null) DTP = !!m.dtp; if (m.sks && m.sks !== SKS) { SKS = m.sks; try { paintIcons(); } catch (e) {} } const H = document.documentElement; if (m.pls) H.dataset.pls = m.pls; if (m.plb) H.dataset.plb = m.plb; if (m.plf != null) H.dataset.plfx = m.plf ? '1' : '0'; }
   function plBurst(el) {
     const H = document.documentElement; if (H.dataset.plfx === '0') return;
     const st = H.dataset.pls || 'neon', r = el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2, R = Math.max(r.width, r.height) / 2, rnd = Math.random;
@@ -6554,6 +6589,7 @@ def notif_add(typ, **kw):
         if x['type'] == 'new' and x.get('kid') == kw.get('kid') and not x.get('read'):
           x['eps'] = sorted(set(x.get('eps') or []) | set(kw.get('eps') or []))
           x['ts'] = time.time()
+          x['seen'] = False  # з'явилась ще серія — це знову «нове», pop-up доречний
           _notif_save()
           return
     if typ == 'new' and kw.get('kid') and kw.get('eps'):  # однакове повідомлення на всіх пристроях має однаковий id — тоді воно синхронізується, а не дублюється
@@ -6567,9 +6603,22 @@ def notif_add(typ, **kw):
     _notif_save()
 
 
+def api_notifs_seen(ids=None):
+  """«Побачено»: повідомлення відкривали/показували pop-up, але могли не відмічати прочитаним — pop-up про нього більше не потрібен (синхронізується разом із повідомленням)."""
+  with _NOTIF_LOCK:
+    ch = False
+    for x in NOTIFS:
+      if x.get('type') == 'new' and not x.get('seen') and (not ids or x['id'] in ids):
+        x['seen'] = True
+        ch = True
+    if ch:
+      _notif_save()
+  return api_notifs()
+
+
 def api_notifs():
   with _NOTIF_LOCK:
-    items = list(reversed(NOTIFS))[:60]
+    items = sorted(NOTIFS, key=lambda x: x.get('ts') or 0, reverse=True)[:60]  # однаковий порядок на всіх пристроях — за часом
     return {'items': items, 'unread': sum(1 for x in NOTIFS if not x.get('read'))}
 
 
@@ -7360,7 +7409,7 @@ def net_state():
 SETTINGS = {'mobile_download': False, 'auto_skip': False, 'auto_skip_opening': True, 'auto_skip_ending': True, 'auto_next': True,
             'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': True, 'ios_player': False, 'ios_pl2': False, 'web_inapp': True, 'np_ep_cover': True, 'hide_psave': False, 'auto_arc': True, 'show_scrollbar': False,
             'bg_keep': True, 'bg_check': False, 'island': True, 'island_dl': True, 'island_check': False,
-            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'old_cards': False, 'pc_cursor': True, 'cursor_scale': 100, 'np_cover': 'ep', 'dub_fav': [], 'dub_prio': [], 'dub_seen': [], 'fx_style': 'blocks', 'pl_style': 'neon', 'pl_btns': 'both', 'pl_fx': True, 'recent_min': 3, 'handoff': True, 'rc': True, 'rc_in': True, 'rc_out': True, 'dv2': False, 'xgest': 'both', 'client': {},
+            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'old_cards': False, 'pc_cursor': True, 'cursor_scale': 100, 'np_cover': 'ep', 'dub_fav': [], 'dub_prio': [], 'dub_seen': [], 'fx_style': 'blocks', 'pl_style': 'neon', 'pl_btns': 'both', 'pl_fx': True, 'dtap': True, 'dtap_pc': 'pip', 'xgest_pc': 'both', 'seek_step': 10, 'recent_min': 3, 'handoff': True, 'rc': True, 'rc_in': True, 'rc_out': True, 'dv2': False, 'xgest': 'both', 'client': {},
             'site_order': ['aniliberty', 'yummyani', 'animevost', 'animru'], 'view': {}}
 
 
@@ -7413,11 +7462,20 @@ def api_settings(data=None):
             if isinstance(data[k], dict) and len(json.dumps(data[k])) < 4000:
               SETTINGS[k] = data[k]
           elif k == 'fx_style':
-            SETTINGS[k] = data[k] if data[k] in ('blocks', 'vortex', 'edge') else 'blocks'
+            SETTINGS[k] = data[k] if data[k] in ('blocks', 'vortex', 'edge', 'wave', 'pixel', 'portal', 'beam', 'meteor', 'aurora') else 'blocks'
           elif k == 'pl_style':
             SETTINGS[k] = data[k] if data[k] in ('neon', 'glass', 'solid') else 'neon'
+          elif k == 'dtap_pc':
+            SETTINGS[k] = data[k] if data[k] in ('pip', 'player', 'both') else 'pip'
           elif k == 'pl_btns':
             SETTINGS[k] = data[k] if data[k] in ('both', 'seek', 'ep') else 'both'
+          elif k == 'seek_step':
+            try:
+              SETTINGS[k] = int(data[k]) if int(data[k]) in (5, 10, 15, 20, 30) else 10
+            except (TypeError, ValueError):
+              SETTINGS[k] = 10
+          elif k == 'xgest_pc':
+            SETTINGS[k] = data[k] if data[k] in ('both', 'mouse', 'key') else 'both'
           elif k == 'xgest':
             SETTINGS[k] = data[k] if data[k] in ('both', 'top', 'edge') else 'both'
           elif k == 'np_cover':
@@ -8204,6 +8262,7 @@ class Handler(BaseHTTPRequestHandler):
           '/api/jobs_resume': lambda: api_jobs_resume(),
           '/api/notifs_clear': lambda: api_notifs_clear(),
           '/api/notifs_read': lambda: api_notifs_read(b.get('id')),
+          '/api/notifs_seen': lambda: api_notifs_seen(b.get('ids')),
           '/api/jobs_discard': lambda: api_jobs_discard(),
           '/api/dl_pause': lambda: api_dl_pause(b.get('on')),
           '/api/settings': lambda: api_settings(b),
@@ -9282,15 +9341,15 @@ SYNC_LOCK = threading.RLock()
 SYNC = {'st': None, 'srv': None, 'srv_err': '', 'started': False, 'found': {}, 'pending': None, 'pair_out': None, 'gen': 0,
         'status': {}, 'inb': {}, 'wake': threading.Event(), 'scanning': 0.0, 'last_rescan': 0.0, 'pair_until': 0.0, 'last_scan': 0.0}
 SYNC_SETTINGS_KEYS = ['view', 'auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'auto_check', 'auto_check_hours', 'blur_thumbs',
-                      'np_ep_cover', 'np_cover', 'ios_player', 'hide_psave', 'auto_arc', 'skip_mode', 'vol_max', 'own_vol', 'recent_min', 'site_order', 'dub_fav', 'dub_prio', 'fx_style', 'pl_style', 'pl_btns', 'pl_fx',
+                      'np_ep_cover', 'np_cover', 'ios_player', 'hide_psave', 'auto_arc', 'skip_mode', 'vol_max', 'own_vol', 'recent_min', 'site_order', 'dub_fav', 'dub_prio', 'fx_style', 'pl_style', 'pl_btns', 'pl_fx', 'dtap', 'dtap_pc', 'seek_step',
                       # налаштування, яких немає на частині платформ, теж зберігаємо й передаємо — щоб при підключенні іншого пристрою вони відновились
-                      'web_inapp', 'mobile_download', 'bg_keep', 'bg_check', 'island', 'island_dl', 'island_check', 'xgest', 'pc_cursor', 'cursor_scale']
+                      'web_inapp', 'mobile_download', 'bg_keep', 'bg_check', 'island', 'island_dl', 'island_check', 'xgest', 'xgest_pc', 'pc_cursor', 'cursor_scale']
 SYNC_GROUPS = {'view': ['view', 'blur_thumbs'],
-               'player': ['auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'skip_mode', 'vol_max', 'own_vol', 'np_ep_cover', 'np_cover', 'ios_player', 'hide_psave', 'pl_style', 'pl_btns', 'pl_fx'],
+               'player': ['auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'skip_mode', 'vol_max', 'own_vol', 'np_ep_cover', 'np_cover', 'ios_player', 'hide_psave', 'pl_style', 'pl_btns', 'pl_fx', 'dtap', 'dtap_pc', 'seek_step'],
                'library': ['recent_min', 'auto_arc'],
                'auto': ['auto_check', 'auto_check_hours'],
                'sites': ['site_order', 'dub_fav', 'dub_prio'],
-               'device': ['web_inapp', 'mobile_download', 'bg_keep', 'bg_check', 'island', 'island_dl', 'island_check', 'xgest', 'pc_cursor', 'cursor_scale'],
+               'device': ['web_inapp', 'mobile_download', 'bg_keep', 'bg_check', 'island', 'island_dl', 'island_check', 'xgest', 'xgest_pc', 'pc_cursor', 'cursor_scale'],
                'covers': []}  # covers — не налаштування, а власні обкладинки карток (передаються разом із прапорцями аніме)
 SYNC_GNAMES = list(SYNC_GROUPS)
 SYNC_SCOPES = ('all',) + tuple(SYNC_GNAMES)
@@ -9675,6 +9734,7 @@ def _sync_apply_one(st, k, r):
         nv['ts'] = max(nv.get('ts') or 0, cur.get('ts') or 0) if nv.get('read') == cur.get('read') else nv.get('ts') or cur.get('ts')
         cur.clear()
         cur.update(nv)
+        NOTIFS.sort(key=lambda x: x.get('ts') or 0)
       _notif_save()
       last[k] = _nt_hash(nv)
       return True
@@ -10149,7 +10209,7 @@ def _sync_command(body, pid=None):
       SYNC['offer'] = {'hid': uuid.uuid4().hex[:10], 'from': str(body.get('from') or '')[:30], 'n': len(vals), 'scope': body.get('scope') if body.get('scope') in SYNC_SCOPES else 'all', 'settings': {k: v for k, v in vals.items() if k in SYNC_SETTINGS_KEYS}, 'ts': time.time()}
     return {'ok': True}
   if body.get('type') == 'ping':
-    return {'ok': True, 'sync': bool(_sync_state().get('sync')), 'pids': list(_sync_state()['peers'])}
+    return {'ok': True, 'sync': bool(_sync_state().get('sync')), 'pids': list(_sync_state()['peers']), 'rcin': bool(SETTINGS.get('rc') and SETTINGS.get('rc_in'))}
   if body.get('type') == 'unpair' and pid:
     _sync_drop_peer(pid)
     return {'ok': True}
@@ -10368,7 +10428,7 @@ def _sync_loop():
     for pid in list(st['peers']):
       try:
         r = _peer_cmd(pid, {'type': 'ping'}, 4)
-        SYNC['status'][pid] = {'ok': True, 't': time.time(), 'sync': bool(r.get('sync'))}
+        SYNC['status'][pid] = {'ok': True, 't': time.time(), 'sync': bool(r.get('sync')), 'rcin': bool(r.get('rcin', True))}
         try:
           _sync_mesh(pid, r.get('pids'))
         except Exception:
@@ -10381,7 +10441,7 @@ def _sync_loop():
         prev = SYNC['status'].get(pid) or {}
         fails = int(prev.get('fails', 0)) + 1
         if time.time() - SYNC['inb'].get(pid, 0) < 25:  # ми до нього не достукуємось, але він до нас так — бачимо його онлайн
-          SYNC['status'][pid] = {'ok': True, 't': time.time(), 'sync': bool(prev.get('sync')), 'inb': True, 'fails': fails, 'err': str(ex)[:90]}
+          SYNC['status'][pid] = {'ok': True, 't': time.time(), 'sync': bool(prev.get('sync')), 'rcin': prev.get('rcin', True), 'inb': True, 'fails': fails, 'err': str(ex)[:90]}
           if time.time() - SYNC['last_rescan'] > 20:
             SYNC['last_rescan'] = time.time()
             threading.Thread(target=_sync_scan_net, daemon=True).start()
@@ -10464,7 +10524,7 @@ def api_sync_state():
     s = SYNC['status'].get(pid) or {}
     peers.append({'id': pid, 'name': p.get('alias') or p.get('name') or pid[:6], 'rname': p.get('name') or '', 'alias': p.get('alias') or '',
                   'kind': p.get('kind') or 'phone', 'xfer': p.get('xfer') or 'std', 'addr': p.get('addr'), 'last': p.get('last') or 0,
-                  'online': bool(s.get('ok') and now - s.get('t', 0) < 45), 'err': '' if s.get('ok') or not s else s.get('err', ''), 'sync': bool(s.get('sync'))})
+                  'online': bool(s.get('ok') and now - s.get('t', 0) < 45), 'err': '' if s.get('ok') or not s else s.get('err', ''), 'sync': bool(s.get('sync')), 'rcin': bool(s.get('rcin', True))})
   found = [f for f in SYNC['found'].values() if now - f['ts'] < 12 and f['id'] not in st['peers']] if _pairing() else []
   pd = SYNC['pending']
   if pd and time.time() > pd['exp']:
@@ -11093,6 +11153,7 @@ body{padding-bottom:calc(84px + var(--bot))}
 #tabs a.on{color:var(--ac)}
 #rcbar{z-index:95!important;touch-action:manipulation;-webkit-tap-highlight-color:transparent;transition:width .25s,height .25s,border-radius .25s,padding .25s,bottom .3s cubic-bezier(.2,.9,.3,1),top .3s cubic-bezier(.2,.9,.3,1)}
 #rcbar.fl{transition:none!important}#rcbar.drag{transition:none!important;box-shadow:0 18px 50px #000c,0 0 0 2px var(--ac)}#rcbar.min{touch-action:none;cursor:grab}
+#rcbar:not(.min) .rch,#rcbar:not(.min) .rcgrip{cursor:grab}#rcbar.drag,#rcbar.drag *{cursor:grabbing!important}#rcbar{user-select:none;-webkit-user-select:none}#rcbar input{cursor:pointer}
 #rcbar .rcgrip{display:block;width:38px;height:4px;border-radius:2px;background:#ffffff2e;margin:-4px auto 8px}
 #rcbar:not(.min){touch-action:none}#rcbar input[type=range]{touch-action:pan-x}
 #rcbar .rcx{background:none;border:0;color:var(--mu);width:38px;height:38px;display:flex;align-items:center;justify-content:center}
@@ -11240,6 +11301,89 @@ html.pcmax #fx .edf,html.pcfs #fx .edf{border-radius:0!important}
 @keyframes mvR{0%{transform:translate(32px,0) scale(1);opacity:0}15%{opacity:1}85%{opacity:1}100%{transform:translate(0,0) scale(.1);opacity:0}}
 .fxm .mf{position:absolute;inset:0;border-radius:12px;box-shadow:inset 0 0 0 2px #a596ff,inset 0 0 14px 3px #7c6cffcc;animation:mfP 2.2s ease-in-out infinite}
 @keyframes mfP{0%{opacity:.2;box-shadow:inset 0 0 0 1px #a596ff88,inset 0 0 4px 0 #7c6cff66}70%{opacity:1;box-shadow:inset 0 0 0 3px #c4baff,inset 0 0 20px 6px #7c6cff,inset 0 0 40px 10px #4c96ffaa}100%{opacity:.2;box-shadow:inset 0 0 0 1px #a596ff88,inset 0 0 4px 0 #7c6cff66}}
+#fx .wvr{position:absolute;left:50%;top:46%;width:80vmax;height:80vmax;border-radius:50%;border:3px solid #b3a8ff;box-shadow:0 0 34px #7c6cff,inset 0 0 36px #4c96ff88;opacity:0;transform:translate(-50%,-50%) scale(.02)}
+#fx .wvk{position:absolute;left:50%;top:46%;width:30vmin;height:30vmin;border-radius:50%;background:radial-gradient(circle,#fff,#a596ffcc 35%,transparent 70%);opacity:0;transform:translate(-50%,-50%) scale(.1)}
+#fx.s-wave.k-out .wvr{animation:wvO 1.35s cubic-bezier(.2,.7,.3,1) var(--d) both}#fx.s-wave.k-out .wvk{animation:wvKO 1.2s ease-out both}
+#fx.s-wave.k-in .wvr{animation:wvI 1.35s cubic-bezier(.5,0,.8,.4) var(--d) both}#fx.s-wave.k-in .wvk{animation:wvKI 1.3s ease-in .75s both}
+@keyframes wvO{0%{opacity:0;transform:translate(-50%,-50%) scale(.02)}12%{opacity:1}100%{opacity:0;transform:translate(-50%,-50%) scale(1.5)}}
+@keyframes wvI{0%{opacity:0;transform:translate(-50%,-50%) scale(1.5)}30%{opacity:1}100%{opacity:0;transform:translate(-50%,-50%) scale(.02)}}
+@keyframes wvKO{0%{opacity:1;transform:translate(-50%,-50%) scale(.1)}100%{opacity:0;transform:translate(-50%,-50%) scale(3)}}
+@keyframes wvKI{0%{opacity:0;transform:translate(-50%,-50%) scale(.1)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.1)}100%{opacity:0;transform:translate(-50%,-50%) scale(2.6)}}
+#fx .pxc{position:absolute;border-radius:5px;opacity:0;box-shadow:0 0 14px #5b4cff66}
+#fx.s-pixel.k-out .pxc{animation:pxO .95s cubic-bezier(.4,0,.2,1) var(--d) both}
+#fx.s-pixel.k-in .pxc{animation:pxI 1s cubic-bezier(.3,.7,.3,1) var(--d) both}
+@keyframes pxO{0%{opacity:0;transform:scale(.2) rotate(-20deg)}30%{opacity:.92;transform:scale(1)}100%{opacity:0;transform:translateY(-34vh) scale(.3) rotate(40deg)}}
+@keyframes pxI{0%{opacity:0;transform:translateY(-34vh) scale(.3) rotate(-40deg)}55%{opacity:.92;transform:scale(1)}100%{opacity:0;transform:scale(.8) rotate(8deg)}}
+#fx .ptl{position:absolute;left:50%;top:46%;width:min(74vw,56vh,460px);aspect-ratio:1;border-radius:50%;background:conic-gradient(#7c6cff,#4c96ff,#d3ccff,#7c6cff,#4c96ff,#7c6cff);-webkit-mask:radial-gradient(circle,transparent 46%,#000 52%,#000 64%,transparent 72%);mask:radial-gradient(circle,transparent 46%,#000 52%,#000 64%,transparent 72%);filter:drop-shadow(0 0 22px #7c6cff);opacity:0;transform:translate(-50%,-50%) scale(.05)}
+#fx .ptc{position:absolute;left:50%;top:46%;width:min(50vw,38vh,320px);aspect-ratio:1;border-radius:50%;background:radial-gradient(circle,#02030a 0,#0a0b1ce6 55%,#4c96ff33 78%,transparent 100%);opacity:0;transform:translate(-50%,-50%) scale(.05)}
+#fx .pts{position:absolute;left:50%;top:46%;width:7px;height:7px;margin:-3px 0 0 -3px;border-radius:50%;background:#d3ccff;box-shadow:0 0 12px #7c6cff,0 0 4px #fff;opacity:0}
+#fx.s-portal.k-out .ptl{animation:ptO 1.85s cubic-bezier(.3,.7,.3,1) both}#fx.s-portal.k-out .ptc{animation:ptCO 1.85s cubic-bezier(.3,.7,.3,1) both}
+#fx.s-portal.k-in .ptl{animation:ptI 1.9s cubic-bezier(.2,.7,.3,1) both}#fx.s-portal.k-in .ptc{animation:ptCI 1.9s cubic-bezier(.2,.7,.3,1) both}
+#fx.s-portal.k-out .pts{animation:psO 1.3s cubic-bezier(.5,0,.75,.45) var(--d) both}#fx.s-portal.k-in .pts{animation:psI 1.2s cubic-bezier(.2,.6,.3,1) calc(var(--d) + .55s) both}
+@keyframes ptO{0%{opacity:0;transform:translate(-50%,-50%) scale(.05) rotate(0)}18%{opacity:1;transform:translate(-50%,-50%) scale(1) rotate(90deg)}78%{opacity:1;transform:translate(-50%,-50%) scale(1) rotate(330deg)}100%{opacity:0;transform:translate(-50%,-50%) scale(.05) rotate(460deg)}}
+@keyframes ptCO{0%{opacity:0;transform:translate(-50%,-50%) scale(.05)}18%{opacity:1;transform:translate(-50%,-50%) scale(1)}78%{opacity:1;transform:translate(-50%,-50%) scale(1)}100%{opacity:0;transform:translate(-50%,-50%) scale(.05)}}
+@keyframes ptI{0%{opacity:0;transform:translate(-50%,-50%) scale(.05) rotate(0)}20%{opacity:1;transform:translate(-50%,-50%) scale(.6) rotate(-90deg)}55%{opacity:1;transform:translate(-50%,-50%) scale(1) rotate(-220deg)}100%{opacity:0;transform:translate(-50%,-50%) scale(2.1) rotate(-380deg)}}
+@keyframes ptCI{0%{opacity:0;transform:translate(-50%,-50%) scale(.05)}20%{opacity:1;transform:translate(-50%,-50%) scale(.6)}55%{opacity:1;transform:translate(-50%,-50%) scale(1)}100%{opacity:0;transform:translate(-50%,-50%) scale(2.1)}}
+@keyframes psO{0%{opacity:0;transform:rotate(var(--a)) translateX(calc(var(--r)*1vmin)) scale(1)}15%{opacity:1}100%{opacity:0;transform:rotate(calc(var(--a) + 70deg)) translateX(0) scale(.2)}}
+@keyframes psI{0%{opacity:0;transform:rotate(var(--a)) translateX(0) scale(.2)}15%{opacity:1}100%{opacity:0;transform:rotate(calc(var(--a) + 70deg)) translateX(calc(var(--r)*1vmin)) scale(1)}}
+.fxm .mrg{position:absolute;left:50%;top:48%;width:88%;aspect-ratio:1;border-radius:50%;border:2px solid #a596ff;box-shadow:0 0 10px #7c6cff;opacity:0;animation:mrgA 2.2s ease-out infinite;transform:translate(-50%,-50%) scale(.05)}
+@keyframes mrgA{0%{transform:translate(-50%,-50%) scale(.05);opacity:0}15%{opacity:1}100%{transform:translate(-50%,-50%) scale(1);opacity:0}}
+.fxm .mpx{position:absolute;width:29%;height:21%;border-radius:3px;background:linear-gradient(145deg,#8b7bff,#4c96ff);opacity:0;animation:mpxA 2.2s ease-in-out infinite}
+@keyframes mpxA{0%{opacity:0;transform:scale(.3)}30%{opacity:1;transform:scale(1)}70%{opacity:1;transform:translateY(-30%) scale(.8)}100%{opacity:0;transform:translateY(-80%) scale(.3)}}
+.fxm .mpt{position:absolute;left:50%;top:48%;width:72%;aspect-ratio:1;border-radius:50%;background:conic-gradient(#7c6cff,#4c96ff,#d3ccff,#7c6cff);-webkit-mask:radial-gradient(circle,transparent 46%,#000 52%,#000 66%,transparent 72%);mask:radial-gradient(circle,transparent 46%,#000 52%,#000 66%,transparent 72%);filter:drop-shadow(0 0 6px #7c6cff);animation:mptA 2.2s ease-in-out infinite;transform:translate(-50%,-50%) scale(.1);opacity:0}
+@keyframes mptA{0%{transform:translate(-50%,-50%) scale(.1) rotate(0);opacity:0}30%{opacity:1;transform:translate(-50%,-50%) scale(1) rotate(120deg)}75%{opacity:1;transform:translate(-50%,-50%) scale(1) rotate(300deg)}100%{transform:translate(-50%,-50%) scale(.1) rotate(420deg);opacity:0}}
+#fx .bm{position:absolute;left:0;right:0;top:0;height:3px;opacity:0;background:linear-gradient(90deg,transparent,#c4baff 18%,#fff 50%,#c4baff 82%,transparent);box-shadow:0 0 16px 4px #7c6cffcc,0 0 56px 12px #4c96ff66}
+#fx .bm i{position:absolute;left:0;right:0;height:52vh;pointer-events:none}
+#fx.k-out .bm i{top:3px;background:linear-gradient(#7c6cff59,#4c96ff1a 55%,transparent)}
+#fx.k-in .bm i{bottom:3px;background:linear-gradient(transparent,#4c96ff1a 45%,#7c6cff59)}
+#fx.s-beam.k-out .bm{animation:bmO 1.45s cubic-bezier(.55,0,.3,1) var(--d) both}
+#fx.s-beam.k-in .bm{animation:bmI 1.45s cubic-bezier(.55,0,.3,1) var(--d) both}
+@keyframes bmO{0%{opacity:0;transform:translateY(106vh)}10%{opacity:var(--o,1)}90%{opacity:var(--o,1)}100%{opacity:0;transform:translateY(-14vh)}}
+@keyframes bmI{0%{opacity:0;transform:translateY(-14vh)}10%{opacity:var(--o,1)}90%{opacity:var(--o,1)}100%{opacity:0;transform:translateY(106vh)}}
+#fx .mtr{position:absolute;height:3px;border-radius:3px;opacity:0;background:linear-gradient(90deg,transparent,#8b7bff99 55%,#fff);box-shadow:0 0 12px 2px #7c6cff99}
+#fx.s-meteor.k-out .mtr{transform:rotate(-30deg);animation:mtO var(--t) cubic-bezier(.35,0,.6,1) var(--d) both}
+#fx.s-meteor.k-in .mtr{transform:rotate(150deg);animation:mtI var(--t) cubic-bezier(.35,0,.6,1) var(--d) both}
+@keyframes mtO{0%{opacity:0;transform:rotate(-30deg) translateX(-30vmax)}15%{opacity:1}80%{opacity:1}100%{opacity:0;transform:rotate(-30deg) translateX(110vmax)}}
+@keyframes mtI{0%{opacity:0;transform:rotate(150deg) translateX(-30vmax)}15%{opacity:1}80%{opacity:1}100%{opacity:0;transform:rotate(150deg) translateX(110vmax)}}
+#fx .aur{position:absolute;left:-35%;width:170%;height:46vh;border-radius:50%;filter:blur(46px);opacity:0;mix-blend-mode:screen}
+#fx .aur.a1{background:#2ee6b8;top:30%}#fx .aur.a2{background:#7c6cff;top:44%;--w:.3s}#fx .aur.a3{background:#ff6bd6;top:38%;--w:.6s}
+#fx .auc{position:absolute;left:-10%;right:-10%;top:14%;height:62vh;opacity:0;filter:blur(5px);background:repeating-linear-gradient(90deg,#46ffc8aa 0 5px,transparent 5px 18px,#8b7bffaa 18px 22px,transparent 22px 40px);-webkit-mask-image:linear-gradient(transparent,#000 40%,#000 60%,transparent);mask-image:linear-gradient(transparent,#000 40%,#000 60%,transparent);transform-origin:50% 100%}
+#fx.s-aurora.k-out .aur{animation:auO 1.9s ease-in-out var(--w,0s) both}#fx.s-aurora.k-in .aur{animation:auI 1.9s ease-in-out var(--w,0s) both}
+#fx.s-aurora.k-out .auc{animation:acO 1.9s ease-in-out both}#fx.s-aurora.k-in .auc{animation:acI 1.9s ease-in-out both}
+@keyframes auO{0%{opacity:0;transform:translateY(55vh) rotate(-8deg)}28%{opacity:.5}62%{opacity:.58;transform:translateY(0) rotate(6deg) scaleX(1.12)}100%{opacity:0;transform:translateY(-50vh) rotate(-5deg)}}
+@keyframes auI{0%{opacity:0;transform:translateY(-50vh) rotate(5deg)}28%{opacity:.5}62%{opacity:.58;transform:translateY(0) rotate(-6deg) scaleX(1.12)}100%{opacity:0;transform:translateY(55vh) rotate(8deg)}}
+@keyframes acO{0%{opacity:0;transform:translateY(30vh) skewX(-8deg) scaleY(.4)}35%{opacity:.5}65%{opacity:.55;transform:translateY(0) skewX(8deg) scaleY(1)}100%{opacity:0;transform:translateY(-30vh) skewX(-6deg) scaleY(1.2)}}
+@keyframes acI{0%{opacity:0;transform:translateY(-30vh) skewX(8deg) scaleY(1.2)}35%{opacity:.5}65%{opacity:.55;transform:translateY(0) skewX(-8deg) scaleY(1)}100%{opacity:0;transform:translateY(30vh) skewX(6deg) scaleY(.4)}}
+.fxm .mbm{position:absolute;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#fff,transparent);box-shadow:0 0 8px 2px #7c6cff;animation:mbmA 2.2s cubic-bezier(.55,0,.3,1) infinite}
+.fxm .mbm::after{content:"";position:absolute;left:0;right:0;top:2px;height:40px;background:linear-gradient(#7c6cff66,transparent)}
+@keyframes mbmA{0%{transform:translateY(130px);opacity:0}15%{opacity:1}85%{opacity:1}100%{transform:translateY(-20px);opacity:0}}
+.fxm .mmt{position:absolute;height:2px;width:34%;border-radius:2px;background:linear-gradient(90deg,transparent,#fff);box-shadow:0 0 6px #7c6cff;opacity:0;animation:mmtA 2.2s ease-in infinite;transform:rotate(-30deg)}
+@keyframes mmtA{0%{opacity:0;transform:rotate(-30deg) translateX(-40px)}20%{opacity:1}80%{opacity:1}100%{opacity:0;transform:rotate(-30deg) translateX(150px)}}
+.fxm .mau{position:absolute;left:-20%;width:140%;height:42%;border-radius:50%;filter:blur(12px);opacity:0;animation:mauA 2.4s ease-in-out infinite;mix-blend-mode:screen}
+@keyframes mauA{0%{opacity:0;transform:translateY(120%) rotate(-6deg)}35%{opacity:.9}65%{opacity:.9;transform:translateY(0) rotate(5deg)}100%{opacity:0;transform:translateY(-110%) rotate(-3deg)}}
+body.fxsk #fx{transition:opacity .18s;opacity:0}
+/* жест і приклад для ПК */
+.gdemo.wide{width:128px;position:relative}
+.gmon{position:absolute;left:0;top:30px;width:70px;height:48px;border-radius:7px;border:2px solid #ffffff30;background:#0d0e13;overflow:hidden;animation:pShake 4.4s infinite}
+.gmon::after{content:"";position:absolute;left:50%;bottom:-9px;width:18px;height:5px;margin-left:-9px;background:#ffffff30;border-radius:2px}
+.gmon .pe{position:absolute;right:0;top:20%;bottom:20%;width:12px;background:radial-gradient(ellipse at 100% 50%,#8b7bffcc,transparent 70%);opacity:0;animation:pEdge 4.4s infinite}
+.gmon .pcu{position:absolute;right:5px;top:50%;width:9px;height:9px;margin-top:-4px;border-radius:50%;background:#fff;opacity:0;box-shadow:0 0 0 0 #fff8;animation:pCur 4.4s infinite}
+.gmon .pbar{position:absolute;left:5px;top:5px;width:22px;height:4px;border-radius:2px;background:#ffffff22}.gmon .pbar+.pbar{top:12px;width:34px}
+.pph{position:absolute;right:0;top:20px;width:32px;height:62px;border-radius:9px;border:2px solid #ffffff30;background:#0d0e13;animation:pPhone 4.4s infinite}
+.pph::before{content:"";position:absolute;left:50%;top:3px;width:8px;height:2px;margin-left:-4px;border-radius:2px;background:#ffffff30}
+.xcard{position:absolute;left:25px;top:44px;width:14px;height:20px;border-radius:4px;background:linear-gradient(145deg,#8b7bff,#4c96ff);box-shadow:0 0 10px #7c6cffaa;opacity:0;animation:xFly 4.4s infinite}
+.gdemo.kd .xcard{left:48px;top:20px}
+.kd .kc{position:absolute;top:60px;height:26px;min-width:30px;padding:0 6px;border-radius:7px;border:1px solid #ffffff3a;background:#1b1e2b;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 0 #000a;animation:kPress 4.4s infinite}
+.kd .kc.k1{left:0}.kd .kc.k2{left:34px;animation-delay:.12s}.kd .kc.k3{left:70px;min-width:24px;animation-delay:.24s}
+.kd .pph{top:2px;height:52px}
+@keyframes pShake{0%,22%{transform:none}24%{transform:translateX(-1.5px)}28%{transform:translateX(1.5px)}32%{transform:translateX(-1.5px)}36%,100%{transform:none}}
+@keyframes pEdge{0%,14%{opacity:0}22%,52%{opacity:1}70%,100%{opacity:0}}
+@keyframes pCur{0%{opacity:0;transform:translateY(0)}8%{opacity:.95}22%{box-shadow:0 0 0 7px #fff0;transform:translateY(0)}42%{transform:translateY(-14px);opacity:.95}55%,100%{opacity:0;transform:translateY(-16px)}}
+@keyframes xFly{0%,46%{opacity:0;transform:translate(0,0) scale(.7)}52%{opacity:1}84%{opacity:1;transform:translate(70px,-12px) scale(.95) rotate(8deg)}100%{opacity:0;transform:translate(86px,-14px) scale(.3)}}
+.gdemo.kd .xcard{animation-name:xFly2}
+@keyframes xFly2{0%,46%{opacity:0;transform:translate(0,0) scale(.7)}52%{opacity:1}84%{opacity:1;transform:translate(40px,-4px) scale(.95) rotate(8deg)}100%{opacity:0;transform:translate(52px,-4px) scale(.3)}}
+@keyframes pPhone{0%,78%{box-shadow:none;border-color:#ffffff30}86%,94%{box-shadow:0 0 18px 2px #7c6cffcc;border-color:#a596ff}100%{box-shadow:none;border-color:#ffffff30}}
+@keyframes kPress{0%,10%{transform:none;background:#1b1e2b}16%,40%{transform:translateY(3px);box-shadow:0 0 0 #000;background:#4a3fd0;border-color:#a596ff}50%,100%{transform:none;background:#1b1e2b}}
 #fxh{position:fixed;left:50%;top:calc(var(--top,0px) + 70px);transform:translate(-50%,-10px);z-index:99991;pointer-events:none;background:#1c1f2bee;border:1px solid #7c6cff88;color:#fff;font-weight:600;font-size:14px;line-height:1;padding:11px 16px;border-radius:999px;opacity:0;transition:all .2s;white-space:nowrap;box-shadow:0 8px 24px #000a}
 #fxh.on{opacity:1;transform:translate(-50%,0)}
 body.armed #root{animation:armW .16s linear infinite}
@@ -11821,9 +11965,25 @@ html.nosb ::-webkit-scrollbar,html.nosb::-webkit-scrollbar{display:none;width:0;
 #player .top .tt{flex:1;min-width:0;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #player .top .tt small{display:block;color:var(--mu);font-weight:400;font-size:12px}
 #player .stage{position:absolute;inset:0;background:#000}
-#dtf{position:absolute;top:50%;width:34%;height:46%;transform:translateY(-50%);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:#fff;font-weight:700;font-size:15px;pointer-events:none;opacity:0;background:radial-gradient(closest-side,#ffffff2e,transparent);z-index:5}
-#dtf.l{left:0}#dtf.r{right:0}#dtf.on{opacity:1;animation:dtp .65s ease-out}#dtf i{width:34px;height:34px;display:block}#dtf i svg{width:100%;height:100%}
-@keyframes dtp{0%{transform:translateY(-50%) scale(.85)}30%{transform:translateY(-50%) scale(1)}100%{transform:translateY(-50%) scale(1)}}
+#dtf{position:absolute;top:0;bottom:0;width:44%;overflow:hidden;pointer-events:none;opacity:0;z-index:5;color:var(--dta,#fff);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;transition:opacity .25s ease}
+#dtf.l{left:0}#dtf.r{right:0}#dtf.on{opacity:1;transition:none}
+#dtf .bg{position:absolute;top:-30%;bottom:-30%;width:200%;border-radius:50%;background:var(--dtc,#ffffff26)}
+#dtf.l .bg{left:-100%}#dtf.r .bg{right:-100%}
+#dtf.on .bg{animation:dtbg .32s cubic-bezier(.2,.8,.3,1) both}
+#dtf .rp{position:absolute;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;background:var(--dtr,#ffffff59);transform:scale(0)}
+#dtf.on .rp{animation:dtrp .6s ease-out both}
+#dtf .ar{position:relative;display:flex}#dtf.l .ar{flex-direction:row-reverse}
+#dtf .ar svg{width:20px;height:26px;margin:0 -3px;fill:none;stroke:var(--dta,#fff);stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round;opacity:0;filter:var(--dtf,drop-shadow(0 1px 4px #0008))}
+#dtf.l .ar svg{transform:scaleX(-1)}
+#dtf.on .ar svg{animation:dtar .6s ease-out both}#dtf.on .ar svg:nth-child(2){animation-delay:.08s}#dtf.on .ar svg:nth-child(3){animation-delay:.16s}
+#dtf span{position:relative;font-weight:700;font-size:15px;letter-spacing:.01em;text-shadow:var(--dts,0 1px 8px #000a)}
+html[data-pls=neon]{--dtc:#7c6cff47;--dtr:#a99bff80;--dta:#fff}
+html[data-pls=glass]{--dtc:#9fd8ff2b;--dtr:#d8f0ff70;--dta:#fff}
+html[data-pls=glass] #dtf .bg{-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+html[data-pls=solid]{--dtc:#ffffffe6;--dtr:#00000026;--dta:#0d0e13;--dtf:none;--dts:none}
+@keyframes dtbg{from{transform:scale(.6);opacity:0}to{transform:none;opacity:1}}
+@keyframes dtrp{from{transform:scale(0);opacity:.9}to{transform:scale(8);opacity:0}}
+@keyframes dtar{0%{opacity:0}30%{opacity:1}100%{opacity:.22}}
 #player video{position:absolute;inset:0;width:100%;height:100%;background:#000;object-fit:contain}
 .vc{position:absolute;inset:0;transition:opacity .2s}
 .vc.off{opacity:0}.vc.off *,.vc.off .cb,.vc.off .sk,.vc.off .top,.vc.off button,.vc.off input{pointer-events:none!important}  /* поки елементи сховані — кнопки неактивні: перший дотик лише показує їх */
@@ -11869,7 +12029,8 @@ html.nosb ::-webkit-scrollbar,html.nosb::-webkit-scrollbar{display:none;width:0;
 #player.pipon #pipph{display:grid}
 #player.pipon .vc .cb{background:none}
 @keyframes pipPop{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:none}}
-#player.ld .vc #vback,#player.ld .vc #vpp,#player.ld .vc #vfwd{display:none}
+#player.ld .vc #vback,#player.ld .vc #vfwd{position:absolute;left:50%;top:50%;margin:-28px 0 0 -28px;opacity:0;pointer-events:none}
+#player.ld .vc #vpp{position:absolute;left:50%;top:50%;margin:-36px 0 0 -36px;opacity:0;pointer-events:none}
 #player.ld .vc .mid3{justify-content:space-between;padding:0 clamp(18px,8%,96px);gap:0}
 #player.ld .vc .cb.sm{width:68px;height:68px;background:#ffffff14;border:1px solid #ffffff26;animation:pop .32s cubic-bezier(.2,.9,.25,1.15)}
 #player.ld .vc .cb.sm .i{width:32px;height:32px}
@@ -11883,7 +12044,7 @@ html[data-pls] #player.pipon .vc .cb{background:none!important;border-color:tran
 .vc #vback .i,.vc #vfwd .i{width:32px;height:32px}
 html[data-pls] :is(.vc,.plpv) .cb .i{color:inherit}
 html[data-pls] #player.ld .vc .cb.sm,html[data-pls] .plpv .l .cb{background:var(--lb);border:var(--lbd);border-radius:var(--lr);box-shadow:var(--lsh);-webkit-backdrop-filter:var(--lbl);backdrop-filter:var(--lbl);color:var(--lc)}
-html[data-pls] :is(.vc,.plpv) .cb{transition:transform .22s cubic-bezier(.2,.9,.3,1.35),box-shadow .22s,background .2s,filter .2s,border-color .2s;will-change:transform}
+html[data-pls] :is(.vc,.plpv) .cb{transition:transform .22s cubic-bezier(.2,.9,.3,1.35),box-shadow .35s,background .35s,filter .2s,border-color .35s,color .35s,border-radius .35s;will-change:transform}
 @media (hover:hover){html[data-pls] :is(.vc,.plpv) .cb:hover{transform:translateY(-2px) scale(1.08)!important;filter:brightness(1.18)}
 html[data-pls=neon] :is(.vc,.plpv) .cb.big:hover{box-shadow:0 0 0 8px #7c6cff40,0 10px 38px #5b4cffe0,0 0 56px #4c96ff99}
 html[data-pls=glass] :is(.vc,.plpv) .cb:hover{background:#ffffff38;border-color:#ffffff66}
@@ -11908,6 +12069,8 @@ html[data-plb=ep] .vc #vback,html[data-plb=ep] .vc #vfwd{display:none}
 html[data-plb=seek] .plpv .m [data-k=ep],html[data-plb=ep] .plpv .m [data-k=sk],html[data-plb=seek] .plpv .p [data-k=ep],html[data-plb=ep] .plpv .p [data-k=sk]{display:none}
 .pvh{font-size:12px;font-weight:700;letter-spacing:.03em;color:var(--mu);margin:12px 16px 4px;text-transform:uppercase}
 .pvb{padding:0 16px}
+.plpv .pvs.d{height:112px;cursor:pointer;-webkit-user-select:none;user-select:none;touch-action:manipulation}.pvhint{position:relative;font-size:12px;color:#ffffff99;text-align:center;padding:0 32%;line-height:1.35}
+.dtr{display:flex;align-items:center;gap:10px;flex:none}
 #player .top .ib{color:#fff}
 #player .top .ib[data-act=pclose]{width:44px;height:44px;margin:-2px 0 -2px -8px;border-radius:50%;background:none;border:0;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none;filter:drop-shadow(0 1px 5px #000c);transition:background .18s,transform .18s}
 #player .top .ib[data-act=pclose] .i{width:30px;height:30px}
@@ -12584,7 +12747,7 @@ const S = {
   sheet: null, busy: new Set(), checking: false, lookup: null, addErr: '',
   cur: null, // що зараз грає: {id, n}
   net: {state: 'unknown'}, set: {web_inapp: true, site_order: ['aniliberty', 'yummyani', 'animevost', 'animru'], mobile_download: false, auto_next: true, auto_check: true, auto_check_hours: 3, blur_thumbs: false, logging: false, multitask: true, ios_player: false, hide_psave: false, auto_arc: true, show_scrollbar: false}, st: {data: null, t: 0, loading: false},
-  epView: (function () { try { return localStorage.getItem('epv') || 'list'; } catch (e) { return 'list'; } })(), reorder: false, acOpen: false, ac: null,
+  epView: (function () { try { return localStorage.getItem('epv') || 'rm'; } catch (e) { return 'rm'; } })(), reorder: false, acOpen: false, ac: null,
 };
 
 /* ---------- звіти про помилки ---------- */
@@ -12712,10 +12875,11 @@ const ICONS = {
   spinner: '<path d="M12 3a9 9 0 1 0 9 9"/>'
 };
 const FILLED = {play: 1, prev: 1, next: 1, spark: 1};
+function seekStep() { const v = Number(S.set && S.set.seek_step); return v === 5 || v === 15 || v === 20 || v === 30 ? v : 10; }
 function ico(n, cls) {
   const st = FILLED[n] ? ' fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"'
     : ' fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
-  return '<svg class="i' + (n === 'spinner' ? ' spin' : '') + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24"' + st + ' aria-hidden="true">' + ICONS[n] + '</svg>';
+  return '<svg class="i' + (n === 'spinner' ? ' spin' : '') + (cls ? ' ' + cls : '') + '" viewBox="0 0 24 24"' + st + ' aria-hidden="true">' + ((n === 'back10' || n === 'fwd10') && seekStep() !== 10 ? ICONS[n].replace('>10</text>', '>' + seekStep() + '</text>') : ICONS[n]) + '</svg>';
 }
 function fillIcons(root) {
   (root || document).querySelectorAll('[data-ico]').forEach(e => { e.outerHTML = ico(e.dataset.ico); });
@@ -13064,7 +13228,7 @@ function cdAutoCheck(el, diff) {  // таймер дійшов до нуля: с
   const card = el.closest('[data-id]'), r = route(), kid = (card && card.dataset.id) || (r.name === 'detail' ? r.id : '');
   if (!kid || !item(kid) || Date.now() - (CDCHK[kid] || 0) < 150000 || (S.net && S.net.state === 'offline')) return;
   CDCHK[kid] = Date.now();
-  api('/api/check', {id: kid}).then(async j => { await loadLib(); if (j && j.new && j.new.length) toast('Вийшла нова серія: ' + j.new.join(', '), false, 'spark'); }).catch(() => {});
+  api('/api/check', {id: kid}).then(async j => { await loadLib(); if (j && j.new && j.new.length) toastNewEps([{kid, title: (item(kid) || {}).title, new: j.new}], l => 'Вийшла нова серія: ' + l[0].new.join(', ')); }).catch(() => {});
 }
 function tickCd() {
   document.querySelectorAll('.cd').forEach(el => {
@@ -13415,7 +13579,7 @@ async function pollAC(kick) {
     if (prev && j.seq !== prev.seq) {
       await loadLib();
       const f = (j.found || []).slice(-Math.max(1, j.seq - prev.seq));
-      toast('Нові серії: ' + f.map(x => x.title + ' — ' + x.new.join(', ')).join('; ').slice(0, 140), false, 'spark');
+      toastNewEps(f, l => 'Нові серії: ' + l.map(x => x.title + ' — ' + x.new.join(', ')).join('; ').slice(0, 140));
     }
     const st = $('#acstat'); if (st) st.textContent = acStat();
     acBtnSync();
@@ -13567,6 +13731,10 @@ function settingsHTML() {
         <label class="sw"><input type="checkbox" data-set="auto_arc" ${S.set.auto_arc !== false ? 'checked' : ''}></label></div>
       <div class="row"><div class="tx"><b>Сховати «Зберегти для аніме»</b><span class="d">Зміни озвучки й якості діють лише на сеанс.</span></div>
         <label class="sw"><input type="checkbox" data-set="hide_psave" ${S.set.hide_psave === true ? 'checked' : ''}></label></div>
+      <div class="row"><div class="tx"><b>Подвійний ${PC_APP ? 'клік' : 'тап'} по краю</b><span class="d">${PC_APP ? 'Лівий чи правий край: −/+10 с. Оберіть, де це працює.' : 'Лівий чи правий край плеєра: −/+10 с.'}</span></div>
+        <div class="dtr">${PC_APP ? stSel('dtap_pc', dtapWhere(), [['pip', 'Лише PiP'], ['player', 'Лише плеєр'], ['both', 'В обох']], 'Де працює подвійний клік') : ''}<label class="sw"><input type="checkbox" data-set="dtap" ${dtapOn() ? 'checked' : ''}></label></div></div>
+      <div class="row"><div class="tx"><b>Крок перемотки</b><span class="d">Кнопки перемотки, подвійний тап по краю, клавіші J / L та пульт.</span></div>
+        ${stSel('seek_step', String(seekStep()), [['5', '5 с'], ['10', '10 с'], ['15', '15 с'], ['20', '20 с'], ['30', '30 с']], 'Крок перемотки')}</div>
       ${IOS_APP ? `<div class="row"><div class="tx"><b>Плеєр iOS</b><span class="d">Стандартний: PiP, AirPlay, екран блокування.</span></div>
         <label class="sw"><input type="checkbox" data-set="ios_player" ${S.set.ios_player === true ? 'checked' : ''}></label></div>` : ''}
     </div></div>
@@ -13579,6 +13747,7 @@ function settingsHTML() {
       <div class="pvb"><div class="plpv">
         <div class="pvs m"><span class="pvl">Плеєр</span>${plPrevRow(true)}</div>
         <div class="pvr"><div class="pvs l"><span class="pvl">Завантаження</span><button class="cb sm" data-k="ep">${ico('prev')}</button><button class="cb sm" data-k="ep">${ico('next')}</button></div></div>
+        <div class="pvs d" id="pvdt"><span class="pvl">Подвійний ${PC_APP ? 'клік' : 'тап'} по краю</span><div class="pvhint">Спробуйте: двічі торкніться лівого чи правого краю</div></div>
         ${PC_APP ? `<div class="pvs p"><div class="pvt">Серія 1<small>Назва аніме</small></div>${plPrevRow(false)}<div class="pvk"><i></i></div></div>` : ''}
       </div></div>
       <h6 class="pvh">Стиль кнопок</h6>
@@ -13727,6 +13896,20 @@ S.notifs = {items: [], unread: 0};
 function notifFresh(j) {  // з'явилось нове повідомлення про серію — карточки в бібліотеці (33/34, тег «Нова») треба оновити
   const ids = new Set((S.notifs.items || []).map(x => x.id));
   return (j.items || []).some(x => !ids.has(x.id) && x.type === 'new');
+}
+async function toastNewEps(list, fmt) {  // pop-up про нові серії лише якщо повідомлення ще «не побачене» (ні списком, ні раніше pop-up'ом, ні на іншому пристрої)
+  let its = (S.notifs && S.notifs.items) || [];
+  try { const j = await api('/api/notifs'); S.notifs = j; its = j.items || []; } catch (e) {}
+  const show = [], mark = [];
+  for (const x of list) {
+    const eps = (x.new || x.eps || []).map(String);
+    const m = its.filter(n => n.type === 'new' && ((x.kid && n.kid === x.kid) || (!x.kid && n.title === x.title)) && (n.eps || []).some(e => eps.includes(String(e))));
+    if (m.length && m.every(n => n.seen || n.read)) continue;
+    show.push(x); m.forEach(n => mark.push(n.id));
+  }
+  if (!show.length) return;
+  toast(fmt(show), false, 'spark');
+  if (mark.length) api('/api/notifs_seen', {ids: mark}).then(j => { S.notifs = j; }).catch(() => {});
 }
 async function pollNotifs() {
   try {
@@ -15038,6 +15221,7 @@ const A = {
     const b = $('#dvbox'); if (b) { b.dataset.h = ''; paintSync(); }
     clearTimeout(FXDEMO); fxPlay('out', null, k); FXDEMO = setTimeout(() => fxPlay('in', null, k), FXDUR[k] + 900);
   },
+  async xgestpc(el) { try { await api('/api/settings', {xgest_pc: el.dataset.m}); if (S.set) S.set.xgest_pc = el.dataset.m; paintSync(); const b = $('#dvbox'); if (b) { b.dataset.h = ''; paintSync(); } } catch (e) { toast(e.message, true); } },
   async xgest(el) { try { await api('/api/settings', {xgest: el.dataset.m}); if (S.set) S.set.xgest = el.dataset.m; paintSync(); const b = $('#dvbox'); if (b) { b.dataset.h = ''; paintSync(); } } catch (e) { toast(e.message, true); } },
   async dxfer(el) { try { S.sync = await api('/api/sync_xfer', {id: el.dataset.id, mode: el.dataset.x}); paintSync(); } catch (e) { toast(e.message, true); } },
   async dpush(el) {
@@ -15061,10 +15245,7 @@ const A = {
   async dsync(el) { closeSheet(); A.syncnow(); },
   async dremote(el) {
     const id = el.dataset.id, p = peerOf(id);
-    if (!(S.sync && S.sync.rc_out_on)) {  // на цьому пристрої вимкнено керування іншими — пропонуємо ввімкнути одразу
-      if (!(await askConfirm('Увімкнути керування іншими пристроями?', 'Щоб відкрити пульт для «' + (p ? p.name : 'пристрою') + '», на цьому пристрої має бути ввімкнено керування іншими пристроями.', 'Увімкнути'))) return;
-      try { S.set.rc = true; S.set.rc_out = true; await api('/api/settings', {rc: true, rc_out: true}); await syncFetch(); } catch (e) { toast(e.message, true); return; }
-    }
+    if (!(S.sync && S.sync.rc_out_on) || (p && p.rcin === false)) { closeSheet(); return; }
     closeSheet(); rcStart(id); S.rm.manual = false; S.rm.pend = null; location.hash = '#/remote';
     try { const r = await api('/api/sync_pstate', {peer: id}); if (r.state && r.state.denied) toast('На «' + (p ? p.name : 'пристрої') + '» вимкнено керування пультом — увімкніть там у налаштуваннях пристроїв', true); } catch (e) {}
   },
@@ -15221,7 +15402,7 @@ const A = {
     S.busy.delete('alts'); render();
   },
   dtab(el) { S.dtab = el.dataset.t; S.dtabMap[route().id] = S.dtab; if (S.dtab !== 'eps') { S.sel.clear(); S.selMode = false; } render(); },
-  notifs() { openSheet('notifs'); pollNotifs(); },
+  notifs() { openSheet('notifs'); pollNotifs().then(() => api('/api/notifs_seen', {}).then(j => { S.notifs = j; notifBadge(); }).catch(() => {})); },
   async nclear() { try { S.notifs = await api('/api/notifs_clear', {}); renderSheet(); render(); toast('Прочитані повідомлення очищено', false, 'check'); } catch (e) { toast(e.message, true); } },
   async nreadall() { try { S.notifs = await api('/api/notifs_read', {}); renderSheet(); render(); } catch (e) { toast(e.message, true); } },
   async nopen(el) {
@@ -16123,7 +16304,8 @@ document.addEventListener('change', ev => {
     else if (k === 'skip_mode') setOpt('skip_mode', v);
     else if (k === 'vol_max') { setOpt('vol_max', Number(v)); if (volMax() < 200 && volGet() > 100) volApply(100); }
     else if (k === 'recent_min') setOpt('recent_min', Number(v));
-    else if (k === 'pl_style' || k === 'pl_btns') setOpt(k, v);
+    else if (k === 'pl_style' || k === 'pl_btns' || k === 'dtap_pc') setOpt(k, v);
+    else if (k === 'seek_step') setOpt(k, Number(v));
     return;
   }
   if (ev.target.id === 'mobsw') {
@@ -16169,7 +16351,7 @@ let pSaveT = 0, pMarked = false;
 const nativeHls = !!V.canPlayType('application/vnd.apple.mpegurl');
 
 /* ---------- власний PiP на ПК: окреме вікно програми грає відео, а тут плеєр лишається «пультом» ---------- */
-['loadedmetadata', 'canplay', 'playing'].forEach(e => V.addEventListener(e, () => { try { $('#player').classList.remove('ld'); } catch (er) {} }));
+['loadedmetadata', 'canplay', 'playing'].forEach(e => V.addEventListener(e, () => { try { plLd(false); } catch (er) {} }));
 const PCPIP = {on: false, hand: false, hooked: false, loading: false, ready: false, back: false, t: 0, paused: true, vol: false, mine: 0, nxk: ''};
 const PCPIP_CT = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime'), PCPIP_PA = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'paused');
 const pcWv = () => (PC_APP && window.chrome && window.chrome.webview) || null;
@@ -16180,7 +16362,7 @@ function pcPipPayload(t, cur, paused, src, hand) {
   const it = S.cur && item(S.cur.id), i = it ? it.episodes.findIndex(x => x.n === S.cur.n) : -1, ic = {};
   ['play', 'pause', 'prev', 'next', 'back10', 'fwd10', 'vol', 'close', 'fs', 'undo'].forEach(n => { ic[n] = ico(n); });
   PCPIP.nxk = PCPIP.skk = '';
-  return {t, src, cur, paused, hand: !!hand, own: ownVol(), vmax: volMax(), p: volGet(), rate: V.playbackRate, skips, icons: ic, pls: plStyle(), plb: plBtns(), plf: plFx(), ac: getComputedStyle(document.documentElement).getPropertyValue('--ac').trim(),
+  return {t, src, cur, paused, hand: !!hand, own: ownVol(), vmax: volMax(), p: volGet(), rate: V.playbackRate, skips, icons: ic, pls: plStyle(), plb: plBtns(), plf: plFx(), dtp: dtapPip(), sks: seekStep(), ac: getComputedStyle(document.documentElement).getPropertyValue('--ac').trim(),
     title: S.cur ? 'Серія ' + S.cur.n : '', sub: it ? it.title : '', hasPrev: i > 0, hasNext: !!(it && i >= 0 && it.episodes[i + 1])};
 }
 function pcPipHook(on) {  // поки йде PiP, стандартні властивості відео керують вікном PiP: решта коду плеєра (позиція, інтро/аутро, автоперехід) працює без змін
@@ -16405,7 +16587,7 @@ async function play(id, n, startT, _retry) {
   applyPlayerMode(); setNowPlaying(it, e, n);
   $('#ptitle').innerHTML = `Серія ${esc(n)}<small>${esc(it.title)}</small>`;
   syncAuto(); skips = {}; skDone = {}; skSoft = null; skEnded = false; skBack = null; pReset(); paintMarks(); skipBtn(null);
-  $('#player').classList.add('ld');  // поки відео не готове: ховаємо плей/перемотку, серії — більші по боках
+  plLd(true);  // поки відео не готове: ховаємо плей/перемотку, серії — більші по боках
   const msg = $('#pmsg'); msg.classList.remove('hide'); msg.innerHTML = ico('hourglass') + 'Готую відео…';
   V.pause(); V.removeAttribute('src'); V.load();
   pMarked = !!(e && e.watched); pSaveT = 0;
@@ -16600,6 +16782,41 @@ function awayBack() {
 document.addEventListener('visibilitychange', awayBack);
 window.addEventListener('focus', awayBack);
 window.addEventListener('pageshow', awayBack);
+/* перехід кнопок плеєра «завантаження ⇄ відтворення»: кожна кнопка плавно їде/виростає/зменшується на своє місце (з урахуванням стилю та «Кнопки плеєра») */
+function plLd(on) {
+  const pl = $('#player'); if (!pl || pl.classList.contains('ld') === on) return;
+  const m = pl.querySelector('.mid3');
+  let reduce = false; try { reduce = matchMedia('(prefers-reduced-motion:reduce)').matches; } catch (e) {}
+  if (!m || reduce || !m.offsetWidth || pl.classList.contains('pipon') || !m.animate) { pl.classList.toggle('ld', on); return; }
+  const bs = [...m.querySelectorAll('.cb')];
+  const snap = () => bs.map(b => {
+    const cs = getComputedStyle(b), r = b.getBoundingClientRect(), ic = b.querySelector('.i'), ir = ic ? ic.getBoundingClientRect() : null;
+    return {b, r, on: cs.display !== 'none' && cs.opacity !== '0' && r.width > 0, bg: cs.background, bd: cs.border, rad: cs.borderRadius, sh: cs.boxShadow, col: cs.color, bl: cs.backdropFilter || cs.webkitBackdropFilter, iw: ir ? ir.width : 0};
+  });
+  const A = snap(); pl.classList.toggle('ld', on); const B = snap();
+  const mr = m.getBoundingClientRect(), cx = mr.left + mr.width / 2, cy = mr.top + mr.height / 2;
+  A.forEach((a, i) => {
+    const z = B[i], sm = a.b.classList.contains('sm'), pp = a.b.id === 'vpp';
+    const ease = pp ? 'cubic-bezier(.2,.9,.25,1.2)' : 'cubic-bezier(.22,1,.36,1)';
+    if (z.on) {
+      const ox = a.r.width ? a.r.left + a.r.width / 2 : cx, oy = a.r.width ? a.r.top + a.r.height / 2 : cy;
+      const dx = ox - (z.r.left + z.r.width / 2), dy = oy - (z.r.top + z.r.height / 2);
+      const sc = a.on ? a.r.width / z.r.width : (sm ? .3 : .35);
+      z.b.animate(a.on ? [{transform: `translate(${dx}px,${dy}px) scale(${sc})`}, {transform: 'none'}] : [{transform: `translate(${sm ? 0 : dx}px,${sm ? 0 : dy}px) scale(${sc})`, opacity: 0}, {transform: 'none', opacity: 1}],
+        {duration: a.on ? 520 : 460, delay: a.on ? 0 : (pp ? 60 : sm ? 0 : 110), easing: ease, fill: 'backwards'});
+    } else if (a.on) {  // кнопка зникає: лишаємо її копію, що зменшується й розчиняється
+      const c = a.b.cloneNode(true); c.removeAttribute('id'); c.removeAttribute('data-act'); c.setAttribute('aria-hidden', 'true');
+      const ic = c.querySelector('.i');
+      Object.assign(c.style, {position: 'absolute', left: (a.r.left - mr.left) + 'px', top: (a.r.top - mr.top) + 'px', width: a.r.width + 'px', height: a.r.height + 'px', margin: '0', pointerEvents: 'none', opacity: 1, background: a.bg, border: a.bd, borderRadius: a.rad, boxShadow: a.sh, color: a.col, transition: 'none', animation: 'none'});
+      if (a.bl && a.bl !== 'none') { c.style.backdropFilter = a.bl; c.style.webkitBackdropFilter = a.bl; }
+      if (ic && a.iw) { ic.style.width = a.iw + 'px'; ic.style.height = a.iw + 'px'; }
+      m.appendChild(c);
+      const tx = sm ? 0 : cx - (a.r.left + a.r.width / 2), ty = sm ? 0 : cy - (a.r.top + a.r.height / 2);
+      const an = c.animate([{transform: 'none', opacity: 1}, {transform: `translate(${tx}px,${ty}px) scale(.3)`, opacity: 0}], {duration: 300, easing: 'cubic-bezier(.4,0,.8,.4)', fill: 'forwards'});
+      an.onfinish = an.oncancel = () => c.remove(); setTimeout(() => c.remove(), 450);
+    }
+  });
+}
 function stepPlayer(d, auto) {
   if (!S.cur) return;
   const it = item(S.cur.id); const i = it.episodes.findIndex(x => x.n === S.cur.n);
@@ -16670,17 +16887,22 @@ document.addEventListener('click', ev => {
 function plStyle() { const v = S.set && S.set.pl_style; return v === 'glass' || v === 'solid' ? v : 'neon'; }
 function plFx() { return !(S.set && S.set.pl_fx === false); }
 function plBtns() { const v = S.set && S.set.pl_btns; return v === 'seek' || v === 'ep' ? v : 'both'; }
+function seekIcons() {  // після зміни кроку перемотки оновлюємо числа на іконках і підписи
+  const n = seekStep();
+  [['#vback', 'back10', 'Назад'], ['#vfwd', 'fwd10', 'Вперед']].forEach(([q, i, t]) => { const b = $(q); if (b) { b.innerHTML = ico(i); b.setAttribute('aria-label', t + ' ' + n + ' с'); } });
+  document.querySelectorAll('.plpv [data-sk]').forEach(b => { b.innerHTML = ico(b.dataset.sk === 'f' ? 'fwd10' : 'back10'); });
+}
 function plPrevRow(full) {
-  return `<button class="cb sm" data-k="ep">${ico('prev')}</button>${full ? '' : ''}<button class="cb" data-k="sk">${ico('back10')}</button><button class="cb big">${ico('pause')}</button><button class="cb" data-k="sk">${ico('fwd10')}</button><button class="cb sm" data-k="ep">${ico('next')}</button>`;
+  return `<button class="cb sm" data-k="ep">${ico('prev')}</button>${full ? '' : ''}<button class="cb" data-k="sk" data-sk="b">${ico('back10')}</button><button class="cb big">${ico('pause')}</button><button class="cb" data-k="sk" data-sk="f">${ico('fwd10')}</button><button class="cb sm" data-k="ep">${ico('next')}</button>`;
 }
 let PLAPP = '';
 function plApply() {  // стиль і набір кнопок: на всьому застосунку та в PiP
-  const a = plStyle(), b = plBtns(), key = a + '|' + b + '|' + plFx(), H = document.documentElement;
+  const a = plStyle(), b = plBtns(), key = a + '|' + b + '|' + plFx() + '|' + dtapPip() + '|' + seekStep(), H = document.documentElement;
   if (key === PLAPP) return;
-  PLAPP = key; H.dataset.pls = a; H.dataset.plb = b; H.dataset.plfx = plFx() ? '1' : '0';
-  try { if (PCPIP && PCPIP.on) pcPipSend({t: 'pl', pls: a, plb: b, plf: plFx()}); } catch (e) {}
+  PLAPP = key; seekIcons(); H.dataset.pls = a; H.dataset.plb = b; H.dataset.plfx = plFx() ? '1' : '0';
+  try { if (PCPIP && PCPIP.on) pcPipSend({t: 'pl', pls: a, plb: b, plf: plFx(), dtp: dtapPip(), sks: seekStep()}); } catch (e) {}
 }
-function setOpt(k, v) { S.set[k] = v; if (k === 'pl_style' || k === 'pl_btns' || k === 'pl_fx') plApply(); api('/api/settings', {[k]: v}).catch(er => toast(er.message, true)); }
+function setOpt(k, v) { S.set[k] = v; if (k === 'pl_style' || k === 'pl_btns' || k === 'pl_fx' || k === 'dtap' || k === 'dtap_pc' || k === 'seek_step') plApply(); api('/api/settings', {[k]: v}).catch(er => toast(er.message, true)); }
 function win(k) { const w = skips && skips[k]; return w && w.length === 2 && w[1] > w[0] ? w : null; }
 function paintMarks() {
   if (PCPIP.on && !PCPIP.loading) pcPipSend({t: 'skips', skips});
@@ -16872,8 +17094,8 @@ function setNowPlaying(it, e, n) {
     const h = (k, f) => { try { ms.setActionHandler(k, f); } catch (er) {} };
     h('play', () => V.play().catch(() => {})); h('pause', () => V.pause());
     h('previoustrack', () => stepPlayer(-1)); h('nexttrack', () => stepPlayer(1));
-    h('seekbackward', () => { V.currentTime = Math.max(0, V.currentTime - 10); });
-    h('seekforward', () => { V.currentTime = Math.min(V.duration || 1e9, V.currentTime + 10); });
+    h('seekbackward', () => { V.currentTime = Math.max(0, V.currentTime - seekStep()); });
+    h('seekforward', () => { V.currentTime = Math.min(V.duration || 1e9, V.currentTime + seekStep()); });
   } catch (er) {}
 }
 $('#vfs').addEventListener('click', () => {
@@ -17013,22 +17235,32 @@ $('#stage').addEventListener('click', ev => {
   if (ev.target.closest('.skwrap')) return;
   if (ev.target.closest('#pset')) { if (ev.target.id === 'pset') A.psclose(); return; }
   if (ev.target.closest('.cb, .sk, .top, .nxbox, .vsl, #vvp')) { vcShow(); return; }
-  if (PC_APP) { clearTimeout(DT.t); if (ev.detail >= 2) return; DT.t = setTimeout(() => { if (V.paused) V.play().catch(() => {}); else V.pause(); vcShow(); }, 230); return; }  // ПК: клік по відео — пауза/відтворення (як на YouTube), інтерфейс керується мишею
+  if (PC_APP) { clearTimeout(DT.t); if (ev.detail >= 2) { const sd = dtSide(ev); if (sd && dtapMain()) dtGo(sd, ev); return; } DT.t = setTimeout(() => { if (V.paused) V.play().catch(() => {}); else V.pause(); vcShow(); }, 230); return; }  // ПК: клік по відео — пауза/відтворення (як на YouTube), інтерфейс керується мишею
   const toggle = () => { if (VC.classList.contains('off')) vcShow(); else { VC.classList.add('off'); clearTimeout(vcT); } };
   // подвійний тап по лівому/правому боку: −/+10 с без показу меню плеєра; наступні швидкі тапи в той самий бік продовжують перемотку
-  const r = $('#stage').getBoundingClientRect(), fx = (ev.clientX - r.left) / (r.width || 1), side = fx < 0.35 ? -1 : fx > 0.65 ? 1 : 0;
+  const r = $('#stage').getBoundingClientRect(), fx = (ev.clientX - r.left) / (r.width || 1), side = !dtapMain() ? 0 : fx < 0.35 ? -1 : fx > 0.65 ? 1 : 0;
   const now = Date.now();
   if (!side) { DT.n = 0; clearTimeout(DT.t); toggle(); return; }
   if (DT.side === side && now - DT.at < (DT.n ? 550 : 300)) {
-    clearTimeout(DT.t); DT.n++; DT.at = now; DT.acc += 10;
-    V.currentTime = Math.max(0, Math.min(V.duration || 1e9, V.currentTime + side * 10)); vcSync();
-    dtFlash(side, DT.acc);
+    clearTimeout(DT.t); DT.n++; DT.at = now; DT.acc += seekStep();
+    V.currentTime = Math.max(0, Math.min(V.duration || 1e9, V.currentTime + side * seekStep())); vcSync();
+    dtFlash(side, DT.acc, ev);
     return;
   }
   DT.side = side; DT.at = now; DT.n = 0; DT.acc = 0;
   clearTimeout(DT.t); DT.t = setTimeout(toggle, 300);  // одиночний тап збоку — як і раніше показує/ховає меню (з короткою затримкою)
 });
 const DT = {side: 0, at: 0, n: 0, acc: 0, t: 0};
+const dtapOn = () => !(S.set && S.set.dtap === false);
+const dtapWhere = () => { const v = S.set && S.set.dtap_pc; return v === 'player' || v === 'both' ? v : 'pip'; };
+const dtapMain = () => dtapOn() && (!PC_APP || dtapWhere() !== 'pip');  // у плеєрі: iOS — за перемикачем; ПК — якщо обрано «плеєр» чи «обидва»
+const dtapPip = () => PC_APP && dtapOn() && dtapWhere() !== 'player';
+function dtSide(ev) { const r = $('#stage').getBoundingClientRect(), fx = (ev.clientX - r.left) / (r.width || 1); return fx < 0.35 ? -1 : fx > 0.65 ? 1 : 0; }
+function dtGo(side, ev) {  // ПК: подвійний клік по краю — ±10 с, наступні швидкі кліки складаються
+  const now = Date.now(); if (DT.side !== side || now - DT.at > 650) DT.acc = 0;
+  DT.side = side; DT.at = now; DT.acc += seekStep();
+  V.currentTime = Math.max(0, Math.min(V.duration || 1e9, V.currentTime + side * seekStep())); vcSync(); dtFlash(side, DT.acc, ev);
+}
 let osdT = 0;
 function osd(text, icon) {
   let b = $('#osd'); if (!b) { b = document.createElement('div'); b.id = 'osd'; b.className = 'osd'; $('#stage').appendChild(b); }
@@ -17037,7 +17269,7 @@ function osd(text, icon) {
 if (PC_APP) {
   let mmT = 0;
   $('#stage').addEventListener('mousemove', () => { const n = Date.now(); if (n - mmT < 70 || !S.cur) return; mmT = n; vcShow(); });  // ПК: інтерфейс з'являється від руху миші й гасне через кілька секунд спокою
-  $('#stage').addEventListener('dblclick', ev => { if (ev.target.closest('.cb, .sk, .top, .nxbox, .vsl, #vvp, .skwrap, #pset')) return; clearTimeout(DT.t); $('#vfs').click(); });
+  $('#stage').addEventListener('dblclick', ev => { if (ev.target.closest('.cb, .sk, .top, .nxbox, .vsl, #vvp, .skwrap, #pset')) return; if (dtapMain() && dtSide(ev)) return; clearTimeout(DT.t); $('#vfs').click(); });
   document.addEventListener('keydown', ev => {  // гарячі клавіші плеєра (як на YouTube); працюють, лише коли вікно програми в фокусі
     const pl = $('#player'); if (!S.cur || !pl || pl.classList.contains('hide') || ev.ctrlKey || ev.metaKey || ev.altKey || !document.hasFocus()) return;
     const ae = document.activeElement;
@@ -17047,7 +17279,7 @@ if (PC_APP) {
     let used = true;
     if (k === ' ' || k === 'k' || k === 'K' || k === 'л' || k === 'Л') { if (V.paused) V.play().catch(() => {}); else V.pause(); osd(V.paused ? 'Пауза' : 'Відтворення', V.paused ? 'pause' : 'play'); }
     else if (k === 'ArrowLeft') seek(-5); else if (k === 'ArrowRight') seek(5);
-    else if (k === 'j' || k === 'J' || k === 'о' || k === 'О') seek(-10); else if (k === 'l' || k === 'L' || k === 'д' || k === 'Д') seek(10);
+    else if (k === 'j' || k === 'J' || k === 'о' || k === 'О') seek(-seekStep()); else if (k === 'l' || k === 'L' || k === 'д' || k === 'Д') seek(seekStep());
     else if (k === 'ArrowUp' || k === 'ArrowDown') { const p = Math.max(0, Math.min(volMax(), volGet() + (k === 'ArrowUp' ? 5 : -5))); volApply(p); volPaint(); osd('Гучність ' + p + '%', 'vol'); }
     else if (k === 'm' || k === 'M' || k === 'ь' || k === 'Ь') { const p = volGet(); if (p > 0) { VOLPREV = p; volApply(0); } else volApply(VOLPREV || 100); volPaint(); osd(volGet() ? 'Звук увімкнено' : 'Звук вимкнено', 'vol'); }
     else if (/^[0-9]$/.test(k) && V.duration) { V.currentTime = V.duration * Number(k) / 10; vcSync(); osd(k + '0%'); }
@@ -17058,14 +17290,25 @@ if (PC_APP) {
   }, true);
 }
 let dtFT = 0;
-function dtFlash(side, acc) {
-  let b = $('#dtf'); if (!b) { b = document.createElement('div'); b.id = 'dtf'; $('#stage').appendChild(b); }
-  b.className = side < 0 ? 'l' : 'r'; b.innerHTML = `<i>${ico(side < 0 ? 'back10' : 'fwd10')}</i><span>${side < 0 ? '−' : '+'}${acc} с</span>`;
-  void b.offsetWidth; b.classList.add('on'); clearTimeout(dtFT); dtFT = setTimeout(() => { b.classList.remove('on'); DT.acc = 0; }, 650);
+const PVD = {side: 0, at: 0, acc: 0};
+document.addEventListener('click', ev => {  // перегляд у налаштуваннях: можна випробувати подвійний тап по краю
+  const h = ev.target.closest && ev.target.closest('#pvdt'); if (!h) return;
+  const r = h.getBoundingClientRect(), fx = (ev.clientX - r.left) / (r.width || 1), side = fx < 0.4 ? -1 : fx > 0.6 ? 1 : 0; if (!side) return;
+  const n = Date.now();
+  if (PVD.side === side && n - PVD.at < (PVD.acc ? 550 : 320)) { PVD.acc += seekStep(); PVD.at = n; dtFlashX(h, side, PVD.acc, ev); }
+  else { PVD.side = side; PVD.at = n; PVD.acc = 0; }
+});
+function dtFlashX(host, side, acc, ev) {
+  let b = host.querySelector('#dtf'); if (!b) { b = document.createElement('div'); b.id = 'dtf'; host.appendChild(b); }
+  const left = side < 0; b.className = left ? 'l' : 'r';
+  const r = b.getBoundingClientRect(), x = ev ? ev.clientX - r.left : r.width / 2, y = ev ? ev.clientY - r.top : r.height / 2, ch = '<svg viewBox="0 0 16 24"><path d="M4 5l8 7-8 7"/></svg>';
+  b.innerHTML = '<div class="bg"></div><i class="rp" style="left:' + x + 'px;top:' + y + 'px"></i><div class="ar">' + ch + ch + ch + '</div><span>' + (left ? '−' : '+') + acc + ' с</span>';
+  void b.offsetWidth; b.classList.add('on'); clearTimeout(b._t); b._t = setTimeout(() => b.classList.remove('on'), 650);
 }
+function dtFlash(side, acc, ev) { dtFlashX($('#stage'), side, acc, ev); clearTimeout(dtFT); dtFT = setTimeout(() => { DT.acc = 0; }, 650); }
 $('#vpp').addEventListener('click', () => { V.paused ? V.play().catch(() => {}) : V.pause(); });
-$('#vback').addEventListener('click', () => { V.currentTime = Math.max(0, V.currentTime - 10); vcSync(); });
-$('#vfwd').addEventListener('click', () => { V.currentTime = Math.min(V.duration || 1e9, V.currentTime + 10); vcSync(); });
+$('#vback').addEventListener('click', () => { V.currentTime = Math.max(0, V.currentTime - seekStep()); vcSync(); });
+$('#vfwd').addEventListener('click', () => { V.currentTime = Math.min(V.duration || 1e9, V.currentTime + seekStep()); vcSync(); });
 VS.addEventListener('input', () => { seeking = true; vcSync(); clearTimeout(vcT); });
 VS.addEventListener('change', () => { if (V.duration) V.currentTime = VS.value / 100000 * V.duration; seeking = false; vcSync(); vcShow(); });
 ['play', 'pause', 'playing'].forEach(e => V.addEventListener(e, () => { vcIcon(); vcShow(); }));
@@ -17218,6 +17461,14 @@ function devBody() {
     h += '<div class="dvsec">Можливості</div>';
     let hb = '';
     const g = (S.set && S.set.xgest) || 'both';
+    const gp = (S.set && S.set.xgest_pc) || 'both';
+    if (PC_APP) hb += `<div class="dvsub">Як перекидати на телефон</div>
+      <div class="seg" role="tablist">${[['both', 'Обидва'], ['mouse', 'Мишею'], ['key', 'Клавішами']].map(([m, t]) => `<button data-act="xgestpc" data-m="${m}" class="${gp === m ? 'on' : ''}">${t}</button>`).join('')}</div>
+      <div class="dvcard gest ${gp === 'key' ? 'dim' : ''}"><div class="gdemo wide"><div class="gmon"><i class="pbar"></i><i class="pbar"></i><i class="pe"></i><i class="pcu"></i></div><div class="pph"></div><i class="xcard"></i></div>
+      <div class="tx"><b>Затиснути правий край і потягнути вгору</b><span class="d">Натисніть і тримайте мишею правий край вікна посередині — вікно затремтить і засяє. Тоді проведіть мишею вгору: відкрите перелетить на телефон.</span></div></div>
+      <div class="dvcard gest ${gp === 'mouse' ? 'dim' : ''}"><div class="gdemo wide kd"><i class="kc k1">Ctrl</i><i class="kc k2">Shift</i><i class="kc k3">T</i><div class="pph"></div><i class="xcard"></i></div>
+      <div class="tx"><b>Ctrl + Shift + T</b><span class="d">Одна комбінація: вікно коротко засяє, і відкрите перелетить на телефон. T — від «Throw» (кинути); працює в будь-якій розкладці.</span></div></div>
+      `;
     if (!PC_APP) hb += `<div class="dvsub">Жест перекидання</div>
       <div class="seg" role="tablist">${[['both', 'Обидва'], ['top', 'Зверху'], ['edge', 'Справа']].map(([m, t]) => `<button data-act="xgest" data-m="${m}" class="${g === m ? 'on' : ''}">${t}</button>`).join('')}</div>
       <div class="dvcard gest ${g === 'edge' ? 'dim' : ''}"><div class="gdemo"><div class="gph"><i class="gglow"></i><i class="gb b1"></i><i class="gb b2"></i><i class="gb b3"></i><i class="gf"></i></div></div>
@@ -17226,8 +17477,8 @@ function devBody() {
       <div class="tx"><b>Затиснути справа й провести вгору</b><span class="d">Затисніть правий край посередині екрана — він затремтить. Тоді проведіть пальцем угору, щоб перекинути.</span></div></div>
       `;
     const fs = fxStyle();
-    hb += `<div class="dvsub">Анімація передачі</div><div class="fxtiles">${[['blocks', 'Блоки'], ['vortex', 'Вихор'], ['edge', 'Свічення']].map(([k, t]) => `<button class="fxt${fs === k ? ' on' : ''}" data-act="fxsel" data-s="${k}"><div class="fxm v-${k}">${fxMini(k)}</div><span>${t}</span></button>`).join('')}</div>
-      <p class="dvhint">Торкніться, щоб вибрати й побачити приклад. Анімація однакова для надсилання й отримання і синхронізується на всіх ваших пристроях.</p>`;
+    hb += `<div class="dvsub">Анімація передачі</div><div class="fxtiles">${[['blocks', 'Блоки'], ['vortex', 'Вихор'], ['edge', 'Свічення'], ['wave', 'Хвиля'], ['pixel', 'Піксели'], ['portal', 'Портал'], ['beam', 'Промінь'], ['meteor', 'Зорепад'], ['aurora', 'Аврора']].map(([k, t]) => `<button class="fxt${fs === k ? ' on' : ''}" data-act="fxsel" data-s="${k}"><div class="fxm v-${k}">${fxMini(k)}</div><span>${t}</span></button>`).join('')}</div>
+      <p class="dvhint">Торкніться, щоб вибрати й побачити приклад (торкніться екрана під час анімації — вона зупиниться). Анімація однакова для надсилання й отримання і синхронізується на всіх ваших пристроях.</p>`;
     const hoO = !!(S.dvOpen && S.dvOpen.ho);
     h += `<div class="dvcard dvx ${hoO ? 'open' : ''}"><div class="dvxh"><div class="dvxl" data-act="dvx" data-k="ho"><div class="dvic ft">${ico('xfer')}</div><div class="tx"><b>Передача між пристроями</b><span class="d">Перекидайте вкладку, серію з поточного моменту, пошук і прокрутку на інший пристрій. Увімкніть на обох.</span></div></div>
       <button class="dvxc" data-act="dvx" data-k="ho" aria-label="Розгорнути">${ico('chev')}</button><label class="sw"><input type="checkbox" id="hosw" ${y.handoff_on ? 'checked' : ''}></label></div>
@@ -17258,7 +17509,7 @@ function dmenuHTML(s) {
     ${p.online ? `<button data-act="dpx" class="${s.px ? 'xo' : ''}">${ico('download')} Передати налаштування <span class="chv">${ico('chev')}</span></button>
     <div class="px ${s.px ? 'o' : ''}">${[['all', 'Усе'], ['view', 'Вигляд'], ['player', 'Плеєр'], ['library', 'Бібліотека'], ['auto', 'Автоперевірка'], ['sites', 'Сайти й озвучка'], ['device', 'Системні']].map(([m, t]) => `<button data-act="dpush" data-id="${esc(p.id)}" data-sc="${m}">${t}</button>`).join('')}</div>` : ''}
     <div class="xf"><span class="xl">Перекидання на цей пристрій</span><div class="seg sm">${[['std', 'Звичайне'], ['only', 'Єдиний'], ['never', 'Ніколи']].map(([m, t]) => `<button data-act="dxfer" data-id="${esc(p.id)}" data-x="${m}" class="${(p.xfer || 'std') === m ? 'on' : ''}">${t}</button>`).join('')}</div></div>
-    ${p.online ? `<button data-act="dremote" data-id="${esc(p.id)}">${ico('cast')} Відкрити пульт</button>` : ''}
+    ${p.online && S.sync && S.sync.rc_out_on && p.rcin !== false ? `<button data-act="dremote" data-id="${esc(p.id)}">${ico('cast')} Відкрити пульт</button>` : ''}
     <button data-act="drename" data-id="${esc(p.id)}">${ico('edit')} Змінити назву</button>
     <button class="dng" data-act="dunpair" data-id="${esc(p.id)}">${ico('trash')} Відʼєднати</button></div>`;
 }
@@ -17343,6 +17594,12 @@ function closePair() {
 function fxMini(k) {
   if (k === 'vortex') return [0, 90, 180, 270, 45].map((a, n) => `<i class="mw" style="--a:${a}deg;animation-delay:${n * 90}ms"><i class="mv" style="animation-delay:${n * 90}ms"></i></i>`).join('');
   if (k === 'edge') return '<i class="mf"></i>';
+  if (k === 'wave') return '<i class="mrg"></i><i class="mrg" style="animation-delay:.45s"></i><i class="mrg" style="animation-delay:.9s"></i>';
+  if (k === 'pixel') { let h = ''; for (let i = 0; i < 12; i++) h += `<i class="mpx" style="left:${(i % 3) * 33 + 3}%;top:${Math.floor(i / 3) * 25 + 2}%;animation-delay:${(3 - Math.floor(i / 3)) * 140 + (i % 3) * 60}ms"></i>`; return h; }
+  if (k === 'portal') return '<i class="mpt"></i>';
+  if (k === 'beam') return '<i class="mbm"></i><i class="mbm" style="animation-delay:.25s;opacity:.5"></i>';
+  if (k === 'meteor') return [0, 1, 2, 3].map(i => `<i class="mmt" style="left:${5 + i * 12}%;top:${70 - i * 16}%;animation-delay:${i * 300}ms"></i>`).join('');
+  if (k === 'aurora') return '<i class="mau" style="top:30%;background:#2ee6b8"></i><i class="mau" style="top:42%;background:#7c6cff;animation-delay:.4s"></i>';
   return '<i class="mb m1"></i><i class="mb m2"></i><i class="mb m3"></i>';
 }
 // ───────── Окремі налаштування під тип пристрою (утримання / Ctrl+клік) ─────────
@@ -17453,6 +17710,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) peer
 window.addEventListener('pageshow', peersWake); window.addEventListener('focus', peersWake);
 
 // ───────── Перекидання сеансу й пульт ─────────
+function rcPeers() { return (S.sync && S.sync.rc_out_on) ? onlinePeers().filter(p => p.rcin !== false) : []; }  // пульт: лише коли цей пристрій може керувати і той дозволяє керування
 function onlinePeers() { return ((S.sync && S.sync.peers) || []).filter(p => p.online); }
 // куди можна перекинути з цього пристрою: онлайн, не «не передавати», а «лише якщо єдиний» — тільки коли він єдиний онлайн
 function castTargets() {
@@ -17569,7 +17827,7 @@ function rcOpt(a) {  // одразу показуємо результат на�
   RC.hold = Date.now() + 1400;
   const st = RC.st || (RC.st = {});
   if (a === 'pp') { st.paused = !st.paused; const e = $('#rcpp'); if (e) e.innerHTML = ico(st.paused ? 'play' : 'pause'); }
-  else if (a === 'back' || a === 'fwd') { st.t = Math.max(0, Math.min(st.dur || 1e9, (st.t || 0) + (a === 'back' ? -10 : 10))); const c = $('#rcc'); if (c) c.textContent = fmtT(st.t); const sk = $('#rcseek'); if (sk && st.dur) sk.value = Math.round(1000 * st.t / st.dur); }
+  else if (a === 'back' || a === 'fwd') { st.t = Math.max(0, Math.min(st.dur || 1e9, (st.t || 0) + (a === 'back' ? -seekStep() : seekStep()))); const c = $('#rcc'); if (c) c.textContent = fmtT(st.t); const sk = $('#rcseek'); if (sk && st.dur) sk.value = Math.round(1000 * st.t / st.dur); }
   else if (a === 'prev' || a === 'next') { RC.hold = Date.now() + 2200; const e = $('#rcs'); if (e) e.textContent = 'Перемикаю серію…'; const c = $('#rcc'); if (c) c.textContent = '0:00'; const sk = $('#rcseek'); if (sk) sk.value = 0; }
 }
 function rcAct(b) {
@@ -17581,7 +17839,7 @@ function rcAct(b) {
   else if (a === 'stop') { rcCmd('close'); rcStop(); }
   else if (a === 'pp') rcCmd(wasPaused ? 'play' : 'pause');
   else if (a === 'prev') rcCmd('prev'); else if (a === 'next') rcCmd('next');
-  else if (a === 'back') rcCmd('seekby', -10); else if (a === 'fwd') rcCmd('seekby', 10);
+  else if (a === 'back') rcCmd('seekby', -seekStep()); else if (a === 'fwd') rcCmd('seekby', seekStep());
 }
 const RCP = (() => { try { const o = JSON.parse(localStorage.getItem('rcpos') || 'null'); if (o && (o.v === 't' || o.v === 'b') && (o.h === 'l' || o.h === 'r')) return o; } catch (e) {} return {v: 'b', h: 'r'}; })();
 function rcPosSave() { try { localStorage.setItem('rcpos', JSON.stringify(RCP)); } catch (e) {} }
@@ -17608,7 +17866,9 @@ function dockLayout() {  // острівець пульта: кут екрана
   if (v === 'b') { el.style.bottom = Math.round(vh - low + 10) + 'px'; el.style.top = 'auto'; }
   else { el.style.top = Math.round(topEdge + 10) + 'px'; el.style.bottom = 'auto'; }
   if (min) { el.style.left = RCP.h === 'l' ? 'calc(12px + var(--lft,0px))' : 'auto'; el.style.right = RCP.h === 'r' ? 'calc(12px + var(--rgt,0px))' : 'auto'; }
+  else if (PC_APP) { const w = Math.min(520, innerWidth - 24); el.style.width = w + 'px'; el.style.margin = '0'; el.style.left = RCP.h === 'l' ? 'calc(12px + var(--lft,0px))' : 'auto'; el.style.right = RCP.h === 'r' ? 'calc(12px + var(--rgt,0px))' : 'auto'; }
   else { el.style.left = ''; el.style.right = ''; }
+  if (min) { el.style.width = ''; el.style.margin = ''; }
   el.dataset.v = v;
 }
 function rcFlip(el, fn, dur) {  // плавний перескок: показуємо рух від старого місця до нового
@@ -17628,10 +17888,10 @@ setInterval(dockLayout, 600);
   const el = $('#rcbar'); if (!el) return;
   let d = null, sw = null;
   el.addEventListener('pointerdown', ev => {
-    if (el.classList.contains('min')) {
+    if (el.classList.contains('min') || (ev.pointerType === 'mouse' && ev.button === 0 && !ev.target.closest('button,input,a,select,[data-rc]'))) {
       const r = el.getBoundingClientRect(); d = {id: ev.pointerId, x: ev.clientX, y: ev.clientY, l: r.left, t: r.top, moved: false, t0: Date.now(), sv: RCP.v, sh: RCP.h};
       try { el.setPointerCapture(ev.pointerId); } catch (e) {}
-    } else if (!ev.target.closest('button,input,a')) sw = {id: ev.pointerId, x: ev.clientX, y: ev.clientY, done: false};
+    } else if (ev.pointerType !== 'mouse' && !ev.target.closest('button,input,a')) sw = {id: ev.pointerId, x: ev.clientX, y: ev.clientY, done: false};
   });
   el.addEventListener('pointermove', ev => {
     if (d && ev.pointerId === d.id) {
@@ -17641,6 +17901,7 @@ setInterval(dockLayout, 600);
         RC.dragMoved = Date.now();
         const w = el.offsetWidth, hh = el.offsetHeight, bd = dockBounds(), x = Math.max(4, Math.min(innerWidth - w - 4, d.l + dx)), y = Math.max(bd.top + 4, Math.min(bd.low - hh - 4, d.t + dy));  // не заходить на верхню/нижню панелі навіть під час перетягування
         d.lx = ev.clientX - d.x; d.ly = ev.clientY - d.y;
+        if (!el.classList.contains('min')) { el.style.width = w + 'px'; el.style.margin = '0'; }
         el.style.left = x + 'px'; el.style.right = 'auto'; el.style.top = y + 'px'; el.style.bottom = 'auto';
       }
     } else if (sw && ev.pointerId === sw.id && !sw.done) {
@@ -17697,7 +17958,7 @@ setInterval(dockLayout, 600);
   const el = $('#rcbar'); if (!el) return;
   el.addEventListener('click', ev => { ev.stopPropagation(); ev.preventDefault(); });
   let last = 0;
-  const tap = ev => { if (RC.dragging || Date.now() - (RC.dragMoved || 0) < 450) return; const b = ev.target.closest && ev.target.closest('[data-rc]'); if (!b) return; if (ev.type === 'touchend' && ev.cancelable) ev.preventDefault(); if (Date.now() - last < 350) return; last = Date.now(); rcAct(b); };
+  const tap = ev => { if (RC.dragging || Date.now() - (RC.dragMoved || 0) < 450) return; let b = ev.target.closest && ev.target.closest('[data-rc]'); if (!b && ev.type === 'pointerup') { const u = document.elementFromPoint(ev.clientX, ev.clientY); b = u && u.closest && u.closest('[data-rc]'); } if (!b) return; if (ev.type === 'touchend' && ev.cancelable) ev.preventDefault(); if (Date.now() - last < 350) return; last = Date.now(); rcAct(b); };
   el.addEventListener('touchend', tap, {passive: false}); el.addEventListener('pointerup', ev => { if (ev.pointerType === 'mouse') tap(ev); });
   ['touchstart', 'pointerdown'].forEach(t => el.addEventListener(t, ev => ev.stopPropagation()));
 })();
@@ -17905,7 +18166,7 @@ function rmEps() {
 }
 function rmBody() {
   if (!RC.pid) {
-    const ps = (S.sync && S.sync.rc_out_on) ? onlinePeers() : [];
+    const ps = rcPeers();
     return `<div class="rmempty"><div class="rmei">${ico('cast')}</div><b>Пульт не активний</b>
       <span>${ps.length ? 'Оберіть пристрій, яким хочете керувати.' : (S.sync && S.sync.rc_out_on ? 'Немає підключених пристроїв у мережі.' : 'Керування іншими пристроями вимкнено в розділі «Пристрої».')}</span>
       <div class="rmpk">${ps.map(p => `<button class="btn" data-act="rmpick" data-id="${esc(p.id)}">${dico(p.kind)} ${esc(p.name)}</button>`).join('')}</div></div>`;
@@ -18033,7 +18294,7 @@ Object.assign(A, {
   rmpssave() { rcCmd('pssave'); gpHaptic(); if (RC.st && RC.st.ps) { RC.st.ps.dirty = false; rmPsPaint(RC.st, true); } },
   rmnx(el) { rcCmd(el.dataset.c); RC.hold = Date.now() + 900; gpHaptic(); const n = $('#rcnx'); if (n) n.classList.remove('on'); },
   rmleave() { rcCmd('close'); RC.miss = Math.max(RC.miss, 2); RC.hold = 0; gpHaptic(); toast('Закриваю аніме на «' + RC.name + '»', false, 'cast'); },
-  rmpick(el) { if (!(S.sync && S.sync.rc_out_on)) return; S.rm.manual = false; rcStart(el.dataset.id); },
+  rmpick(el) { if (!rcPeers().some(p => p.id === el.dataset.id)) return; S.rm.manual = false; rcStart(el.dataset.id); },
   rmongoing() { S.rm.ongoing = !S.rm.ongoing; $('#rmflt').innerHTML = rmFilters(); rmPaintStrip(); },
   rmtab(el) { S.rm.tab = el.dataset.t; S.rm.grp = null; $('#rmflt').innerHTML = rmFilters(); rmPaintStrip(); },
   rmgrp(el) { S.rm.grp = S.rm.grp === el.dataset.g ? null : el.dataset.g; rmPaintStrip(); const m = groupMembers(el.dataset.g); if (S.rm.grp && m.length && !m.some(x => x.id === S.rm.kid)) { S.rm.kid = m[0].id; S.rm.manual = true; rmPaintStrip(); rmPaintEps(); } },
@@ -18082,12 +18343,14 @@ async function rcPoll() {
   RC.busy = true; RC.busyT = Date.now();
   try {
     if (RC.pid && !(S.sync && S.sync.rc_out_on)) { rcStop(); return; }
+    if (RC.pid && (peerOf(RC.pid) || {}).rcin === false) { rcStop(); return; }  // на тому пристрої вимкнули керування — пульт зникає
     if (RC.pid) {
       if ((RC.drag || RC.vdrag) && Date.now() - (RC.dragT || 0) > 2500) RC.drag = RC.vdrag = false;  // прапорець міг «застрягти», якщо елемент перемалювався під час тягнення — тоді дані пульта замерзали
       if (RC.drag || RC.vdrag) return;
       let st = {};
       try { st = (await rcTO(api('/api/sync_pstate', {peer: RC.pid}))).state || {}; } catch (e) { st = null; }
       if (!RC.pid) return;
+      if (st && st.denied) { rcStop(); return; }
       if (route().name === 'remote') rmDlSync();
       if (st && st.on) { rcSavePos(st); RC.seen = true; RC.miss = 0; RC.lost = false; if (RC.idle) { RC.idle = false; RC.rkey = ''; if (route().name === 'remote') { RC.st = st; rmSoft(); } } rcPaint(st); if (S.cur && RC.auto) rcStop(); return; }
       RC.miss++;
@@ -18101,7 +18364,7 @@ async function rcPoll() {
     }
     if (S.cur || !(S.sync && S.sync.rc_out_on)) return;
     RC.n++; if (RC.n % 3) return;
-    for (const p of onlinePeers()) {
+    for (const p of rcPeers()) {
       try { const st = (await rcTO(api('/api/sync_pstate', {peer: p.id}))).state || {}; if (st.on && !S.cur) { rcStart(p.id, true); rcPaint(st); RC.seen = true; return; } } catch (e) {}
     }
   } finally { RC.busy = false; }
@@ -18144,8 +18407,8 @@ function fxBlocks(kind) {
   }
   return h;
 }
-let FXT = [], FXBUSY = false, FXDEMO = 0;
-const FXDUR = {blocks: 1750, vortex: 2000, edge: 1800};
+let FXT = [], FXBUSY = false, FXDEMO = 0, FXGEN = 0, FXCUR = null, FXSWALLOW = 0;
+const FXDUR = {blocks: 1750, vortex: 2000, edge: 1800, wave: 2000, pixel: 2000, portal: 2000, beam: 2000, meteor: 2000, aurora: 2000};
 /* заокруглення екрана пристрою (pt): світіння по краях має точно лягати в кути екрана, не заходити за них і не лишати зазору */
 const SCR_R = {'375x812': 44, '414x896': 41.5, '390x844': 47.33, '428x926': 53.33, '393x852': 55, '430x932': 55, '402x874': 62, '440x956': 62, '420x912': 62, '360x780': 44, '375x667': 0, '414x736': 0, '320x568': 0, '375x812b': 39,
   '744x1133': 18, '820x1180': 18, '834x1194': 18, '834x1210': 18, '1024x1366': 18, '1032x1376': 18, '768x1024': 0, '810x1080': 0, '834x1112': 0};
@@ -18199,7 +18462,7 @@ function fxLift() {
   FXT.push(setTimeout(() => { b.classList.remove('fxo'); const o = $('#fxs'); if (o) o.remove(); }, 950));
 }
 function fxClear() {
-  FXT.forEach(clearTimeout); FXT = []; FXBUSY = false;
+  FXT.forEach(clearTimeout); FXT = []; FXBUSY = false; FXCUR = null; document.body.classList.remove('fxsk');
   const o = $('#fxs'); if (o) o.remove(); document.body.classList.remove('fxl', 'fxo');
   const el = $('#fx'), v = $('#fxv');
   if (el) { el.className = ''; el.innerHTML = ''; }
@@ -18213,13 +18476,39 @@ function fxMarkup(kind, st) {
     return h;
   }
   if (st === 'edge') return '<i class="edf"></i>';
+  if (st === 'wave') { let h = '<i class="wvk"></i>'; for (let k = 0; k < 5; k++) h += `<i class="wvr" style="--d:${k * 170}ms;border-width:${4 - Math.min(2, k * .5)}px"></i>`; return h; }
+  if (st === 'pixel') {
+    const W = innerWidth, H = innerHeight, cs = Math.max(44, Math.sqrt(W * H / 220)), cols = Math.ceil(W / cs), rows = Math.ceil(H / cs); let h = '';
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const rr = kind === 'out' ? rows - 1 - r : r, d = Math.round(rr * (680 / rows) + Math.random() * 280), hue = 213 + (r * 3 + c * 5) % 34, l = 60 + (r * c) % 14;
+      h += `<i class="pxc" style="left:${Math.round(c * cs)}px;top:${Math.round(r * cs)}px;width:${Math.round(cs) - 4}px;height:${Math.round(cs) - 4}px;--d:${d}ms;background:hsl(${hue} 100% ${l}%)"></i>`;
+    }
+    return h;
+  }
+  if (st === 'beam') { let h = ''; for (let k = 0; k < 4; k++) h += `<i class="bm" style="--d:${k * 140}ms;--o:${k ? .45 : 1}"><i></i></i>`; return h; }
+  if (st === 'meteor') {
+    let h = '';
+    for (let k = 0; k < 18; k++) {
+      const len = 110 + (k * 37) % 150, x = kind === 'out' ? -10 + (k * 29) % 70 : 40 + (k * 29) % 70, y = kind === 'out' ? 35 + (k * 17) % 75 : -10 + (k * 17) % 55;
+      h += `<i class="mtr" style="left:${x}%;top:${y}%;width:${len}px;--d:${(k * 97) % 720}ms;--t:${900 + (k * 53) % 400}ms"></i>`;
+    }
+    return h;
+  }
+  if (st === 'aurora') return '<i class="aur a1"></i><i class="aur a2"></i><i class="aur a3"></i><i class="auc"></i>';
+  if (st === 'portal') {
+    let h = '<i class="ptc"></i><i class="ptl"></i>';
+    for (let k = 0; k < 18; k++) h += `<i class="pts" style="--a:${(k * 137) % 360}deg;--r:${24 + (k * 7) % 22};--d:${(k % 9) * 70}ms"></i>`;
+    return h;
+  }
   return fxBlocks(kind);
 }
 // kind: 'out' — відправник, 'in' — отримувач, 'fail' — червоний спалах «немає куди»; swap() виконується під розмиттям (зміна вкладки)
 function fxPlay(kind, swap, styleOv) {
   const el = $('#fx'), v = $('#fxv');
   if (!el) { try { swap && swap(); } catch (e) {} return; }
-  fxClear(); FXBUSY = true;
+  fxClear(); FXBUSY = true; const gen = ++FXGEN;
+  let swapped = false; const doSwap = () => { if (swapped) return; swapped = true; try { return swap && swap(); } catch (e) {} };
+  FXCUR = {kind, doSwap, skipped: false};
   const st = kind === 'fail' ? 'edge' : (styleOv || fxStyle());
   el.innerHTML = fxMarkup(kind, st); void el.offsetWidth; el.className = 'k-' + kind + ' s-' + st;
   const t = (f, ms) => FXT.push(setTimeout(f, ms));
@@ -18228,14 +18517,31 @@ function fxPlay(kind, swap, styleOv) {
   if (!snap && v) { v.classList.toggle('lite', kind === 'out'); v.classList.add('on'); }
   const T = FXDUR[st], t0 = Date.now(), at = kind === 'in' ? 750 : 560;
   t(async () => {
-    try { if (swap) await Promise.race([Promise.resolve(swap()), new Promise(r => setTimeout(r, 4500))]); } catch (e) {}
+    try { if (swap) await Promise.race([Promise.resolve(doSwap()), new Promise(r => setTimeout(r, 4500))]); } catch (e) {}
+    if (gen !== FXGEN) return;  // анімацію пропустили
     const left = Math.max(300, T - (Date.now() - t0));
     await new Promise(r => setTimeout(r, 140));
+    if (gen !== FXGEN) return;
     t(() => { if (v) v.classList.remove('on'); if (snap) { fxLift(); t(fxClear, 1000); } else t(fxClear, 650); }, left);
   }, at);
   t(fxClear, 14000);
 }
+function fxSkip() {  // торкнулися екрана під час анімації: одразу її завершуємо (саму передачу/перехід не скасовуємо)
+  if (!FXBUSY || !FXCUR || FXCUR.skipped || FXCUR.kind === 'fail') return false;
+  FXCUR.skipped = true; FXGEN++; FXT.forEach(clearTimeout); FXT = []; clearTimeout(FXDEMO);
+  try { FXCUR.doSwap(); } catch (e) {}
+  document.body.classList.add('fxsk');
+  const v = $('#fxv'); if (v) v.classList.remove('on');
+  if ($('#fxs')) { fxLift(); FXT.push(setTimeout(fxClear, 1000)); } else FXT.push(setTimeout(fxClear, 320));
+  FXSWALLOW = Date.now() + 450;
+  return true;
+}
+document.addEventListener('pointerdown', ev => { if (FXBUSY && fxSkip()) { ev.stopPropagation(); } }, true);
+document.addEventListener('click', ev => { if (Date.now() < FXSWALLOW) { ev.stopPropagation(); ev.preventDefault(); } }, true);
 function thArm() {
+  if (!castTargets().length) {  // нема онлайн-пристрою — показуємо це одразу, як тільки утримання розпізнано, а не після свайпу
+    gpHaptic(); fxPlay('fail'); toast('Зараз немає пристрою, на який можна перекинути', true); return;
+  }
   TH.armed = true; gpHaptic(); GP.t = Date.now();
   document.body.classList.add('armed'); try { getSelection().removeAllRanges(); } catch (e) {}
   const el = $('#fx'); if (el) { el.innerHTML = '<i class="fxg"></i>'; el.className = 'arm'; }
@@ -18277,6 +18583,30 @@ document.addEventListener('touchmove', ev => {
   if (TH.t && Math.hypot(t.clientX - TH.sx, t.clientY - TH.sy) > 10) { clearTimeout(TH.t); TH.t = 0; }
 }, {passive: false, capture: true});
 ['touchend', 'touchcancel'].forEach(t => document.addEventListener(t, thReset, true));
+if (PC_APP) {  // ПК: те саме, що на телефоні, але мишею (правий край → вгору) або комбінацією Ctrl+Shift+T
+  const xgp = () => { const v = S.set && S.set.xgest_pc; return v === 'mouse' || v === 'key' ? v : 'both'; };
+  document.addEventListener('pointerdown', ev => {
+    thReset();
+    if (ev.pointerType !== 'mouse' || ev.button !== 0 || S.sheet || PR.open || !thReady() || xgp() === 'key') return;
+    if (!(ev.clientX > innerWidth - 40 && ev.clientX < innerWidth - 8 && ev.clientY > innerHeight * .25 && ev.clientY < innerHeight * .75)) return;
+    if (ev.target.closest && ev.target.closest('button,input,select,textarea,.sheet,#rcbar,video,.rzh,.vc')) return;
+    TH.mode = 'edge'; TH.sx = ev.clientX; TH.sy = ev.clientY; document.body.classList.add('thz');
+    TH.t = setTimeout(() => { TH.t = 0; thArm(); }, 380);
+  }, true);
+  document.addEventListener('pointermove', ev => {
+    if (ev.pointerType !== 'mouse') return;
+    if (TH.armed) { if (TH.mode === 'edge' && TH.sy - ev.clientY > 45) thFire(); return; }
+    if (TH.t && Math.hypot(ev.clientX - TH.sx, ev.clientY - TH.sy) > 10) { clearTimeout(TH.t); TH.t = 0; document.body.classList.remove('thz'); }
+  }, true);
+  ['pointerup', 'pointercancel'].forEach(t => document.addEventListener(t, ev => { if (ev.pointerType === 'mouse') thReset(); }, true));
+  document.addEventListener('keydown', ev => {
+    if (ev.code !== 'KeyT' || !ev.ctrlKey || !ev.shiftKey || ev.altKey || ev.repeat || xgp() === 'mouse') return;
+    ev.preventDefault();
+    if (S.sheet || PR.open) return;
+    if (!thReady()) { castPick('handoff'); return; }
+    TH.mode = 'top'; thArm(); const hh = $('#fxh'); if (hh) hh.textContent = 'Перекидаю на телефон…';  // коротке «тремтіння» і спалах → перекидання за 0.7 с
+  }, true);
+}
 function diagSend(ev) {
   try {
     const b = {player: !!S.cur, plays: PLAYS, hash: location.hash, lib: (S.items || []).length, imgs: Object.keys(JG_IMGS).length};
