@@ -532,6 +532,9 @@ async def _inset_loop(app, wv, view):
     import json
     from anisyns import anime_app
     last, tick, ka = None, 0, _KeepAlive()
+    act_since, last_rl = 0.0, 0.0
+    from rubicon.objc import ObjCClass as ObjCClass_
+    NSURLRequest_, NSURL_ = ObjCClass_('NSURLRequest'), ObjCClass_('NSURL')
     isl_last, isl_t, isl_port = None, 0.0, None
     cap_last, cap_n = None, 0
     while True:
@@ -588,6 +591,22 @@ async def _inset_loop(app, wv, view):
             if cur != last or tick % 10 == 0:
                 last = cur
                 wv.evaluateJavaScript('window.__insets&&window.__insets(%d,%d,%d,%d)' % cur, completionHandler=None)
+        except Exception:
+            pass
+        try:  # сторожа WebView: застосунок активний, а сторінка мовчить (її JS шле пульс кожні 3 с) — WebView завис (після PiP/фону/аудіо-переривання) і не реагує на дотики; перезавантажуємо
+            import time as _tw
+            nw = _tw.time()
+            st_ = int(ObjCClass_('UIApplication').sharedApplication.applicationState)
+            if st_ == 0:
+                if not act_since:
+                    act_since = nw
+            else:
+                act_since = 0
+            pt = anime_app.PULSE[0]
+            if act_since and pt > 0 and nw - act_since > 12 and nw - max(pt, act_since) > 12 and nw - last_rl > 45:
+                last_rl = nw
+                act_since = nw
+                wv.loadRequest(NSURLRequest_.requestWithURL(NSURL_.URLWithString('http://127.0.0.1:%d/' % int(anime_app.PORT))))
         except Exception:
             pass
         try:

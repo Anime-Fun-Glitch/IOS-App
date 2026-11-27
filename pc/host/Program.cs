@@ -49,6 +49,31 @@ namespace AniSyns
         }
     }
 
+    // Зміна розміру керується сторінкою (миша захоплена нею), тому власний курсор resize не зникає, як при системному циклі WM_NCLBUTTONDOWN
+    class Rz
+    {
+        Form f; int ht; Point p0; Rectangle r0; double ratio; Size min; public bool On;
+        public void Start(Form form, int hit, double rt, Size mn) { f = form; ht = hit; p0 = Cursor.Position; r0 = form.Bounds; ratio = rt; min = mn; On = true; }
+        public void Stop() { On = false; }
+        public void Move()
+        {
+            if (!On || f == null || f.IsDisposed) return;
+            var p = Cursor.Position; int dx = p.X - p0.X, dy = p.Y - p0.Y;
+            int l = r0.Left, t = r0.Top, r = r0.Right, b = r0.Bottom;
+            bool eL = ht == 10 || ht == 13 || ht == 16, eR = ht == 11 || ht == 14 || ht == 17, eT = ht == 12 || ht == 13 || ht == 14, eB = ht == 15 || ht == 16 || ht == 17;
+            if (eL) l += dx; if (eR) r += dx; if (eT) t += dy; if (eB) b += dy;
+            int w = Math.Max(min.Width, r - l), h = Math.Max(min.Height, b - t);
+            if (ratio > 0)
+            {
+                if (ht == 12 || ht == 15) w = (int)(h * ratio); else h = (int)(w / ratio);
+                if (w < min.Width) { w = min.Width; h = (int)(w / ratio); }
+                if (h < min.Height) { h = min.Height; w = (int)(h * ratio); }
+            }
+            int nl = eL ? r0.Right - w : r0.Left, nt = eT ? r0.Bottom - h : r0.Top;
+            f.SetBounds(nl, nt, w, h);
+        }
+    }
+
     static class Wv
     {
         // WebView2 не завжди дізнається, що батьківське вікно змінило місце/розмір (розгорнути → повернути): повідомляємо явно
@@ -245,6 +270,7 @@ namespace AniSyns
         }
 
         FormWindowState lastWs = FormWindowState.Normal;
+        readonly Rz rz = new Rz();
 
         // Повна перебудова після зміни стану вікна (розгорнути/повернути): розмір WebView, відступи, кути, стан сторінки
         void Reconcile()
@@ -350,7 +376,9 @@ namespace AniSyns
                     else if (msg == "pipclose") { if (pip != null && !pip.IsDisposed) { pip.Silent = true; pip.Close(); } }
                     else if (msg == "front") { if (WindowState == FormWindowState.Minimized) ShowWindow(Handle, 9); Activate(); }
                     else if (msg != null && msg.StartsWith("pip>")) { try { if (pip != null && !pip.IsDisposed && pip.wv.CoreWebView2 != null) pip.wv.CoreWebView2.ExecuteScriptAsync("window.__pipIn&&window.__pipIn(" + msg.Substring(4) + ")"); } catch { } }
-                    else if (msg != null && msg.StartsWith("rz:") && !full && WindowState == FormWindowState.Normal) { int ht; if (int.TryParse(msg.Substring(3), out ht) && ht >= 10 && ht <= 17) { ReleaseCapture(); SendMessage(Handle, 0xA1, (IntPtr)ht, IntPtr.Zero); } }
+                    else if (msg != null && msg.StartsWith("rzs:") && !full && WindowState == FormWindowState.Normal) { int ht; if (int.TryParse(msg.Substring(4), out ht) && ht >= 10 && ht <= 17) rz.Start(this, ht, 0, MinimumSize); }
+                    else if (msg == "rzm") rz.Move();
+                    else if (msg == "rze") rz.Stop();
                     else if (msg == "drag" && !full) { ReleaseCapture(); SendMessage(Handle, 0xA1, (IntPtr)2, IntPtr.Zero); }  // WM_NCLBUTTONDOWN, HTCAPTION
                 };
                 c.NavigationCompleted += (s, e) =>
@@ -504,6 +532,7 @@ namespace AniSyns
         public Action<string> Msg;
         public bool Silent;
         double ratio = 16.0 / 9;
+        readonly Rz rz = new Rz();
         readonly CoreWebView2Environment env;
         readonly string url;
         static readonly string Cfg = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AniSyns", "pip.txt");
@@ -572,7 +601,9 @@ namespace AniSyns
                     string m = e.TryGetWebMessageAsString();
                     if (m == null) return;
                     if (m == "pipdrag") { ReleaseCapture(); SendMessage(Handle, 0xA1, (IntPtr)2, IntPtr.Zero); }
-                    else if (m.StartsWith("rz:")) { int ht; if (int.TryParse(m.Substring(3), out ht) && ht >= 10 && ht <= 17) { ReleaseCapture(); SendMessage(Handle, 0xA1, (IntPtr)ht, IntPtr.Zero); } }
+                    else if (m.StartsWith("rzs:")) { int ht; if (int.TryParse(m.Substring(4), out ht) && ht >= 10 && ht <= 17) rz.Start(this, ht, ratio, MinimumSize); }
+                    else if (m == "rzm") rz.Move();
+                    else if (m == "rze") rz.Stop();
                     else if (m.StartsWith("ar:"))
                     {
                         double r;

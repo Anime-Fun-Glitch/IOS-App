@@ -35,6 +35,7 @@ BASE_DIR = '.'  # папка з відео, library.json і кешем обкл�
 PORT = 8765
 HOST = '127.0.0.1'
 INDEX_SERVED = [0.0]
+PULSE = [0.0]  # останній «пульс» сторінки (JS живий): якщо застосунок активний, а пульсу нема — WebView завис, обгортка його перезавантажить
 READY = [0.0]  # коли сторінка вперше намалювалась (сигнал для iPhone-обгортки)
 IOS_APP = False  # true, коли працює всередині iPhone-застосунку (див. app.py): тоді сторінка сама враховує вирізи екрана
 PC_APP = False  # true, коли працює всередині ПК-застосунку (вікно WebView2, див. pc/): сторінка вмикає режим ПК (data-pc)
@@ -53,7 +54,7 @@ def api_npframe(b):
 # курсори ПК-застосунку (Bevel-Edge): SVG, віддаються на /cur/<назва>.svg
 CURSORS = {'default': '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="g1" x1="0.904" y1="0.45" x2="27.144" y2="26.69" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#d6d8f6"/></linearGradient><linearGradient id="g2" x1="0.904" y1="0.45" x2="27.144" y2="26.69" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#a99cff"/><stop offset="1" stop-color="#5e4cc8"/></linearGradient></defs><polygon points="4.184,2.5 4.184,21.36 9.104,16.85 12.548,24.23 15.828,22.754 12.384,15.538 19.354,15.21" fill="url(#g1)" stroke="url(#g2)" stroke-width="1.312" stroke-linejoin="round"/></svg>', 'pointer': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><path d="M10.5 5.25 A2.25 2.25 0 0 1 15 5.25 V12.5 V16.5 V12.5 A2.25 2.25 0 0 1 19.5 12.5 V17 V13.3 A2.25 2.25 0 0 1 24 13.3 V17.5 V14.8 A1.75 1.75 0 0 1 27.5 14.8 V21 C27.5 25.5 24.5 28.5 20.5 28.5 H17 C14.5 28.5 12.8 27.4 11.5 25.6 L5.3 18 C4.7 17.2 4.9 16.1 5.7 15.6 C6.5 15.1 7.6 15.3 8.2 16 L10.5 19 Z" fill="url(#f)" stroke="url(#s)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></g></svg>', 'text': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)" transform="translate(16 16) scale(.78) translate(-16 -16)"><path d="M10 4.5 H22 Q17.4 5.2 17.2 9 V23 Q17.4 26.8 22 27.5 H10 Q14.6 26.8 14.8 23 V9 Q14.6 5.2 10 4.5 Z" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><path d="M10 4.5 H22 Q17.4 5.2 17.2 9 V23 Q17.4 26.8 22 27.5 H10 Q14.6 26.8 14.8 23 V9 Q14.6 5.2 10 4.5 Z" fill="url(#f)"/></g></svg>', 'wait': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><circle cx="16" cy="16" r="9" fill="none" stroke="url(#s)" stroke-width="4.8"/><circle cx="16" cy="16" r="9" fill="none" stroke="#F1F2FF" stroke-opacity=".28" stroke-width="2.8"/><circle cx="16" cy="16" r="9" fill="none" stroke="#F1F2FF" stroke-width="2.8" stroke-linecap="round" stroke-dasharray="17.0 39.6"><animateTransform attributeName="transform" type="rotate" from="0 16 16" to="360 16 16" dur="0.9s" repeatCount="indefinite"/></circle></g></svg>', 'progress': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><path transform="translate(.3 .3) scale(.82)" d="M4 2.5 L4 25.5 L10 20 L14.2 29 L18.2 27.2 L14 18.4 L22.5 18 Z" fill="url(#f)" stroke="url(#s)" stroke-width="1.6" stroke-linejoin="round"/><circle cx="23.5" cy="23.5" r="4.2" fill="none" stroke="url(#s)" stroke-width="3.8"/><circle cx="23.5" cy="23.5" r="4.2" fill="none" stroke="#F1F2FF" stroke-opacity=".28" stroke-width="1.8"/><circle cx="23.5" cy="23.5" r="4.2" fill="none" stroke="#F1F2FF" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="7.9 18.5"><animateTransform attributeName="transform" type="rotate" from="0 23.5 23.5" to="360 23.5 23.5" dur="0.9s" repeatCount="indefinite"/></circle></g></svg>', 'help': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><path transform="translate(.3 .3) scale(.82)" d="M4 2.5 L4 25.5 L10 20 L14.2 29 L18.2 27.2 L14 18.4 L22.5 18 Z" fill="url(#f)" stroke="url(#s)" stroke-width="1.6" stroke-linejoin="round"/><circle cx="23.5" cy="23.5" r="5.2" fill="url(#f)" stroke="url(#s)" stroke-width="1.1"/><path d="M21.4 21.8 C21.4 19.6 25.6 19.6 25.6 21.8 C25.6 23.3 23.5 23.3 23.5 24.8" fill="none" stroke="url(#s)" stroke-width="1.5" stroke-linecap="round"/><circle cx="23.5" cy="27" r=".9" fill="url(#s)"/></g></svg>', 'crosshair': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><path fill-rule="evenodd" d="M14.8 4 H17.2 V14.8 H28 V17.2 H17.2 V28 H14.8 V17.2 H4 V14.8 H14.8 Z" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><path fill-rule="evenodd" d="M14.8 4 H17.2 V14.8 H28 V17.2 H17.2 V28 H14.8 V17.2 H4 V14.8 H14.8 Z" fill="url(#f)"/></g></svg>', 'not-allowed': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><path transform="translate(.3 .3) scale(.82)" d="M4 2.5 L4 25.5 L10 20 L14.2 29 L18.2 27.2 L14 18.4 L22.5 18 Z" fill="url(#f)" stroke="url(#s)" stroke-width="1.6" stroke-linejoin="round"/><circle cx="23.5" cy="23.5" r="5.8" fill="url(#s)"/><circle cx="23.5" cy="23.5" r="4" fill="url(#f)" stroke="#FF7A98" stroke-width="1.9"/><path d="M20.7 20.7 L26.3 26.3" stroke="#FF7A98" stroke-width="1.9" stroke-linecap="round"/></g></svg>', 'resize-ns': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><polygon points="16 3 20.8 9.8 11.2 9.8" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 29 20.8 22.2 11.2 22.2" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><rect x="14.8" y="9" width="2.4" height="14" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 3 20.8 9.8 11.2 9.8" fill="url(#f)"/><polygon points="16 29 20.8 22.2 11.2 22.2" fill="url(#f)"/><rect x="14.8" y="9" width="2.4" height="14" fill="url(#f)"/></g></svg>', 'resize-ew': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><g transform="rotate(90 16 16)"><polygon points="16 3 20.8 9.8 11.2 9.8" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 29 20.8 22.2 11.2 22.2" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><rect x="14.8" y="9" width="2.4" height="14" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 3 20.8 9.8 11.2 9.8" fill="url(#f)"/><polygon points="16 29 20.8 22.2 11.2 22.2" fill="url(#f)"/><rect x="14.8" y="9" width="2.4" height="14" fill="url(#f)"/></g></g></svg>', 'resize-nesw': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><g transform="rotate(45 16 16)"><polygon points="16 3 20.8 9.8 11.2 9.8" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 29 20.8 22.2 11.2 22.2" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><rect x="14.8" y="9" width="2.4" height="14" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 3 20.8 9.8 11.2 9.8" fill="url(#f)"/><polygon points="16 29 20.8 22.2 11.2 22.2" fill="url(#f)"/><rect x="14.8" y="9" width="2.4" height="14" fill="url(#f)"/></g></g></svg>', 'resize-nwse': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><g transform="rotate(-45 16 16)"><polygon points="16 3 20.8 9.8 11.2 9.8" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 29 20.8 22.2 11.2 22.2" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><rect x="14.8" y="9" width="2.4" height="14" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 3 20.8 9.8 11.2 9.8" fill="url(#f)"/><polygon points="16 29 20.8 22.2 11.2 22.2" fill="url(#f)"/><rect x="14.8" y="9" width="2.4" height="14" fill="url(#f)"/></g></g></svg>', 'move': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><polygon points="16 2.5 20.2 8 11.8 8" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 29.5 20.2 24 11.8 24" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="2.5 16 8 11.8 8 20.2" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="29.5 16 24 11.8 24 20.2" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><rect x="14.8" y="8" width="2.4" height="16" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><rect x="8" y="14.8" width="16" height="2.4" fill="url(#s)" stroke="url(#s)" stroke-width="2.6" stroke-linejoin="round"/><polygon points="16 2.5 20.2 8 11.8 8" fill="url(#f)"/><polygon points="16 29.5 20.2 24 11.8 24" fill="url(#f)"/><polygon points="2.5 16 8 11.8 8 20.2" fill="url(#f)"/><polygon points="29.5 16 24 11.8 24 20.2" fill="url(#f)"/><rect x="14.8" y="8" width="2.4" height="16" fill="url(#f)"/><rect x="8" y="14.8" width="16" height="2.4" fill="url(#f)"/></g></svg>', 'grab': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><path d="M11 18.5 V7.5 A2 2 0 0 1 15 7.5 V12 V5.5 A2 2 0 0 1 19 5.5 V12 V7 A2 2 0 0 1 23 7 V13 V10 A2 2 0 0 1 27 10 V19 C27 25.5 23.5 28.5 19.5 28.5 H17 C14 28.5 12 27 10.5 24.8 L5.2 17 C4.7 16.2 4.9 15.2 5.7 14.7 C6.5 14.2 7.5 14.4 8.1 15.1 L11 18.5 Z" fill="url(#f)" stroke="url(#s)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></g></svg>', 'grabbing': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><rect x="5.2" y="14.8" width="10" height="6" rx="3" transform="rotate(-24 10 17.8)" fill="url(#f)" stroke="url(#s)" stroke-width="1.6"/><path d="M8.5 14.5 A2.2 2.2 0 0 1 12.9 14.5 V19 V14.5 A2.2 2.2 0 0 1 17.3 14.5 V19 V14.5 A2.2 2.2 0 0 1 21.7 14.5 V19 V14.5 A2.2 2.2 0 0 1 26.1 14.5 V21 C26.1 25.5 23.2 28.5 19.2 28.5 H15.5 C11.8 28.5 8.5 26 8.5 22 Z" fill="url(#f)" stroke="url(#s)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></g></svg>', 'zoom-in': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><circle cx="13" cy="13" r="7.6" fill="rgba(238,240,255,.12)" stroke="url(#s)" stroke-width="5.2"/><path d="M19.3 19.3 L26.5 26.5" stroke="url(#s)" stroke-width="5.4" stroke-linecap="round"/><circle cx="13" cy="13" r="7.6" fill="none" stroke="url(#f)" stroke-width="2.6"/><path d="M19.3 19.3 L26.5 26.5" stroke="url(#f)" stroke-width="2.8" stroke-linecap="round"/><path d="M9.8 13 H16.2 M13 9.8 V16.2" stroke="#F1F2FF" stroke-width="1.5" stroke-linecap="round"/></g></svg>', 'zoom-out': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><circle cx="13" cy="13" r="7.6" fill="rgba(238,240,255,.12)" stroke="url(#s)" stroke-width="5.2"/><path d="M19.3 19.3 L26.5 26.5" stroke="url(#s)" stroke-width="5.4" stroke-linecap="round"/><circle cx="13" cy="13" r="7.6" fill="none" stroke="url(#f)" stroke-width="2.6"/><path d="M19.3 19.3 L26.5 26.5" stroke="url(#f)" stroke-width="2.8" stroke-linecap="round"/><path d="M9.8 13 H16.2" stroke="#F1F2FF" stroke-width="1.5" stroke-linecap="round"/></g></svg>', 'copy': '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><defs><linearGradient id="f" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D6D8F6"/></linearGradient><linearGradient id="s" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="32" y2="32"><stop offset="0" stop-color="#A99CFF"/><stop offset="1" stop-color="#5E4CC8"/></linearGradient><filter id="g" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="0" dy="0" stdDeviation="1" flood-color="#8B7CF6" flood-opacity=".55"/></filter></defs><g filter="url(#g)"><path transform="translate(.3 .3) scale(.82)" d="M4 2.5 L4 25.5 L10 20 L14.2 29 L18.2 27.2 L14 18.4 L22.5 18 Z" fill="url(#f)" stroke="url(#s)" stroke-width="1.6" stroke-linejoin="round"/><rect x="16.5" y="16.5" width="8" height="8" rx="1.8" fill="url(#f)" stroke="url(#s)" stroke-width="1.5"/><rect x="20.5" y="20.5" width="8" height="8" rx="1.8" fill="url(#f)" stroke="url(#s)" stroke-width="1.5"/></g></svg>'}
 
-PIP_HTML = r'''<!doctype html><html lang="uk"><head><meta charset="utf-8"><title>AniSyns</title>
+PIP_HTML = r'''<!doctype html><html lang="uk" data-pls="neon" data-plb="both" data-plfx="1"><head><meta charset="utf-8"><title>AniSyns</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--ac:#8b7bff;--tx:#eef0f7;--mu:#8d92a8;--op:#ffb020;--ed:#38c6ff}
@@ -127,6 +128,16 @@ body.show .sk,body.paused .sk{transform:none}
 body.wait .ld{opacity:1}
 body.wait .mid .cb.big{opacity:0}
 @keyframes sp{to{transform:rotate(360deg)}}
+html[data-pls=glass]{--sb:#ffffff1f;--sbd:1px solid #ffffff2e;--sr:50%;--ssh:0 6px 20px #0006,inset 0 1px 0 #ffffff33;--sbl:blur(14px);--sc:#fff;--mb:#ffffff2e;--mbd:1px solid #ffffff3d;--mr:50%;--msh:0 8px 26px #0007,inset 0 1px 0 #ffffff44;--mc:#fff;--mk:1;--lb:#ffffff26;--lbd:1px solid #ffffff47;--lr:28px;--lsh:0 10px 30px #0008,inset 0 1px 0 #ffffff4d;--lbl:blur(22px);--lc:#fff}
+html[data-pls=neon]{--sb:#7c6cff29;--sbd:1px solid #7c6cff73;--sr:16px;--ssh:none;--sbl:none;--sc:#e4e0ff;--mb:linear-gradient(145deg,#8b7bff,#4c96ff);--mbd:0;--mr:50%;--msh:0 0 0 6px #7c6cff2e,0 8px 30px #5b4cffb3,0 0 44px #4c96ff66;--mc:#fff;--mk:1.17;--lb:linear-gradient(145deg,#8b7bff,#4c96ff);--lbd:0;--lr:50%;--lsh:0 0 0 5px #7c6cff2e,0 8px 28px #5b4cffb3,0 0 36px #4c96ff55;--lbl:none;--lc:#fff}
+html[data-pls=solid]{--sb:#00000066;--sbd:0;--sr:50%;--ssh:none;--sbl:blur(8px);--sc:#fff;--mb:#fff;--mbd:0;--mr:50%;--msh:0 8px 24px #0009;--mc:#0d0e13;--mk:1;--lb:#0b0c11;--lbd:2.5px solid #fff;--lr:50%;--lsh:0 8px 24px #0009;--lbl:none;--lc:#fff}
+html[data-pls] .cb:not(.big){background:var(--sb);border:var(--sbd);border-radius:var(--sr);box-shadow:var(--ssh);-webkit-backdrop-filter:var(--sbl);backdrop-filter:var(--sbl);color:var(--sc)}
+html[data-pls] .cb .i{color:inherit}
+html[data-pls] .cb.big{background:var(--mb);border:var(--mbd);border-radius:var(--mr);box-shadow:var(--msh);color:var(--mc)}
+html[data-pls] .cb{transition:transform .22s cubic-bezier(.2,.9,.3,1.35),box-shadow .22s,background .2s,filter .2s}
+@media (hover:hover){html[data-pls] .cb:hover{transform:translateY(-1px) scale(1.08)!important;filter:brightness(1.18)}}
+html[data-pls] .cb:active{transform:scale(.88)!important}
+html[data-plb=seek] .mid [data-k=ep],html[data-plb=ep] .mid [data-k=sk]{display:none}
 @media (max-width:420px){.cb{width:38px;height:38px}.cb.big{width:50px;height:50px}.cb.sm{width:30px;height:30px}.mid{gap:10px}.cb .i{width:18px;height:18px}.cb.big .i{width:24px;height:24px}}
 @media (max-width:330px){.cb{width:34px;height:34px}.cb.big{width:44px;height:44px}.cb.sm{width:28px;height:28px}.mid{gap:6px}}
 @media (max-height:170px){.cb.big{width:44px;height:44px}.mid{top:48%}.pills{bottom:46px}}
@@ -141,16 +152,16 @@ body.wait .mid .cb.big{opacity:0}
     <button class="ib x" id="cls" title="Закрити"><span data-i="close"></span></button>
   </div>
   <div class="mid">
-    <button class="cb sm" id="pv"><span data-i="prev"></span></button>
-    <button class="cb s2" id="bk"><span data-i="back10"></span></button>
+    <button class="cb sm" id="pv" data-k="ep"><span data-i="prev"></span></button>
+    <button class="cb s2" id="bk" data-k="sk"><span data-i="back10"></span></button>
     <button class="cb big" id="pp"><span data-i="play"></span></button>
-    <button class="cb s2" id="fw"><span data-i="fwd10"></span></button>
-    <button class="cb sm" id="nt"><span data-i="next"></span></button>
+    <button class="cb s2" id="fw" data-k="sk"><span data-i="fwd10"></span></button>
+    <button class="cb sm" id="nt" data-k="ep"><span data-i="next"></span></button>
   </div>
   <div class="pills" id="pills"></div>
   <div class="sk" id="sk">
     <span id="cur">0:00</span>
-    <div class="tr" id="tr"><div class="tbar"><div class="tfill" id="fill"></div></div><div class="knob" id="knob"></div><div class="tpv" id="tpv"><div class="tpf"><video id="tpvv" muted playsinline preload="metadata"></video></div><span id="tpt">0:00</span></div></div>
+    <div class="tr" id="tr"><div class="tbar"><div class="tfill" id="fill"></div></div><div class="knob" id="knob"></div><div class="tpv" id="tpv"><span id="tpt">0:00</span></div></div>
     <span id="rem">0:00</span>
     <button class="xb" id="vb" title="Гучність"><span data-i="vol"></span></button>
   </div>
@@ -236,10 +247,11 @@ body.wait .mid .cb.big{opacity:0}
   document.addEventListener('dragstart', e => e.preventDefault());
 
   // невидимі краї для зміни розміру (системної смуги по краях більше немає)
+  const pz = m => { try { wv.postMessage(m); } catch (x) {} };
   const RZ = [['l',10,'left:0;top:10px;bottom:10px;width:5px;cursor:ew-resize'],['r',11,'right:0;top:10px;bottom:10px;width:5px;cursor:ew-resize'],['t',12,'top:0;left:10px;right:10px;height:4px;cursor:ns-resize'],['b',15,'bottom:0;left:10px;right:10px;height:5px;cursor:ns-resize'],['tl',13,'left:0;top:0;width:10px;height:10px;cursor:nwse-resize'],['tr',14,'right:0;top:0;width:10px;height:10px;cursor:nesw-resize'],['bl',16,'left:0;bottom:0;width:10px;height:10px;cursor:nesw-resize'],['br',17,'right:0;bottom:0;width:10px;height:10px;cursor:nwse-resize']];
   const rzs = document.createElement('style'); rzs.textContent = '.rzh{position:fixed;z-index:2147483647;background:transparent}html.pcfs .rzh,html.pcmax .rzh{display:none!important}';
   document.head.appendChild(rzs);
-  RZ.forEach(([n, ht, css]) => { const d = document.createElement('div'); d.className = 'rzh'; d.style.cssText = css; d.dataset.curk = ({l: 'resize-ew', r: 'resize-ew', t: 'resize-ns', b: 'resize-ns', tl: 'resize-nwse', br: 'resize-nwse', tr: 'resize-nesw', bl: 'resize-nesw'})[n]; d.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); try { wv.postMessage('rz:' + ht); } catch (x) {}; }); document.body.appendChild(d); });
+  RZ.forEach(([n, ht, css]) => { const d = document.createElement('div'); d.className = 'rzh'; d.style.cssText = css; d.dataset.curk = ({l: 'resize-ew', r: 'resize-ew', t: 'resize-ns', b: 'resize-ns', tl: 'resize-nwse', br: 'resize-nwse', tr: 'resize-nesw', bl: 'resize-nesw'})[n]; d.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); let raf = 0; try { d.setPointerCapture(e.pointerId); } catch (x) {} pz('rzs:' + ht); const mv = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; pz('rzm'); }); }, up = () => { d.removeEventListener('pointermove', mv); d.removeEventListener('pointerup', up); d.removeEventListener('pointercancel', up); pz('rze'); }; d.addEventListener('pointermove', mv); d.addEventListener('pointerup', up); d.addEventListener('pointercancel', up); }); document.body.appendChild(d); });
   // перетягування вікна: за будь-яке місце, крім елементів керування
   let pd = null;
   document.addEventListener('pointerdown', e => { if (e.button !== 0) return; pd = e.target.closest('button,.tr,.vsl,.skb') ? null : {x: e.clientX, y: e.clientY}; });
@@ -259,16 +271,12 @@ body.wait .mid .cb.big{opacity:0}
   const tr = $('#tr'); let drag = false;
   const trSeek = e => { const r = tr.getBoundingClientRect(); seekTo((V.duration || 0) * Math.max(0, Math.min(1, (e.clientX - r.left) / r.width))); };
   tr.addEventListener('pointerdown', e => { drag = true; tr.setPointerCapture(e.pointerId); trSeek(e); });
-  const TP = {v: $('#tpvv'), box: $('#tpv'), want: null, busy: false, src: '', bt: 0};
-  function tpGo() { if (TP.want == null) return; const t = TP.want; TP.want = null; TP.busy = true; clearTimeout(TP.bt); TP.bt = setTimeout(() => { TP.busy = false; if (TP.want != null) tpGo(); }, 600); try { TP.v.currentTime = t; } catch (e) { TP.busy = false; } }
-  TP.v.addEventListener('seeked', () => { clearTimeout(TP.bt); TP.busy = false; if (TP.want != null) tpGo(); });
-  TP.v.addEventListener('error', () => { $('.tpf').classList.add('nov'); });
+  const TP = {box: $('#tpv')};  // у PiP на ПК кадр-превʼю не потрібен — лише час, куди перемотуємо
   function tpShow(e) {  // кадр і час під курсором на шкалі
     const d = V.duration; if (!d || !isFinite(d)) return;
-    const r = tr.getBoundingClientRect(), fr = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)), s = V.currentSrc || V.src;
-    if (s && s !== TP.src) { TP.src = s; $('.tpf').classList.remove('nov'); try { TP.v.src = s; TP.v.load(); } catch (x) {} }
-    const bw = TP.box.offsetWidth || 136, x = Math.max(bw / 2 + 6 - r.left, Math.min(fr * r.width, innerWidth - r.left - bw / 2 - 6));
-    TP.box.style.left = x + 'px'; $('#tpt').textContent = fmt(fr * d); TP.box.classList.add('on'); TP.want = fr * d; if (!TP.busy) tpGo();
+    const r = tr.getBoundingClientRect(), fr = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    const bw = TP.box.offsetWidth || 60, x = Math.max(bw / 2 + 6 - r.left, Math.min(fr * r.width, innerWidth - r.left - bw / 2 - 6));
+    TP.box.style.left = x + 'px'; $('#tpt').textContent = fmt(fr * d); TP.box.classList.add('on');
   }
   tr.addEventListener('pointermove', e => { if (drag) trSeek(e); tpShow(e); });
   tr.addEventListener('pointerleave', () => { if (!drag) TP.box.classList.remove('on'); });
@@ -290,8 +298,38 @@ body.wait .mid .cb.big{opacity:0}
   });
   V.addEventListener('canplay', () => { if (start && start.hand && !start.sent) { start.sent = true; send({t: 'cp'}); } });
   V.addEventListener('error', () => { wait(false); send({t: 'error'}); });
+  function plSet(m) { const H = document.documentElement; if (m.pls) H.dataset.pls = m.pls; if (m.plb) H.dataset.plb = m.plb; if (m.plf != null) H.dataset.plfx = m.plf ? '1' : '0'; }
+  function plBurst(el) {
+    const H = document.documentElement; if (H.dataset.plfx === '0') return;
+    const st = H.dataset.pls || 'neon', r = el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2, R = Math.max(r.width, r.height) / 2, rnd = Math.random;
+    let L = document.getElementById('plfxl');
+    if (!L) { L = document.createElement('div'); L.id = 'plfxl'; L.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:99999;overflow:hidden'; document.body.appendChild(L); }
+    const mk = (css, kf, o) => { const d = document.createElement('i'); d.style.cssText = 'position:absolute;left:' + cx + 'px;top:' + cy + 'px;' + css; L.appendChild(d); const a = d.animate(kf, Object.assign({fill: 'forwards'}, o)); a.onfinish = () => d.remove(); };
+    const T = 'translate(-50%,-50%) ';
+    if (st === 'neon') {
+      mk('width:' + 2 * R + 'px;height:' + 2 * R + 'px;border-radius:50%;border:2px solid #8b7bff;box-shadow:0 0 14px #7c6cff', [{transform: T + 'scale(1)', opacity: .9}, {transform: T + 'scale(1.9)', opacity: 0}], {duration: 520, easing: 'ease-out'});
+      for (let i = 0; i < 12; i++) {
+        const a = i / 12 * 6.283 + rnd() * .4, d = R + 16 + rnd() * 30, z = 3 + rnd() * 4, c = i % 2 ? '#a99bff' : '#5aa9ff';
+        mk('width:' + z + 'px;height:' + z + 'px;border-radius:50%;background:' + c + ';box-shadow:0 0 9px ' + c, [{transform: T + 'translate(0,0) scale(1)', opacity: 1}, {transform: T + 'translate(' + Math.cos(a) * d + 'px,' + Math.sin(a) * d + 'px) scale(.2)', opacity: 0}], {duration: 520 + rnd() * 260, easing: 'cubic-bezier(.1,.75,.3,1)'});
+      }
+    } else if (st === 'glass') {
+      mk('width:' + 2 * R + 'px;height:' + 2 * R + 'px;border-radius:50%;border:1.5px solid #ffffffaa;background:#ffffff14', [{transform: T + 'scale(.9)', opacity: .9}, {transform: T + 'scale(1.7)', opacity: 0}], {duration: 650, easing: 'ease-out'});
+      for (let i = 0; i < 7; i++) {
+        const z = 5 + rnd() * 9, x = (rnd() - .5) * R * 2.2, y = -(R * .6 + rnd() * R * 1.4);
+        mk('width:' + z + 'px;height:' + z + 'px;border-radius:50%;border:1px solid #ffffffbb;background:radial-gradient(circle at 30% 30%,#ffffff66,#ffffff12)', [{transform: T + 'translate(' + x * .3 + 'px,0) scale(.6)', opacity: 0}, {opacity: 1, offset: .2}, {transform: T + 'translate(' + x + 'px,' + y + 'px) scale(1.25)', opacity: 0}], {duration: 800 + rnd() * 400, easing: 'cubic-bezier(.2,.7,.3,1)'});
+      }
+    } else {
+      mk('width:' + 2 * R + 'px;height:' + 2 * R + 'px;border-radius:50%;border:2px solid #fff', [{transform: T + 'scale(1)', opacity: .85}, {transform: T + 'scale(1.55)', opacity: 0}], {duration: 420, easing: 'ease-out'});
+      for (let i = 0; i < 10; i++) {
+        const a = i / 10 * 360 + (rnd() - .5) * 10, d0 = R + 4, d1 = R + 16 + rnd() * 14;
+        mk('width:3px;height:' + (7 + rnd() * 6) + 'px;border-radius:2px;background:#fff', [{transform: T + 'rotate(' + a + 'deg) translateY(-' + d0 + 'px)', opacity: 1}, {transform: T + 'rotate(' + a + 'deg) translateY(-' + d1 + 'px) scaleY(.4)', opacity: 0}], {duration: 380 + rnd() * 120, easing: 'cubic-bezier(.1,.8,.3,1)'});
+      }
+    }
+  }
+  document.addEventListener('click', ev => { const b = ev.target.closest && ev.target.closest('.cb'); if (b) plBurst(b); }, true);
   function load(m) {
     if (m.icons) { icons = m.icons; }
+    plSet(m);
     if (m.ac) root.style.setProperty('--ac', m.ac);
     paintIcons();
     D.skips = m.skips || {}; D.hasPrev = !!m.hasPrev; D.hasNext = !!m.hasNext; D.nx = null; D.sk = null; shownKey = ''; nxHold = false; $('#pills').innerHTML = '';
@@ -321,6 +359,7 @@ body.wait .mid .cb.big{opacity:0}
       case 'nav': D.hasPrev = !!m.hasPrev; D.hasNext = !!m.hasNext; $('#pv').classList.toggle('off', !D.hasPrev); $('#nt').classList.toggle('off', !D.hasNext); break;
       case 'nx': D.nx = m.nx || null; break;
       case 'sk': D.sk = m.sk || null; break;
+      case 'pl': plSet(m); break;
     }
   };
   (function () {  // власні курсори (як у головному вікні)
@@ -4641,10 +4680,69 @@ def _note_quals(e, dub, n, links):
   if not qs:
     return False
   d = e.setdefault('quals', {}).setdefault(_dk(dub), {})
+  qs = sorted(set(qs) | set(d.get(str(n)) or []), key=qnum, reverse=True)  # об'єднуємо: часткова перевірка не стирає відоме, а нова якість (з'явилось 1080p) додається
   if d.get(str(n)) != qs:
     d[str(n)] = qs
     return True
   return False
+
+
+_QP_RUN = set()
+
+
+def _probe_dub_quals(kid, e, dub, cap=30):
+  """Після зміни озвучки одразу перевіряємо реальні якості її серій (спершу непереглянуті), у фоні й не поспішаючи."""
+  tk = (kid, dub)
+  if tk in _QP_RUN:
+    return
+  _QP_RUN.add(tk)
+
+  def run():
+    try:
+      qd = (e.get('quals') or {}).get(_dk(dub)) or {}
+      w = set(e.get('watched') or [])
+      todo = [o for o in sorted(e.get('known') or []) if not qd.get(str(o))]
+      todo.sort(key=lambda o: (o in w, o))
+      for o in todo[:cap]:
+        if e.get('dubbing') != dub or net_state()['state'] == 'offline':
+          break
+        try:
+          _get_ep(kid, e, o, dub)
+        except Exception:
+          pass
+        time.sleep(0.4)
+    finally:
+      _QP_RUN.discard(tk)
+  threading.Thread(target=run, daemon=True).start()
+
+
+def _refresh_quals(kid, e):
+  """Під час оновлення бібліотеки перечитуємо якості однієї серії (найдавніше перевірену й нижчу за 1080p), щоб нова якість на сайті з'являлась у позначках."""
+  if e.get('temp') or e.get('archived'):
+    return
+  dub = e.get('dubbing')
+  qd = (e.get('quals') or {}).get(_dk(dub)) or {}
+  qp = e.setdefault('qprobe', {})
+  now = time.time()
+  c = []
+  for o in e.get('known') or []:
+    ql = qd.get(str(o)) or []
+    top = qnum(ql[0]) if ql else 0
+    if top >= 1080:
+      continue
+    t = qp.get(str(o), 0)
+    if now - t < 6 * 3600:
+      continue
+    c.append((t, -float(o), o))
+  if not c:
+    return
+  c.sort()
+  o = c[0][2]
+  qp[str(o)] = now
+  try:
+    _get_ep(kid, e, o, dub)
+  except Exception:
+    pass
 
 
 def _note_eps(e, dub, eps):
@@ -6032,6 +6130,8 @@ def api_set_dub(kid, dub):
       if info:
         _dub_snaps(e, info)
       lib_save()
+      if net_state()['state'] != 'offline':
+        _probe_dub_quals(_kid(key), e, dub)
       return {'ok': True, 'online': info is not None or dub in (e.get('dubs') or {})}
   if not need:
     return go()
@@ -6136,6 +6236,10 @@ def api_check(kid, bg=False, quiet=False):
       e['meta']['fin'] = info['meta'].get('fin')  # «вийшло повністю» — лише поки сайт так каже
       e['meta']['eps_total'] = info['meta'].get('eps_total')
   lib_save()
+  try:
+    _refresh_quals(kid, e)
+  except Exception:
+    pass
   new_poster = (e.get('meta') or {}).get('poster')
   if not _poster_file(kid) or new_poster != old_poster or e.get('poster_src') != new_poster:
     if cache_poster(kid, new_poster):
@@ -7256,7 +7360,7 @@ def net_state():
 SETTINGS = {'mobile_download': False, 'auto_skip': False, 'auto_skip_opening': True, 'auto_skip_ending': True, 'auto_next': True,
             'auto_check': True, 'auto_check_hours': 3, 'blur_thumbs': False, 'logging': False, 'multitask': True, 'ios_player': False, 'ios_pl2': False, 'web_inapp': True, 'np_ep_cover': True, 'hide_psave': False, 'auto_arc': True, 'show_scrollbar': False,
             'bg_keep': True, 'bg_check': False, 'island': True, 'island_dl': True, 'island_check': False,
-            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'old_cards': False, 'pc_cursor': True, 'cursor_scale': 100, 'np_cover': 'ep', 'dub_fav': [], 'dub_prio': [], 'dub_seen': [], 'fx_style': 'blocks', 'recent_min': 3, 'handoff': True, 'rc': True, 'rc_in': True, 'rc_out': True, 'dv2': False, 'xgest': 'both', 'client': {},
+            'skip_mode': 'instant', 'vol_max': 100, 'own_vol': False, 'plain_wv': False, 'wv_reload': False, 'old_cards': False, 'pc_cursor': True, 'cursor_scale': 100, 'np_cover': 'ep', 'dub_fav': [], 'dub_prio': [], 'dub_seen': [], 'fx_style': 'blocks', 'pl_style': 'neon', 'pl_btns': 'both', 'pl_fx': True, 'recent_min': 3, 'handoff': True, 'rc': True, 'rc_in': True, 'rc_out': True, 'dv2': False, 'xgest': 'both', 'client': {},
             'site_order': ['aniliberty', 'yummyani', 'animevost', 'animru'], 'view': {}}
 
 
@@ -7310,6 +7414,10 @@ def api_settings(data=None):
               SETTINGS[k] = data[k]
           elif k == 'fx_style':
             SETTINGS[k] = data[k] if data[k] in ('blocks', 'vortex', 'edge') else 'blocks'
+          elif k == 'pl_style':
+            SETTINGS[k] = data[k] if data[k] in ('neon', 'glass', 'solid') else 'neon'
+          elif k == 'pl_btns':
+            SETTINGS[k] = data[k] if data[k] in ('both', 'seek', 'ep') else 'both'
           elif k == 'xgest':
             SETTINGS[k] = data[k] if data[k] in ('both', 'top', 'edge') else 'both'
           elif k == 'np_cover':
@@ -8054,6 +8162,7 @@ class Handler(BaseHTTPRequestHandler):
           '/api/remove': lambda: api_remove(b.get('id')),
           '/api/delete_file': lambda: api_delete_file(b.get('id'), b.get('n')),
           '/api/beat': lambda: api_beat(b.get('closed')),
+          '/api/pulse': lambda: (PULSE.__setitem__(0, time.time()) or {'ok': True}),
           '/api/diag': lambda: api_diag(b),
           '/api/sync_cfg': lambda: api_sync_cfg(b),
           '/api/sync_sep': lambda: api_sync_sep(b),
@@ -8348,7 +8457,7 @@ def _entry_extra_dirs(e, used, seen_ids=None):
   return out
 
 
-_OWN_DIRS = ('crash_reports', 'anime_videos', 'app_data', 'Збереження')  # папки самого додатка / його завантажувача — не «сторонні»
+_OWN_DIRS = ('crash_reports', 'anime_videos', 'app_data', 'Збереження', 'covers')  # папки самого додатка / його завантажувача — не «сторонні»
 
 
 # ═════════════════════════ Збереження: експорт / імпорт ═════════════════════════
@@ -8793,7 +8902,7 @@ def api_storage():
       {'id': 'partial', 'name': 'Недокачане', 'size': p_tot, 'count': 0, 'unit': ''},
       {'id': 'img', 'name': 'Кеш картинок', 'size': img, 'count': nimg, 'unit': 'файлів'},
       {'id': 'thumbs', 'name': 'Мініатюри серій', 'size': th, 'count': nth, 'unit': 'файлів'},
-      {'id': 'posters', 'name': 'Обкладинки бібліотеки', 'size': posters + other_c, 'count': 0, 'unit': ''},
+      {'id': 'posters', 'name': 'Обкладинки бібліотеки', 'size': posters + other_c + _dir_size(_cover_dir())[0], 'count': 0, 'unit': ''},
       {'id': 'logs', 'name': 'Логи й звіти', 'size': logs, 'count': nlogs, 'unit': 'файлів'},
       {'id': 'data', 'name': 'Дані бібліотеки', 'size': data, 'count': 0, 'unit': ''},
       {'id': 'work', 'name': 'Папка завантажень (anime_videos)', 'size': work, 'count': 0, 'unit': ''},
@@ -9173,11 +9282,11 @@ SYNC_LOCK = threading.RLock()
 SYNC = {'st': None, 'srv': None, 'srv_err': '', 'started': False, 'found': {}, 'pending': None, 'pair_out': None, 'gen': 0,
         'status': {}, 'inb': {}, 'wake': threading.Event(), 'scanning': 0.0, 'last_rescan': 0.0, 'pair_until': 0.0, 'last_scan': 0.0}
 SYNC_SETTINGS_KEYS = ['view', 'auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'auto_check', 'auto_check_hours', 'blur_thumbs',
-                      'np_ep_cover', 'np_cover', 'ios_player', 'hide_psave', 'auto_arc', 'skip_mode', 'vol_max', 'own_vol', 'recent_min', 'site_order', 'dub_fav', 'dub_prio', 'fx_style',
+                      'np_ep_cover', 'np_cover', 'ios_player', 'hide_psave', 'auto_arc', 'skip_mode', 'vol_max', 'own_vol', 'recent_min', 'site_order', 'dub_fav', 'dub_prio', 'fx_style', 'pl_style', 'pl_btns', 'pl_fx',
                       # налаштування, яких немає на частині платформ, теж зберігаємо й передаємо — щоб при підключенні іншого пристрою вони відновились
                       'web_inapp', 'mobile_download', 'bg_keep', 'bg_check', 'island', 'island_dl', 'island_check', 'xgest', 'pc_cursor', 'cursor_scale']
 SYNC_GROUPS = {'view': ['view', 'blur_thumbs'],
-               'player': ['auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'skip_mode', 'vol_max', 'own_vol', 'np_ep_cover', 'np_cover', 'ios_player', 'hide_psave'],
+               'player': ['auto_skip', 'auto_skip_opening', 'auto_skip_ending', 'auto_next', 'skip_mode', 'vol_max', 'own_vol', 'np_ep_cover', 'np_cover', 'ios_player', 'hide_psave', 'pl_style', 'pl_btns', 'pl_fx'],
                'library': ['recent_min', 'auto_arc'],
                'auto': ['auto_check', 'auto_check_hours'],
                'sites': ['site_order', 'dub_fav', 'dub_prio'],
@@ -9305,6 +9414,7 @@ def _sync_kinfo(e):
   m = e.get('meta') or {}
   return {'known': sorted(e.get('known') or []), 'titles': {str(a): b for a, b in (e.get('ep_titles') or {}).items() if b},
           'na': {str(n): int((e.get('new_at') or {}).get(str(n)) or 0) for n in (e.get('new') or []) if (e.get('new_at') or {}).get(str(n))},
+          'quals': {d_: dict(v_) for d_, v_ in (e.get('quals') or {}).items() if v_},
           'dubs': sorted(e.get('all_dubs') or []), 'next': m.get('next'), 'desc': m.get('description') or '',
           'meta': {a: b for a, b in m.items() if a not in ('poster', 'next', 'description') and isinstance(b, (str, int, float, bool))}}
 
@@ -9660,6 +9770,16 @@ def _sync_apply_one(st, k, r):
         if b_ and tt.get(a_) != b_:
           tt[a_] = b_
           changed_ = True
+      try:
+        for d_, dm_ in (v.get('quals') or {}).items():
+          if not isinstance(dm_, dict):
+            continue
+          for n_, ql_ in dm_.items():
+            if isinstance(ql_, list) and ql_ and all(isinstance(q_, str) and qnum(q_) for q_ in ql_):
+              if _note_quals(e, d_, n_, {q_: 1 for q_ in ql_}):
+                changed_ = True
+      except Exception:
+        pass
       dubs = sorted(set(e.get('all_dubs') or []) | set(v.get('dubs') or []))
       if dubs != sorted(e.get('all_dubs') or []):
         e['all_dubs'] = dubs
@@ -9680,7 +9800,7 @@ def _sync_apply_one(st, k, r):
         e['meta'] = m
         changed_ = True
       local = _sync_kinfo(e)
-      same = set(local['known']) == set(rk)
+      same = set(local['known']) == set(rk) and local.get('quals') == (v.get('quals') or {})
     # наше знання не менше за чуже: не відлунюємо; більше — лишаємо запис «зміненим», і ми розішлемо повніший
     if same:
       last[k] = hashlib.sha1(json.dumps(local, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:12]
@@ -10941,7 +11061,7 @@ def start():
 
 
 INDEX_HTML = r"""<!doctype html>
-<html lang="uk">
+<html lang="uk" data-pls="neon" data-plb="both" data-plfx="1">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
@@ -11076,14 +11196,18 @@ body.thz,body.thz *,body.armed,body.armed *{-webkit-user-select:none!important;u
 @keyframes fxFlash{0%{opacity:0}18%{opacity:1}100%{opacity:0}}
 @keyframes fxUp{0%{opacity:0;transform:translateY(20px) scale(.6)}15%{opacity:1}100%{opacity:0;transform:translateY(-95vh) scale(.9) rotate(var(--r))}}
 @keyframes fxDown{0%{opacity:0;transform:translateY(-70vh) scale(.5) rotate(var(--r))}30%{opacity:1}100%{opacity:0;transform:translateY(var(--ty)) scale(1) rotate(0)}}
-#fxs{position:fixed;inset:0;z-index:99984;overflow:hidden;pointer-events:none;background:var(--bg);opacity:1;transition:opacity .55s ease}
-#fxs.gone{opacity:0}
-#fxs .fxs-in{position:absolute;inset:0;filter:blur(0px) brightness(1);transition:filter .45s ease}
-#fxs.on .fxs-in{filter:blur(18px) brightness(.78) saturate(1.2)}
+#fxs{position:fixed;inset:0;z-index:99984;overflow:hidden;pointer-events:none;background:var(--bg);opacity:1}
+#fxs.gone{background:transparent}
+#fxs .fxs-in{transition:opacity .55s ease}#fxs.gone .fxs-in{opacity:0}
+#fxs.gone #root>.bar,#fxs.gone #root>.hdr2,#fxs.gone #tabs{opacity:0!important;transition:opacity .12s ease!important}  /* стара верхня/нижня панель зникає миттєво — під нею вже справжня нова, без накладання заголовків */
+#fxs .fxs-in{position:absolute;inset:0}
+/* розмивається все однаково, разом із верхньою панеллю і вкладками; фільтр — на кожному блоці окремо (не на #root), щоб sticky-панель не зникала */
+#fxs #root>*,#fxs #tabs,#fxs #layer>*{filter:blur(0px) brightness(1);transition:filter .45s ease!important}
+#fxs.on #root>*,#fxs.on #tabs,#fxs.on #layer>*{filter:blur(18px) brightness(.78) saturate(1.2)}
 #fxs .fxs-sc{position:absolute;inset:0;overflow:hidden;box-sizing:border-box}
 #fxs .fxs-in *{animation:none!important;transition:none!important}
-body.fxl #root,body.fxl #tabs{filter:blur(16px) brightness(.8);transition:none}
-body.fxo #root,body.fxo #tabs{transition:filter .75s ease}
+body.fxl #root>*,body.fxl #tabs{filter:blur(16px) brightness(.8);transition:none}
+body.fxo #root>*,body.fxo #tabs{transition:filter .75s ease}
 #fxv{position:fixed;inset:0;z-index:99985;pointer-events:none;opacity:0;background:rgba(14,15,30,.3);-webkit-backdrop-filter:blur(0px);backdrop-filter:blur(0px);transition:opacity .35s ease,-webkit-backdrop-filter .4s ease,backdrop-filter .4s ease}
 #fxv.on{opacity:1;-webkit-backdrop-filter:blur(20px) saturate(1.2);backdrop-filter:blur(20px) saturate(1.2)}
 #fxv.on.lite{background:rgba(14,15,30,.14);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
@@ -11095,7 +11219,8 @@ body.fxo #root,body.fxo #tabs{transition:filter .75s ease}
 @keyframes vxRO{0%{transform:translate(calc(var(--rad)*1.6vmin),0) scale(1);opacity:0}12%{opacity:1}85%{opacity:1}100%{transform:translate(0,0) scale(.04);opacity:0}}
 @keyframes vxSI{from{transform:rotate(calc(var(--a) + 600deg));opacity:1}to{transform:rotate(var(--a));opacity:1}}
 @keyframes vxRI{0%{transform:translate(0,0) scale(.04);opacity:0}12%{opacity:1}70%{opacity:1}100%{transform:translate(calc(var(--rad)*1.6vmin),0) scale(1);opacity:0}}
-#fx .edf{position:absolute;inset:0;border-radius:46px;opacity:0}
+#fx .edf{position:absolute;inset:0;border-radius:var(--scr,46px);opacity:0}
+html.pcmax #fx .edf,html.pcfs #fx .edf{border-radius:0!important}
 #fx.s-edge.k-out .edf{animation:edfO 1.8s ease-in both}
 #fx.s-edge.k-in .edf{animation:edfI 1.8s ease-out both}
 @keyframes edfO{0%{opacity:0;box-shadow:inset 0 0 0 2px rgba(190,178,255,0.55),inset 0 0 8px 1px rgba(124,108,255,0.45),inset 0 0 30px 6px rgba(76,150,255,0.15)}62%{opacity:1;box-shadow:inset 0 0 0 4px rgba(190,178,255,1),inset 0 0 44px 12px rgba(124,108,255,1),inset 0 0 190px 38px rgba(76,150,255,0.8)}100%{opacity:0;box-shadow:inset 0 0 0 4px rgba(190,178,255,1),inset 0 0 44px 12px rgba(124,108,255,1),inset 0 0 190px 38px rgba(76,150,255,0.8)}}
@@ -11748,7 +11873,46 @@ html.nosb ::-webkit-scrollbar,html.nosb::-webkit-scrollbar{display:none;width:0;
 #player.ld .vc .mid3{justify-content:space-between;padding:0 clamp(18px,8%,96px);gap:0}
 #player.ld .vc .cb.sm{width:68px;height:68px;background:#ffffff14;border:1px solid #ffffff26;animation:pop .32s cubic-bezier(.2,.9,.25,1.15)}
 #player.ld .vc .cb.sm .i{width:32px;height:32px}
+html[data-pls=glass]{--sb:#ffffff1f;--sbd:1px solid #ffffff2e;--sr:50%;--ssh:0 6px 20px #0006,inset 0 1px 0 #ffffff33;--sbl:blur(14px);--sc:#fff;--mb:#ffffff2e;--mbd:1px solid #ffffff3d;--mr:50%;--msh:0 8px 26px #0007,inset 0 1px 0 #ffffff44;--mc:#fff;--mk:1;--lb:#ffffff26;--lbd:1px solid #ffffff47;--lr:28px;--lsh:0 10px 30px #0008,inset 0 1px 0 #ffffff4d;--lbl:blur(22px);--lc:#fff}
+html[data-pls=neon]{--sb:#7c6cff29;--sbd:1px solid #7c6cff73;--sr:16px;--ssh:none;--sbl:none;--sc:#e4e0ff;--mb:linear-gradient(145deg,#8b7bff,#4c96ff);--mbd:0;--mr:50%;--msh:0 0 0 6px #7c6cff2e,0 8px 30px #5b4cffb3,0 0 44px #4c96ff66;--mc:#fff;--mk:1.17;--lb:linear-gradient(145deg,#8b7bff,#4c96ff);--lbd:0;--lr:50%;--lsh:0 0 0 5px #7c6cff2e,0 8px 28px #5b4cffb3,0 0 36px #4c96ff55;--lbl:none;--lc:#fff}
+html[data-pls=solid]{--sb:#00000066;--sbd:0;--sr:50%;--ssh:none;--sbl:blur(8px);--sc:#fff;--mb:#fff;--mbd:0;--mr:50%;--msh:0 8px 24px #0009;--mc:#0d0e13;--mk:1;--lb:#0b0c11;--lbd:2.5px solid #fff;--lr:50%;--lsh:0 8px 24px #0009;--lbl:none;--lc:#fff}
+html[data-pls] :is(.vc,.plpv) .cb:not(.big){background:var(--sb);border:var(--sbd);border-radius:var(--sr);box-shadow:var(--ssh);-webkit-backdrop-filter:var(--sbl);backdrop-filter:var(--sbl);color:var(--sc)}
+html[data-pls] :is(.vc,.plpv) .cb.big{background:var(--mb);border:var(--mbd);border-radius:var(--mr);box-shadow:var(--msh);color:var(--mc);width:calc(var(--bw,72px)*var(--mk));height:calc(var(--bw,72px)*var(--mk))}
+html[data-pls] :is(.vc,.plpv) .cb.big .i{width:calc(var(--bw,72px)*var(--mk)*.47);height:calc(var(--bw,72px)*var(--mk)*.47)}
+html[data-pls] #player.pipon .vc .cb{background:none!important;border-color:transparent!important;box-shadow:none!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important;color:#fff!important}
+.vc #vback .i,.vc #vfwd .i{width:32px;height:32px}
+html[data-pls] :is(.vc,.plpv) .cb .i{color:inherit}
+html[data-pls] #player.ld .vc .cb.sm,html[data-pls] .plpv .l .cb{background:var(--lb);border:var(--lbd);border-radius:var(--lr);box-shadow:var(--lsh);-webkit-backdrop-filter:var(--lbl);backdrop-filter:var(--lbl);color:var(--lc)}
+html[data-pls] :is(.vc,.plpv) .cb{transition:transform .22s cubic-bezier(.2,.9,.3,1.35),box-shadow .22s,background .2s,filter .2s,border-color .2s;will-change:transform}
+@media (hover:hover){html[data-pls] :is(.vc,.plpv) .cb:hover{transform:translateY(-2px) scale(1.08)!important;filter:brightness(1.18)}
+html[data-pls=neon] :is(.vc,.plpv) .cb.big:hover{box-shadow:0 0 0 8px #7c6cff40,0 10px 38px #5b4cffe0,0 0 56px #4c96ff99}
+html[data-pls=glass] :is(.vc,.plpv) .cb:hover{background:#ffffff38;border-color:#ffffff66}
+html[data-pls=solid] :is(.vc,.plpv) .cb.big:hover{box-shadow:0 10px 34px #000b,0 0 0 6px #ffffff2e}}
+html[data-pls] :is(.vc,.plpv) .cb:active{transform:scale(.88)!important;filter:brightness(.95)}
+@media (max-width:380px){html[data-pls=neon]{--mk:1.06}}
+html[data-plb=seek] #player:not(.ld) .vc .mid3 .cb.sm{display:none}
+html[data-plb=ep] .vc #vback,html[data-plb=ep] .vc #vfwd{display:none}
+/* попередній перегляд у налаштуваннях */
+.plpv{display:flex;flex-direction:column;gap:10px;margin:4px 0 6px}
+.plpv .pvs{position:relative;display:flex;align-items:center;justify-content:center;gap:10px;border-radius:16px;overflow:hidden;background:radial-gradient(ellipse at 25% 15%,#5b4cff55,transparent 60%),radial-gradient(ellipse at 85% 95%,#ff5c8a33,transparent 55%),linear-gradient(135deg,#1a1d2b,#0d0e16)}
+.plpv .pvs.m{height:132px;--bw:62px}.plpv .pvs.l{height:92px;gap:26px;flex:1}
+.plpv .pvs.p{width:100%;max-width:300px;align-self:center;aspect-ratio:16/9;--bw:44px;gap:8px;border:1px solid #ffffff1f;border-radius:12px;background:linear-gradient(180deg,#000c,#0000 30%),radial-gradient(ellipse at 30% 20%,#5b4cff44,transparent 60%),#07080d;box-shadow:0 10px 26px #0008}
+.plpv .pvs.p .pvt{position:absolute;left:10px;top:7px;font-size:11px;font-weight:700;line-height:1.15}.plpv .pvs.p .pvt small{display:block;font-weight:400;color:#ffffff90;font-size:9.5px}
+.plpv .pvs.p .pvk{position:absolute;left:10px;right:10px;bottom:8px;height:4px;border-radius:2px;background:#ffffff33}.plpv .pvs.p .pvk i{display:block;width:38%;height:100%;border-radius:2px;background:#8b7bff}
+.plpv .pvr{display:flex;gap:10px}
+.plpv .pvl{position:absolute;left:10px;top:7px;font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:#ffffff80}
+.plpv .cb{flex:none;width:46px;height:46px;border:0;border-radius:50%;background:#000a;color:#fff;display:grid;place-items:center;padding:0;cursor:pointer;transform:none;-webkit-tap-highlight-color:transparent}
+.plpv .cb .i{width:24px;height:24px}.plpv .cb.sm{width:38px;height:38px}.plpv .cb.sm .i{width:18px;height:18px}
+.plpv .l .cb{width:52px;height:52px}.plpv .l .cb .i{width:25px;height:25px}
+.plpv .p .cb{width:30px;height:30px}.plpv .p .cb .i{width:17px;height:17px}.plpv .p .cb.sm{width:28px;height:28px}.plpv .p .cb.sm .i{width:15px;height:15px}
+html[data-plb=seek] .plpv .m [data-k=ep],html[data-plb=ep] .plpv .m [data-k=sk],html[data-plb=seek] .plpv .p [data-k=ep],html[data-plb=ep] .plpv .p [data-k=sk]{display:none}
+.pvh{font-size:12px;font-weight:700;letter-spacing:.03em;color:var(--mu);margin:12px 16px 4px;text-transform:uppercase}
+.pvb{padding:0 16px}
 #player .top .ib{color:#fff}
+#player .top .ib[data-act=pclose]{width:44px;height:44px;margin:-2px 0 -2px -8px;border-radius:50%;background:none;border:0;box-shadow:none;-webkit-backdrop-filter:none;backdrop-filter:none;filter:drop-shadow(0 1px 5px #000c);transition:background .18s,transform .18s}
+#player .top .ib[data-act=pclose] .i{width:30px;height:30px}
+@media (hover:hover){#player .top .ib[data-act=pclose]:hover{background:#ffffff1f;transform:translateX(-2px)}}
+#player .top .ib[data-act=pclose]:active{transform:scale(.88)}
 #player .top{background:none!important;border-bottom:0!important;-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
 #player .top::before{content:"";position:absolute;left:0;right:0;top:0;bottom:-26px;z-index:-1;pointer-events:none;background:rgba(10,11,16,.62);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);-webkit-mask-image:linear-gradient(#000 0,#000 58%,transparent);mask-image:linear-gradient(#000 0,#000 58%,transparent)}
 .selmenu{z-index:120}
@@ -12185,6 +12349,7 @@ html[data-pc] .skwrap.ui{bottom:calc(70px + var(--pcl))}html[data-pc] .skwrap.vo
 .tph.on{opacity:1}
 @media (max-width:430px){.tpf{width:140px}}
 html[data-pc] .tpf{width:200px;border-radius:13px}
+.tpf video{position:absolute;inset:0;visibility:hidden}.tpf canvas{position:absolute;inset:0;width:100%;height:100%;display:block;background:#05060a}
 html[data-pc] #stage:has(#vc.off){cursor:none}
 .osd{position:absolute;left:50%;top:18%;transform:translate(-50%,-6px) scale(.96);z-index:9;display:flex;align-items:center;gap:9px;padding:9px 16px;border-radius:14px;background:linear-gradient(135deg,#2a2e46ee,#171a29ee);border:1px solid #ffffff2a;color:#fff;font-weight:700;font-size:15px;opacity:0;pointer-events:none;transition:opacity .16s,transform .16s;-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
 .osd.on{opacity:1;transform:translate(-50%,0) scale(1)}.osd .i{width:20px;height:20px}
@@ -12363,7 +12528,7 @@ html[data-pc].pcfs .vc .sk{left:28px;right:28px}
     <div class="nxbox hide" id="vnx"><div class="nxh"><span class="nxi"><i data-ico="next"></i></span><div class="nxtt"><b id="vnxb">Наступна серія</b><span id="vnxs"></span></div><span class="nxc" id="vnxc">5</span></div><div class="nxbar"><i id="vnxbar"></i></div><div class="nxb"><button class="nxbtn c" data-act="pnxcancel">Скасувати</button><button class="nxbtn g" data-act="pnxnow">Дивитись зараз</button></div></div>
     <div class="vc off" id="vc">
       <div class="top">
-        <button class="ib" data-act="pclose" aria-label="Закрити"><i data-ico="close"></i></button>
+        <button class="ib" data-act="pclose" aria-label="Вийти з плеєра"><i data-ico="pexit"></i></button>
         <div class="tt" id="ptitle"></div>
         <button class="ib" data-act="pcast" aria-label="Грати на іншому пристрої"><i data-ico="cast"></i></button>
         <button class="ib" data-act="airplay" id="apbtn" aria-label="AirPlay" hidden><i data-ico="airplay"></i></button>
@@ -12377,7 +12542,7 @@ html[data-pc].pcfs .vc .sk{left:28px;right:28px}
         <button class="cb sm" data-act="pnext" aria-label="Наступна серія"><i data-ico="next"></i></button>
       </div>
       <div class="vvp hide" id="vvp"><button class="vmb" id="vmb" aria-label="Вимкнути або увімкнути звук"><i data-ico="vol"></i></button><div class="vsl" id="vsl"><input type="range" id="vvr" min="0" max="100" step="1" value="100" aria-label="Гучність"><span class="v100" id="v100"></span></div><b id="vvn">100%</b></div>
-      <div class="sk"><span id="vcur">0:00</span><div class="tr" id="vtr"><div class="tbar"><div class="tfill" id="vfill"></div></div><div class="knob" id="vknob"></div><i class="tph" id="tph"></i><div class="tpv" id="tpv"><div class="tpf"><video id="tpvv" muted playsinline preload="metadata" disablepictureinpicture></video></div><span id="tpt">0:00</span></div><input type="range" id="vseek" min="0" max="1000" value="0" step="1"></div><span id="vrem">0:00</span>
+      <div class="sk"><span id="vcur">0:00</span><div class="tr" id="vtr"><div class="tbar"><div class="tfill" id="vfill"></div></div><div class="knob" id="vknob"></div><i class="tph" id="tph"></i><div class="tpv" id="tpv"><div class="tpf"><video id="tpvv" muted playsinline preload="metadata" disablepictureinpicture></video><canvas id="tpc" width="192" height="108"></canvas></div><span id="tpt">0:00</span></div><input type="range" id="vseek" min="0" max="100000" value="0" step="1"></div><span id="vrem">0:00</span>
         <button class="xb" id="psbtn" data-act="pset" aria-label="Налаштування плеєра"><i data-ico="cog"></i></button>
         <button class="xb" id="vvol" aria-label="Гучність"><i data-ico="vol"></i></button>
         <button class="xb" id="vpip" aria-label="Картинка в картинці"><i data-ico="pip"></i></button>
@@ -12525,8 +12690,9 @@ const ICONS = {
   plug: '<path d="M9 3v5M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>',
   hourglass: '<path d="M6 3h12M6 21h12"/><path d="M7 3v3a5 5 0 0 0 10 0V3M7 21v-3a5 5 0 0 1 10 0v3"/>',
   pause: '<path d="M8 5v14M16 5v14" stroke-width="3.2"/>',
-  back10: '<path d="M4 12a8 8 0 1 0 2.5-5.8"/><path d="M4 4v4.5h4.5"/><text x="12" y="15.5" font-size="7.5" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none">10</text>',
-  fwd10: '<path d="M20 12a8 8 0 1 1-2.5-5.8"/><path d="M20 4v4.5h-4.5"/><text x="12" y="15.5" font-size="7.5" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none">10</text>',
+  back10: '<path stroke-width="1.8" d="M4.4 8.6A8.8 8.8 0 1 0 12 4.2"/><path d="M8 4.2l5.2-3.4v6.8z" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><text x="12" y="16.2" font-size="7.4" font-weight="800" text-anchor="middle" fill="currentColor" stroke="none" font-family="-apple-system,Inter,system-ui,sans-serif">10</text>',
+  fwd10: '<path stroke-width="1.8" d="M19.6 8.6A8.8 8.8 0 1 1 12 4.2"/><path d="M16 4.2l-5.2-3.4v6.8z" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><text x="12" y="16.2" font-size="7.4" font-weight="800" text-anchor="middle" fill="currentColor" stroke="none" font-family="-apple-system,Inter,system-ui,sans-serif">10</text>',
+  pexit: '<path d="M15.5 4.5 8 12l7.5 7.5" stroke-width="2.6"/>',
   wifi: '<path d="M2 9a15 15 0 0 1 20 0"/><path d="M5.5 12.6a10 10 0 0 1 13 0"/><path d="M9 16.2a5 5 0 0 1 6 0"/><path d="M12 20h.01" stroke-width="3"/>',
   cell: '<path d="M5 20v-3M10 20v-7M15 20V9M20 20V4"/>',
   offline: '<path d="M2 9a15 15 0 0 1 4-2.6M22 9a15 15 0 0 0-9-4.9"/><path d="M5.5 12.6a10 10 0 0 1 3-1.8M18.5 12.6a10 10 0 0 0-3-1.8"/><path d="M9 16.2a5 5 0 0 1 2.2-1"/><path d="M3 3l18 18"/>',
@@ -13236,16 +13402,16 @@ function acStat() {
   return (a.running ? 'Перевіряю зараз… · ' : '') + 'Остання: ' + fmtWhen(a.last_run) + ' · наступна: ' + fmtWhen(a.next_run);
 }
 let acPollT = null;
-const acBusy = () => !!(S.checking || (S.ac && S.ac.running));
+const acBusy = () => !!(S.checking || (S.ac && S.ac.running && Date.now() - (S.ac._t || 0) < 12000));
 function acBtnSync() {  // кнопки «оновити» крутяться й блокуються, поки йде перевірка (ручна чи автоматична)
   const b = document.querySelector('#root [data-act=checkall]');
-  if (b) { const on = acBusy(); if (b.classList.contains('busy') !== on) { b.classList.toggle('busy', on); b.disabled = on; b.innerHTML = ico(on ? 'spinner' : 'refresh'); } }
+  if (b) { const on = acBusy(); if (b.classList.contains('busy') !== on) { b.classList.toggle('busy', on); b.disabled = !!S.checking; b.innerHTML = ico(on ? 'spinner' : 'refresh'); } }
   const c = document.querySelector('#root .btn[data-act=check]');
-  if (c) { const id = route().id, on = S.busy.has('check:' + id) || !!(S.ac && S.ac.running && S.ac.cur === id); if (c && c.classList.contains('busy') !== on) { c.classList.toggle('busy', on); c.disabled = on; c.innerHTML = ico(on ? 'spinner' : 'refresh') + ' Нові'; } }
+  if (c) { const id = route().id, own = S.busy.has('check:' + id), on = own || !!(S.ac && S.ac.running && S.ac.cur === id && Date.now() - (S.ac._t || 0) < 12000); if (c && c.classList.contains('busy') !== on) { c.classList.toggle('busy', on); c.disabled = own; c.innerHTML = ico(on ? 'spinner' : 'refresh') + ' Нові'; } }
 }
 async function pollAC(kick) {
   try {
-    const j = await api('/api/autocheck' + (kick === true ? '?kick=1' : '')), prev = S.ac; S.ac = j;
+    const j = await api('/api/autocheck' + (kick === true ? '?kick=1' : '')), prev = S.ac; j._t = Date.now(); S.ac = j;
     if (prev && j.seq !== prev.seq) {
       await loadLib();
       const f = (j.found || []).slice(-Math.max(1, j.seq - prev.seq));
@@ -13256,6 +13422,18 @@ async function pollAC(kick) {
     if (j.running && !acPollT) acPollT = setTimeout(() => { acPollT = null; pollAC(); }, 1800);  // поки йде автоперевірка — опитуємо частіше, щоб анімація була вчасно
   } catch (e) { /* сервер недоступний */ }
 }
+let qWatchId = null;
+async function qWatch(id) {  // після зміни озвучки сервер у фоні перевіряє якості серій — підтягуємо їх у список, поки не заповняться
+  qWatchId = id;
+  for (let i = 0; i < 12 && qWatchId === id; i++) {
+    await new Promise(r => setTimeout(r, 2500));
+    if (route().id !== id) break;
+    if (S.sheet) continue;
+    try { await loadLib(true); const it = item(id); if (!S.sheet && route().id === id) render(); if (it && it.episodes.length && it.episodes.every(x => (x.qs || []).length)) break; } catch (e) { break; }
+  }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) pollAC(); });
+addEventListener('focus', () => pollAC());
 function siteOrder() {
   const o = (S.set.site_order || []).filter(x => SITE_LIST.some(y => y[0] === x));
   return o.concat(SITE_LIST.map(y => y[0]).filter(x => !o.includes(x)));
@@ -13391,6 +13569,27 @@ function settingsHTML() {
         <label class="sw"><input type="checkbox" data-set="hide_psave" ${S.set.hide_psave === true ? 'checked' : ''}></label></div>
       ${IOS_APP ? `<div class="row"><div class="tx"><b>Плеєр iOS</b><span class="d">Стандартний: PiP, AirPlay, екран блокування.</span></div>
         <label class="sw"><input type="checkbox" data-set="ios_player" ${S.set.ios_player === true ? 'checked' : ''}></label></div>` : ''}
+    </div></div>
+  </div>
+
+  <div class="grp ${S.pvOpen ? 'open' : ''}" id="pvgrp">
+    <button class="gh" data-act="grptog" data-g="pvOpen" data-id="pvgrp"><div class="tx"><b>Вигляд плеєра</b><span>Стиль і набір кнопок керування</span></div>${ico('chev')}</button>
+    <div class="fold"><div>
+      <h6 class="pvh">Попередній перегляд</h6>
+      <div class="pvb"><div class="plpv">
+        <div class="pvs m"><span class="pvl">Плеєр</span>${plPrevRow(true)}</div>
+        <div class="pvr"><div class="pvs l"><span class="pvl">Завантаження</span><button class="cb sm" data-k="ep">${ico('prev')}</button><button class="cb sm" data-k="ep">${ico('next')}</button></div></div>
+        ${PC_APP ? `<div class="pvs p"><div class="pvt">Серія 1<small>Назва аніме</small></div>${plPrevRow(false)}<div class="pvk"><i></i></div></div>` : ''}
+      </div></div>
+      <h6 class="pvh">Стиль кнопок</h6>
+      <div class="row"><div class="tx"><b>Стиль</b><span class="d">Для плеєра, завантаження та PiP.</span></div>
+        ${stSel('pl_style', plStyle(), [['neon', 'Неон'], ['glass', 'Скло'], ['solid', 'Контраст']], 'Стиль кнопок плеєра')}</div>
+      <h6 class="pvh">Кнопки біля Play / Pause</h6>
+      <div class="row"><div class="tx"><b>Набір кнопок</b><span class="d">Перемотка ±10 с та перехід між серіями.</span></div>
+        ${stSel('pl_btns', plBtns(), [['both', 'Обидві пари'], ['seek', 'Лише перемотка'], ['ep', 'Лише серії']], 'Набір кнопок плеєра')}</div>
+      <h6 class="pvh">Ефекти</h6>
+      <div class="row"><div class="tx"><b>Частинки при натисканні</b><span class="d">Іскри, бульбашки чи риски — залежно від стилю.</span></div>
+        <label class="sw"><input type="checkbox" data-set="pl_fx" ${plFx() ? 'checked' : ''}></label></div>
     </div></div>
   </div>
 
@@ -13613,7 +13812,7 @@ function homeHTML() {
   ${S.reorder ? `<div class="bar"><h1>Редагування</h1>${layBtns()}<button class="btn pri sm" data-act="reorder">${ico('check')} Готово</button></div>
   <p style="margin:0 16px 4px;color:var(--mu);font-size:13px">Торкайтесь карток, щоб вибрати кілька. Утримайте й перетягніть — змінити порядок; потримайте картку над серединою іншої — згрупувати (вибрані поїдуть разом; другим пальцем можна додати ще й гортати). Правий кут — «переглянуті», лівий — видалити з бібліотеки. Або користуйтесь стрілками.</p>` : `<div class="bar"><h1>Мої аніме</h1>${netHTML()}
     <button class="ib" data-act="notifs" data-lp="bellall" aria-label="Повідомлення">${ico('bell')}${S.notifs.unread ? `<span class="dot">${S.notifs.unread > 99 ? '99+' : S.notifs.unread}</span>` : ''}</button>
-    <button class="ib${acBusy() ? ' busy' : ''}" data-act="checkall" aria-label="Перевірити нові серії" ${acBusy() ? 'disabled aria-busy="true"' : ''}>${ico(acBusy() ? 'spinner' : 'refresh')}</button>
+    <button class="ib${acBusy() ? ' busy' : ''}" data-act="checkall" aria-label="Перевірити нові серії" ${S.checking ? 'disabled aria-busy="true"' : ''}>${ico(acBusy() ? 'spinner' : 'refresh')}</button>
     <button class="ib" data-act="jobs" aria-label="Завантаження">${ico('download')}${dlBadge ? `<span class="dot">${dlBadge}</span>` : ''}</button>
   </div>`}
   ${hdr2(homeTabsHTML())}
@@ -13759,7 +13958,7 @@ function detailHTML(id) {
     ${rc.sim ? `<button class="${S.dtab === 'sim' ? 'on' : ''}" data-act="dtab" data-t="sim">Схожі<small>${rc.sim}</small></button>` : ''}
     ${rc.rec ? `<button class="${S.dtab === 'rec' ? 'on' : ''}" data-act="dtab" data-t="rec">Рекомендовані<small>${rc.rec}</small></button>` : ''}
     ${canCm ? `<button class="${S.dtab === 'cm' ? 'on' : ''}" data-act="dtab" data-t="cm">Коментарі</button>` : ''}</div>` : '';
-  const checking = S.busy.has('check:' + id) || !!(S.ac && S.ac.running && S.ac.cur === id);
+  const checking = S.busy.has('check:' + id), spinning = checking || !!(S.ac && S.ac.running && S.ac.cur === id && Date.now() - (S.ac._t || 0) < 12000);
   const srcs = it.sources || [];
   return `
   <div class="bar"><button class="back" data-act="${tmp ? 'back' : 'home'}">‹ ${tmp ? 'Назад' : 'Бібліотека'}</button><h1></h1>${netHTML()}
@@ -13785,7 +13984,7 @@ function detailHTML(id) {
   <div class="acts">
     <button class="btn pri" data-act="playnext" ${nx || it.episodes.length ? '' : 'disabled'}>${ico('play')} ${nx ? (nx.pos > 5 ? 'Продовжити · серія ' + esc(nx.n) : 'Дивитись · серія ' + esc(nx.n)) : 'Дивитись спочатку'}</button>
     ${tmp && it.preview_of && item(it.preview_of) ? `<button class="btn ok" data-act="openlib" data-id="${esc(it.preview_of)}">${ico('book')} Відкрити в бібліотеці</button>` : tmp ? `<button class="btn ok" data-act="keep" data-lp="gpick" data-cx="tmp" data-m="lib" ${S.busy.has('keep') ? 'disabled' : ''}>${ico('plus')} В бібліотеку</button><button class="btn" data-act="keepseen" data-lp="gpick" data-cx="tmp" data-m="seen" ${S.busy.has('keep') ? 'disabled' : ''}>${ico('check')} Переглянуте</button>`
-          : `<button class="btn${checking ? ' busy' : ''}" data-act="check" ${checking ? 'disabled aria-busy="true"' : ''}>${ico(checking ? 'spinner' : 'refresh')} Нові</button>`}
+          : `<button class="btn${spinning ? ' busy' : ''}" data-act="check" ${checking ? 'disabled aria-busy="true"' : ''}>${ico(spinning ? 'spinner' : 'refresh')} Нові</button>`}
     <button class="btn" data-act="site" data-id="${it.id}" aria-label="Відкрити сайт (подвійний тап — скопіювати посилання)">${ico('globe')}</button>
   </div>
   ${desc ? `<div class="desc ${S.descOpen ? '' : 'cl'}">${esc(desc)}</div>${desc.length > 220 ? `<button class="more" data-act="more">${S.descOpen ? 'Згорнути' : 'Читати далі'}</button>` : ''}` : ''}
@@ -14439,7 +14638,7 @@ let bkShared = '', bkAsked = '', bkApplied = '', S_bkMode = 'lib';
 async function applyImported() {  // після відновлення одразу показуємо нову бібліотеку й налаштування (без перезапуску програми)
   try {
     const j = await api('/api/settings');
-    S.set = j; syncAuto();
+    S.set = j; syncAuto(); plApply();
     const c = j.client || {};  // уподобання, що живуть лише в браузері (вкладка бібліотеки, вигляд серій, сайт новинок, гучність)
     try {
       if (c.libTab) S.libTab = c.libTab;
@@ -14733,7 +14932,7 @@ document.addEventListener('input', ev => {
     const r = ceRegion(s.cov.img, s.fp.z, s.fp.cx, s.fp.cy), dx = ev.clientX - d.x, dy = ev.clientY - d.y; d.x = ev.clientX; d.y = ev.clientY;
     s.fp.cx -= dx * (r.rw / fr.clientWidth) / r.iw; s.fp.cy -= dy * (r.rh / fr.clientHeight) / r.ih; ceFitPaint();
   });
-  ['pointerup', 'pointercancel'].forEach(e => document.addEventListener(e, () => { d = null; }));
+  ['pointerup', 'pointercancel'].forEach(e => document.addEventListener(e, () => { if (d) S.noBd = Date.now() + 500; d = null; }));  // відпустили палець поза рамкою — це не клік по фону
   document.addEventListener('wheel', ev => {
     const s = S.sheet; if (!s || !s.fit || !ev.target.closest || !ev.target.closest('#cfr')) return;
     ev.preventDefault(); s.fp.z = Math.max(1, Math.min(3, s.fp.z - ev.deltaY * 0.002)); const z = $('#cfz'); if (z) z.value = s.fp.z; ceFitPaint();
@@ -15166,7 +15365,8 @@ const A = {
     });
   },
   async checkall() {
-    if (acBusy() || !S.items.length) return;
+    if (S.checking || !S.items.length) return;
+    if (S.ac && S.ac.running) { toast('Автооновлення вже триває…', false, 'refresh'); return; }
     S.checking = true; render();
     const found = [];
     for (const it of S.items.filter(x => !x.archived)) {
@@ -15310,6 +15510,7 @@ const A = {
       S.sel.clear(); S.selMode = false; fx(); S.chipFix = true; await loadLib();
       const n = item(id);
       toast('Озвучка: ' + dub + (n && n.episodes.length ? '' : ' — серій поки немає'), false, 'check');
+      qWatch(id);
     } catch (e) { toast(e.message, true); }
     finally { S.busy.delete('sw'); S.chipFix = true; render(); }
   },
@@ -15417,7 +15618,7 @@ const A = {
     const f = S.dlg; S.dlg = null; closeSheet(); if (f) f(v);
   },
   'dlg-no'() { const num = S.sheet && (S.sheet.kind === 'number' || S.sheet.kind === 'text'); const f = S.dlg; S.dlg = null; closeSheet(); if (f) f(num ? null : false); },
-  backdrop(el, ev) { if (ev.target === el) A['dlg-no'](); },
+  backdrop(el, ev) { if (ev.target === el && Date.now() > (S.noBd || 0)) A['dlg-no'](); },
   play(el) {
     const id = route().id; const n = Number(el.closest('[data-n]').dataset.n);
     play(id, n);
@@ -15922,6 +16123,7 @@ document.addEventListener('change', ev => {
     else if (k === 'skip_mode') setOpt('skip_mode', v);
     else if (k === 'vol_max') { setOpt('vol_max', Number(v)); if (volMax() < 200 && volGet() > 100) volApply(100); }
     else if (k === 'recent_min') setOpt('recent_min', Number(v));
+    else if (k === 'pl_style' || k === 'pl_btns') setOpt(k, v);
     return;
   }
   if (ev.target.id === 'mobsw') {
@@ -15978,7 +16180,7 @@ function pcPipPayload(t, cur, paused, src, hand) {
   const it = S.cur && item(S.cur.id), i = it ? it.episodes.findIndex(x => x.n === S.cur.n) : -1, ic = {};
   ['play', 'pause', 'prev', 'next', 'back10', 'fwd10', 'vol', 'close', 'fs', 'undo'].forEach(n => { ic[n] = ico(n); });
   PCPIP.nxk = PCPIP.skk = '';
-  return {t, src, cur, paused, hand: !!hand, own: ownVol(), vmax: volMax(), p: volGet(), rate: V.playbackRate, skips, icons: ic, ac: getComputedStyle(document.documentElement).getPropertyValue('--ac').trim(),
+  return {t, src, cur, paused, hand: !!hand, own: ownVol(), vmax: volMax(), p: volGet(), rate: V.playbackRate, skips, icons: ic, pls: plStyle(), plb: plBtns(), plf: plFx(), ac: getComputedStyle(document.documentElement).getPropertyValue('--ac').trim(),
     title: S.cur ? 'Серія ' + S.cur.n : '', sub: it ? it.title : '', hasPrev: i > 0, hasNext: !!(it && i >= 0 && it.episodes[i + 1])};
 }
 function pcPipHook(on) {  // поки йде PiP, стандартні властивості відео керують вікном PiP: решта коду плеєра (позиція, інтро/аутро, автоперехід) працює без змін
@@ -16081,8 +16283,9 @@ function volGet() { let v = 100; try { v = parseInt(localStorage.getItem('pvol')
 function volCtx() {  // Web Audio створюємо лише коли справді міняють гучність
   if (AUD) return AUD;
   const C = window.AudioContext || window.webkitAudioContext; if (!C) return null;
-  const ctx = new C(), src = ctx.createMediaElementSource(V), g = ctx.createGain();
-  src.connect(g); g.connect(ctx.destination); AUD = {ctx, g}; return AUD;
+  let ctx; try { ctx = new C({latencyHint: 'interactive'}); } catch (e) { ctx = new C(); }  // малий буфер виводу: iOS інакше ще ~секунду грає «старий» звук після перемотки/паузи
+  const src = ctx.createMediaElementSource(V), g = ctx.createGain();
+  src.connect(g); g.connect(ctx.destination); AUD = {ctx, g, duck: false}; return AUD;
 }
 function volWake() {  // iOS дозволяє створити/запустити аудіоконтекст лише в жесті користувача: робимо це в момент торкання повзунка
   if (!ownVol()) return;
@@ -16096,7 +16299,7 @@ function volApply(p) {
   if (!AUD && p === 100) return;
   try {
     if (!volCtx()) return;
-    AUD.g.gain.value = p / 100;
+    if (!AUD.duck) AUD.g.gain.value = p / 100;
     if (AUD.ctx.state !== 'running') AUD.ctx.resume().catch(() => {});
   } catch (e) { /* без Web Audio лишається системна гучність */ }
 }
@@ -16299,6 +16502,18 @@ let beatT = 0;
 function beat(closed) { const n = Date.now(); if (!closed && n - beatT < 7000) return; beatT = n; fetch('/api/beat', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: closed === true ? '{"closed":true}' : '{}'}).catch(() => {}); }
 setInterval(() => { if (S.cur) { beat(); if (S.ps && S.ps.id === S.cur.id) psTouch(); } }, 10000);  // поки плеєр відкритий (і на паузі, і в PiP) програму не присипляємо  // Python дізнається, що відео грає, і не дає iOS приспати програму
 V.addEventListener('playing', () => beat()); V.addEventListener('timeupdate', () => { if (!V.paused) beat(); }); V.addEventListener('pause', () => beat());
+setInterval(() => { if (!document.hidden) fetch('/api/pulse', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'}).catch(() => {}); }, 3000);
+/* після повернення з фону (PiP, Spotify, блокування) повертаємо плеєр у робочий стан: «зависле» відеоположення над сторінкою глушить усі натискання */
+function wakeHeal() {
+  if (!S.cur) return;
+  try { if (!pipOn() && !V.webkitDisplayingFullscreen && V.webkitPresentationMode && V.webkitPresentationMode !== 'inline') { pipHeal(); uiRecover(); } } catch (e) {}  // лишився «чужий» режим відео
+  try {  // над плеєром не має бути чужого шару: якщо в центрі екрана не наш елемент — скидаємо стан
+    const el = document.elementFromPoint(innerWidth / 2, innerHeight / 2);
+    if (el && !el.closest('#player, #sheet, .sheet, #toast, #pr, #bswl') && !S.sheet) { uiRecover(); pipHeal(); }
+  } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { setTimeout(wakeHeal, 250); setTimeout(wakeHeal, 1500); } });
+window.addEventListener('pageshow', () => setTimeout(wakeHeal, 300));
 function flushPos() { try { const p = JSON.parse(localStorage.getItem('pendPos') || 'null'); if (p && p.id) sendPos(p); } catch (e) {} }
 window.__srv = () => { try { pollAC(true); } catch (e) {} loadLib(true).catch(() => {}); flushPos(); };
 async function markWatched() {
@@ -16333,7 +16548,7 @@ function nxStart(secs) {
   if (nxT || !S.cur) return;
   if (appAway()) { NXWAIT = secs || 5; return; }  // не стартуємо наступну серію «в нікуди»: чекаємо, поки повернешся в програму
   const it = item(S.cur.id), i = it ? it.episodes.findIndex(x => x.n === S.cur.n) : -1, nx = it && it.episodes[i + 1];
-  if (!nx) { closePlayer(); return; }
+  if (!nx) return;  // наступної серії немає — лишаємось у плеєрі
   const tot = secs || 5; let left = tot;
   const canBack = !!(skBack && skBack.k === 'ending' && win('ending'));
   const paint = () => { NXS = {n: nx.n, left, tot, w: canBack ? 1 : 0}; $('#vnxb').textContent = `Наступна серія ${nx.n}`; $('#vnxs').textContent = `Автоперехід через ${left} с`; $('#vnxc').textContent = left; $('#vnxbar').style.width = ((tot - left) / tot * 100) + '%'; };
@@ -16389,7 +16604,7 @@ function stepPlayer(d, auto) {
   if (!S.cur) return;
   const it = item(S.cur.id); const i = it.episodes.findIndex(x => x.n === S.cur.n);
   const nx = it.episodes[i + d];
-  if (!nx) { if (auto) closePlayer(); else toast(d > 0 ? 'Це остання серія' : 'Це перша серія'); return; }
+  if (!nx) { if (!auto) toast(d > 0 ? 'Це остання серія' : 'Це перша серія'); return; }
   savePos(true); play(S.cur.id, nx.n);
 }
 /* ---------- інтро / аутро ---------- */
@@ -16420,7 +16635,52 @@ function curPanel() {
     <div class="row sub cuprev ${off ? 'dis' : ''}">${CUR_PREV.map(k => `<div class="cuv" data-curk="${k}"><img alt="" src="/cur/${k}.svg?s=100" style="width:${32 * curEff(k) / 100}px;height:${32 * curEff(k) / 100}px"></div>`).join('')}</div>
     <div class="row"><button class="btn" data-act="cureset" style="margin-left:auto">Скинути розмір</button></div>`;
 }
-function setOpt(k, v) { S.set[k] = v; api('/api/settings', {[k]: v}).catch(er => toast(er.message, true)); }
+function plBurst(el) {
+  const H = document.documentElement; if (H.dataset.plfx === '0') return;
+  const st = H.dataset.pls || 'neon', r = el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2, R = Math.max(r.width, r.height) / 2, rnd = Math.random;
+  let L = document.getElementById('plfxl');
+  if (!L) { L = document.createElement('div'); L.id = 'plfxl'; L.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:99999;overflow:hidden'; document.body.appendChild(L); }
+  const mk = (css, kf, o) => { const d = document.createElement('i'); d.style.cssText = 'position:absolute;left:' + cx + 'px;top:' + cy + 'px;' + css; L.appendChild(d); const a = d.animate(kf, Object.assign({fill: 'forwards'}, o)); a.onfinish = () => d.remove(); };
+  const T = 'translate(-50%,-50%) ';
+  if (st === 'neon') {
+    mk('width:' + 2 * R + 'px;height:' + 2 * R + 'px;border-radius:50%;border:2px solid #8b7bff;box-shadow:0 0 14px #7c6cff', [{transform: T + 'scale(1)', opacity: .9}, {transform: T + 'scale(1.9)', opacity: 0}], {duration: 520, easing: 'ease-out'});
+    for (let i = 0; i < 12; i++) {
+      const a = i / 12 * 6.283 + rnd() * .4, d = R + 16 + rnd() * 30, z = 3 + rnd() * 4, c = i % 2 ? '#a99bff' : '#5aa9ff';
+      mk('width:' + z + 'px;height:' + z + 'px;border-radius:50%;background:' + c + ';box-shadow:0 0 9px ' + c, [{transform: T + 'translate(0,0) scale(1)', opacity: 1}, {transform: T + 'translate(' + Math.cos(a) * d + 'px,' + Math.sin(a) * d + 'px) scale(.2)', opacity: 0}], {duration: 520 + rnd() * 260, easing: 'cubic-bezier(.1,.75,.3,1)'});
+    }
+  } else if (st === 'glass') {
+    mk('width:' + 2 * R + 'px;height:' + 2 * R + 'px;border-radius:50%;border:1.5px solid #ffffffaa;background:#ffffff14', [{transform: T + 'scale(.9)', opacity: .9}, {transform: T + 'scale(1.7)', opacity: 0}], {duration: 650, easing: 'ease-out'});
+    for (let i = 0; i < 7; i++) {
+      const z = 5 + rnd() * 9, x = (rnd() - .5) * R * 2.2, y = -(R * .6 + rnd() * R * 1.4);
+      mk('width:' + z + 'px;height:' + z + 'px;border-radius:50%;border:1px solid #ffffffbb;background:radial-gradient(circle at 30% 30%,#ffffff66,#ffffff12)', [{transform: T + 'translate(' + x * .3 + 'px,0) scale(.6)', opacity: 0}, {opacity: 1, offset: .2}, {transform: T + 'translate(' + x + 'px,' + y + 'px) scale(1.25)', opacity: 0}], {duration: 800 + rnd() * 400, easing: 'cubic-bezier(.2,.7,.3,1)'});
+    }
+  } else {
+    mk('width:' + 2 * R + 'px;height:' + 2 * R + 'px;border-radius:50%;border:2px solid #fff', [{transform: T + 'scale(1)', opacity: .85}, {transform: T + 'scale(1.55)', opacity: 0}], {duration: 420, easing: 'ease-out'});
+    for (let i = 0; i < 10; i++) {
+      const a = i / 10 * 360 + (rnd() - .5) * 10, d0 = R + 4, d1 = R + 16 + rnd() * 14;
+      mk('width:3px;height:' + (7 + rnd() * 6) + 'px;border-radius:2px;background:#fff', [{transform: T + 'rotate(' + a + 'deg) translateY(-' + d0 + 'px)', opacity: 1}, {transform: T + 'rotate(' + a + 'deg) translateY(-' + d1 + 'px) scaleY(.4)', opacity: 0}], {duration: 380 + rnd() * 120, easing: 'cubic-bezier(.1,.8,.3,1)'});
+    }
+  }
+}
+document.addEventListener('click', ev => {
+  const b = ev.target.closest && ev.target.closest('.vc .cb, .plpv .cb'); if (!b) return;
+  plBurst(b);
+  if (b.closest('.plpv') && b.classList.contains('big')) { const pl = b.dataset.pl === '1'; b.dataset.pl = pl ? '0' : '1'; b.innerHTML = ico(pl ? 'pause' : 'play'); }  // у перегляді Play/Pause перемикається
+}, true);
+function plStyle() { const v = S.set && S.set.pl_style; return v === 'glass' || v === 'solid' ? v : 'neon'; }
+function plFx() { return !(S.set && S.set.pl_fx === false); }
+function plBtns() { const v = S.set && S.set.pl_btns; return v === 'seek' || v === 'ep' ? v : 'both'; }
+function plPrevRow(full) {
+  return `<button class="cb sm" data-k="ep">${ico('prev')}</button>${full ? '' : ''}<button class="cb" data-k="sk">${ico('back10')}</button><button class="cb big">${ico('pause')}</button><button class="cb" data-k="sk">${ico('fwd10')}</button><button class="cb sm" data-k="ep">${ico('next')}</button>`;
+}
+let PLAPP = '';
+function plApply() {  // стиль і набір кнопок: на всьому застосунку та в PiP
+  const a = plStyle(), b = plBtns(), key = a + '|' + b + '|' + plFx(), H = document.documentElement;
+  if (key === PLAPP) return;
+  PLAPP = key; H.dataset.pls = a; H.dataset.plb = b; H.dataset.plfx = plFx() ? '1' : '0';
+  try { if (PCPIP && PCPIP.on) pcPipSend({t: 'pl', pls: a, plb: b, plf: plFx()}); } catch (e) {}
+}
+function setOpt(k, v) { S.set[k] = v; if (k === 'pl_style' || k === 'pl_btns' || k === 'pl_fx') plApply(); api('/api/settings', {[k]: v}).catch(er => toast(er.message, true)); }
 function win(k) { const w = skips && skips[k]; return w && w.length === 2 && w[1] > w[0] ? w : null; }
 function paintMarks() {
   if (PCPIP.on && !PCPIP.loading) pcPipSend({t: 'skips', skips});
@@ -16693,13 +16953,22 @@ $('#vpip').addEventListener('click', () => {
 }));
 /* ---------- звук при перемотці / після згортання ---------- */
 let SMUT = 0, SMT = 0;  // на час перемотки глушимо звук: iOS ще секунду грає старий момент, хоча картинка вже нова
-function smuteOff() { clearTimeout(SMT); if (SMUT) { SMUT = 0; try { V.muted = false; } catch (e) {} } }
+function audDuck(on) {  // власна гучність: миттєво гасимо Web Audio на перемотці/паузі й плавно повертаємо, щоб не лишався «хвіст» старого звуку
+  if (!AUD) return;
+  try {
+    const g = AUD.g.gain, t = AUD.ctx.currentTime; g.cancelScheduledValues(t); AUD.duck = !!on;
+    if (on) g.setValueAtTime(0, t); else { g.setValueAtTime(0, t); g.linearRampToValueAtTime(volGet() / 100, t + 0.07); }
+  } catch (e) {}
+}
+function smuteOff() { clearTimeout(SMT); if (SMUT) { SMUT = 0; try { V.muted = false; } catch (e) {} if (!V.paused) audDuck(false); } }
 V.addEventListener('seeking', () => {
+  audDuck(true);
   if (!V.muted && !SMUT) { SMUT = 1; try { V.muted = true; } catch (e) {} }
   clearTimeout(SMT); SMT = setTimeout(smuteOff, 3000);
 });
 ['seeked', 'playing'].forEach(ev => V.addEventListener(ev, () => { if (SMUT && !V.seeking) { clearTimeout(SMT); SMT = setTimeout(smuteOff, 220); } }));
-V.addEventListener('pause', smuteOff);
+V.addEventListener('pause', () => { smuteOff(); audDuck(true); });
+['playing', 'play'].forEach(ev => V.addEventListener(ev, () => { if (AUD && AUD.duck && !V.seeking && !SMUT) audDuck(false); }));
 function audRescue() {  // після повернення з фону аудіосесія/AudioContext iOS буває «перервана» — піднімаємо звук без перезапуску програми
   try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
   try { if (AUD && AUD.ctx.state !== 'running') AUD.ctx.resume().catch(() => {}); } catch (e) {}
@@ -16732,11 +17001,11 @@ function vcShow() {
 }
 function vcSync() {
   const d = V.duration || 0, t = V.currentTime || 0;
-  if (!seeking) VS.value = d ? Math.round(t / d * 1000) : 0;
-  $('#vcur').textContent = fmtT(seeking ? VS.value / 1000 * d : t);
-  const pc = d ? (seeking ? VS.value / 10 : t / d * 100) : 0;
+  if (!seeking) VS.value = d ? Math.round(t / d * 100000) : 0;
+  $('#vcur').textContent = fmtT(seeking ? VS.value / 100000 * d : t);
+  const pc = d ? (seeking ? VS.value / 1000 : t / d * 100) : 0;
   $('#vfill').style.width = pc + '%'; $('#vknob').style.left = pc + '%';
-  $('#vrem').textContent = d ? '-' + fmtT(Math.max(0, d - (seeking ? VS.value / 1000 * d : t))) : '0:00';
+  $('#vrem').textContent = d ? '-' + fmtT(Math.max(0, d - (seeking ? VS.value / 100000 * d : t))) : '0:00';
 }
 function vcIcon() { $('#vpp').innerHTML = ico(V.paused ? 'play' : 'pause'); }
 $('#stage').addEventListener('click', ev => {
@@ -16798,7 +17067,7 @@ $('#vpp').addEventListener('click', () => { V.paused ? V.play().catch(() => {}) 
 $('#vback').addEventListener('click', () => { V.currentTime = Math.max(0, V.currentTime - 10); vcSync(); });
 $('#vfwd').addEventListener('click', () => { V.currentTime = Math.min(V.duration || 1e9, V.currentTime + 10); vcSync(); });
 VS.addEventListener('input', () => { seeking = true; vcSync(); clearTimeout(vcT); });
-VS.addEventListener('change', () => { if (V.duration) V.currentTime = VS.value / 1000 * V.duration; seeking = false; vcSync(); vcShow(); });
+VS.addEventListener('change', () => { if (V.duration) V.currentTime = VS.value / 100000 * V.duration; seeking = false; vcSync(); vcShow(); });
 ['play', 'pause', 'playing'].forEach(e => V.addEventListener(e, () => { vcIcon(); vcShow(); }));
 V.addEventListener('timeupdate', () => { vcSync(); skipTick(); });
 ['playing', 'seeked', 'loadeddata', 'canplay'].forEach(e => V.addEventListener(e, skipTick));
@@ -16806,18 +17075,33 @@ setInterval(() => { if (S.cur && !V.paused) skipTick(); }, 400);
 V.addEventListener('loadedmetadata', vcSync);
 
 /* ---------- кадр-превʼю при перемотці / наведенні (друге відео без звуку) ---------- */
-const TP = {v: $('#tpvv'), box: $('#tpv'), t: $('#tpt'), f: document.querySelector('.tpf'), h: $('#tph'), want: null, busy: false, src: '', bad: false, rel: 0, bt: 0};
+const TP = {v: $('#tpvv'), box: $('#tpv'), t: $('#tpt'), f: document.querySelector('.tpf'), h: $('#tph'), c: $('#tpc'), cache: new Map(), key: null, want: null, busy: false, src: '', bad: false, rel: 0, bt: 0};
+TP.cx = TP.c.getContext('2d');
 function tpSrc() {
   const s = V.currentSrc || V.src || ''; clearTimeout(TP.rel); if (!s) return;
-  if (s !== TP.src) { TP.src = s; TP.bad = false; TP.f.classList.remove('nov'); try { TP.v.src = s; TP.v.load(); } catch (e) {} }
+  if (s !== TP.src) { TP.src = s; TP.bad = false; TP.cache.clear(); TP.f.classList.remove('nov'); try { TP.v.src = s; TP.v.load(); } catch (e) {} }
 }
-function tpFrame(t) { TP.want = t; if (!TP.busy && !TP.bad) tpGo(); }
+// кадри, які вже бачили, зберігаються (на секунду точності) й показуються миттєво; нові читаються з другого відео, на Safari — швидким переходом до ключового кадру
+function tpQ(t) { const d = V.duration || 0; return Math.round(t / (d > 5400 ? 2 : 1)); }
+function tpDraw(src) { try { TP.cx.drawImage(src, 0, 0, TP.c.width, TP.c.height); } catch (e) {} }
+function tpFrame(t) {
+  if (TP.bad) return; const q = tpQ(t), hit = TP.cache.get(q);
+  if (hit) { tpDraw(hit); TP.cache.delete(q); TP.cache.set(q, hit); TP.want = null; return; }  // повторне звернення: свіжіший у черзі, без читання відео
+  TP.want = t; if (!TP.busy) tpGo();
+}
 function tpGo() {
-  if (TP.want == null) return; const t = TP.want; TP.want = null; TP.busy = true; clearTimeout(TP.bt);
-  TP.bt = setTimeout(() => { TP.busy = false; if (TP.want != null) tpGo(); }, 600);
-  try { TP.v.currentTime = t; } catch (e) { TP.busy = false; }
+  if (TP.want == null) return; const t = TP.want; TP.want = null; TP.busy = true; TP.key = tpQ(t); clearTimeout(TP.bt);
+  TP.bt = setTimeout(() => { TP.busy = false; if (TP.want != null) tpGo(); }, 450);
+  try { if (TP.v.fastSeek) TP.v.fastSeek(t); else TP.v.currentTime = t; } catch (e) { TP.busy = false; }
 }
-TP.v.addEventListener('seeked', () => { clearTimeout(TP.bt); TP.busy = false; if (TP.want != null) tpGo(); });
+TP.v.addEventListener('seeked', () => {
+  clearTimeout(TP.bt); TP.busy = false;
+  if (TP.key != null && TP.v.videoWidth) {
+    tpDraw(TP.v);
+    try { const c = document.createElement('canvas'); c.width = TP.c.width; c.height = TP.c.height; c.getContext('2d').drawImage(TP.v, 0, 0, c.width, c.height); TP.cache.set(TP.key, c); if (TP.cache.size > 90) TP.cache.delete(TP.cache.keys().next().value); } catch (e) {}
+  }
+  if (TP.want != null) tpGo();
+});
 TP.v.addEventListener('error', () => { if (TP.src) { TP.bad = true; TP.f.classList.add('nov'); } });
 function tpShow(frac, hover) {
   const d = V.duration; if (!d || !isFinite(d)) return;
@@ -16831,7 +17115,7 @@ function tpHide() {
   TP.box.classList.remove('on'); TP.h.classList.remove('on');
   clearTimeout(TP.rel); TP.rel = setTimeout(() => { TP.src = ''; try { TP.v.removeAttribute('src'); TP.v.load(); } catch (e) {} }, 25000);  // звільняємо друге відео, коли не користуються
 }
-VS.addEventListener('input', () => tpShow(VS.value / 1000, false));
+VS.addEventListener('input', () => tpShow(VS.value / 100000, false));
 ['change', 'pointerup', 'pointercancel', 'blur'].forEach(e => VS.addEventListener(e, () => { if (!seeking || e !== 'pointerup') tpHide(); }));
 VS.addEventListener('pointerup', () => setTimeout(tpHide, 30));
 $('#vtr').addEventListener('pointermove', ev => {  // наведення мишею (ПК, iPad з мишею): час і кадр моменту під курсором
@@ -16995,7 +17279,7 @@ async function pullView() {
       if (['home', 'group'].includes(route().name) && !S.cur) render();
     }
     if (S.set) Object.assign(S.set, j);
-    ovSync();
+    plApply(); ovSync();
   } catch (e) {}
 }
 function ovSync() {  // після зміни налаштувань ззовні (синхронізація/передача) оновлюємо кнопку гучності й режим плеєра
@@ -17862,6 +18146,24 @@ function fxBlocks(kind) {
 }
 let FXT = [], FXBUSY = false, FXDEMO = 0;
 const FXDUR = {blocks: 1750, vortex: 2000, edge: 1800};
+/* заокруглення екрана пристрою (pt): світіння по краях має точно лягати в кути екрана, не заходити за них і не лишати зазору */
+const SCR_R = {'375x812': 44, '414x896': 41.5, '390x844': 47.33, '428x926': 53.33, '393x852': 55, '430x932': 55, '402x874': 62, '440x956': 62, '420x912': 62, '360x780': 44, '375x667': 0, '414x736': 0, '320x568': 0, '375x812b': 39,
+  '744x1133': 18, '820x1180': 18, '834x1194': 18, '834x1210': 18, '1024x1366': 18, '1032x1376': 18, '768x1024': 0, '810x1080': 0, '834x1112': 0};
+function devRadius() {
+  if (PC_APP) {
+    const d = document.documentElement; if (d.classList.contains('pcmax') || d.classList.contains('pcfs')) return 0;
+    return PC_W11 === false ? 0 : 8;  // Windows 11 — округлені кути вікна (8 px), Windows 10 — прямі
+  }
+  const a = Math.min(screen.width, screen.height), b = Math.max(screen.width, screen.height), k = Math.round(a) + 'x' + Math.round(b);
+  if (k in SCR_R) return SCR_R[k];
+  if (a >= 700) return 18;  // новіші iPad
+  const cs = getComputedStyle(document.documentElement), top = parseFloat(cs.getPropertyValue('--top')) || 0;
+  return top >= 59 ? 55 : top >= 44 ? 44 : (parseFloat(cs.getPropertyValue('--bot')) > 0 ? 40 : 0);
+}
+let PC_W11 = null;
+try { if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) navigator.userAgentData.getHighEntropyValues(['platformVersion']).then(v => { PC_W11 = parseInt(v.platformVersion) >= 13; applyScr(); }).catch(() => {}); } catch (e) {}
+function applyScr() { document.documentElement.style.setProperty('--scr', devRadius() + 'px'); }
+applyScr(); addEventListener('resize', applyScr); addEventListener('orientationchange', () => setTimeout(applyScr, 200));
 function fxStyle() { const v = S.set && S.set.fx_style; return FXDUR[v] ? v : 'blocks'; }
 function fxSnap() {
   try {
@@ -18088,7 +18390,7 @@ function diagSend(ev) {
   let sw = null;
   const layer = $('#layer');
   layer.addEventListener('touchstart', e => {
-    const sh = e.target.closest('.sheet'); if (!sh || e.touches.length !== 1 || sh.closest('.back-d.pop')) { sw = null; return; }  // менюшки збоку не тягнуться
+    const sh = e.target.closest('.sheet'); if (!sh || e.touches.length !== 1 || sh.closest('.back-d.pop') || e.target.closest('#cfr, #cfz, input[type=range]')) { sw = null; return; }  // підгонка обкладинки / повзунки: шторку не тягнемо  // менюшки збоку не тягнуться
     const sc = e.target.closest('#joblist') || $('#sb');  // у шторці завантажень прокручується #joblist, а не #sb
     sw = {y: e.touches[0].clientY, t: Date.now(), sh, sc, drag: false, grab: !!e.target.closest('.grab'), atTop: !sc || sc.scrollTop <= 0, last: 0};
   }, {passive: true});
@@ -18167,7 +18469,7 @@ function diagSend(ev) {
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { pollAC(true); flushPos(); if (!S.cur) loadLib('vis').catch(() => {}); } });
 flushPos();
 api('/api/settings').then(j => {
-  S.set = j; syncAuto();
+  S.set = j; syncAuto(); plApply();
   if (j.view && Object.keys(j.view).length) { S.view = {...VIEW_DEF, ...j.view}; try { localStorage.setItem('libview', JSON.stringify(S.view)); } catch (e) {} if (['home', 'group'].includes(route().name)) render(); }
   else if (S.view && JSON.stringify(S.view) !== JSON.stringify(VIEW_DEF)) api('/api/settings', {view: S.view}).catch(() => {});  // лише змінений вигляд (дефолт не перебиває чужий)
 }).catch(() => {}).then(() => { S.setReady = true; });
@@ -18232,7 +18534,7 @@ if (PC_APP) (function () {
   const RZ = [['l',10,'left:0;top:10px;bottom:10px;width:5px;cursor:ew-resize'],['r',11,'right:0;top:10px;bottom:10px;width:5px;cursor:ew-resize'],['t',12,'top:0;left:10px;right:10px;height:4px;cursor:ns-resize'],['b',15,'bottom:0;left:10px;right:10px;height:5px;cursor:ns-resize'],['tl',13,'left:0;top:0;width:10px;height:10px;cursor:nwse-resize'],['tr',14,'right:0;top:0;width:10px;height:10px;cursor:nesw-resize'],['bl',16,'left:0;bottom:0;width:10px;height:10px;cursor:nesw-resize'],['br',17,'right:0;bottom:0;width:10px;height:10px;cursor:nwse-resize']];
   const rzs = document.createElement('style'); rzs.textContent = '.rzh{position:fixed;z-index:2147483647;background:transparent}html.pcfs .rzh,html.pcmax .rzh{display:none!important}';
   document.head.appendChild(rzs);
-  RZ.forEach(([n, ht, css]) => { const d = document.createElement('div'); d.className = 'rzh'; d.style.cssText = css; d.dataset.curk = ({l: 'resize-ew', r: 'resize-ew', t: 'resize-ns', b: 'resize-ns', tl: 'resize-nwse', br: 'resize-nwse', tr: 'resize-nesw', bl: 'resize-nesw'})[n]; d.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); post('rz:' + ht); }); document.body.appendChild(d); });
+  RZ.forEach(([n, ht, css]) => { const d = document.createElement('div'); d.className = 'rzh'; d.style.cssText = css; d.dataset.curk = ({l: 'resize-ew', r: 'resize-ew', t: 'resize-ns', b: 'resize-ns', tl: 'resize-nwse', br: 'resize-nwse', tr: 'resize-nesw', bl: 'resize-nesw'})[n]; d.addEventListener('pointerdown', e => { if (e.button !== 0) return; e.preventDefault(); e.stopPropagation(); let raf = 0; try { d.setPointerCapture(e.pointerId); } catch (x) {} post('rzs:' + ht); const mv = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; post('rzm'); }); }, up = () => { d.removeEventListener('pointermove', mv); d.removeEventListener('pointerup', up); d.removeEventListener('pointercancel', up); post('rze'); }; d.addEventListener('pointermove', mv); d.addEventListener('pointerup', up); d.addEventListener('pointercancel', up); }); document.body.appendChild(d); });
 
   const onBar = e => { const bar = e.target.closest && e.target.closest('#root .bar'); return bar && !e.target.closest('button,a,input,select,textarea,.ib,[data-act]'); };
   document.addEventListener('mousedown', e => { if (e.button === 0 && onBar(e)) post('drag'); }, true);
