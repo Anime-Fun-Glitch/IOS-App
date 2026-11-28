@@ -11993,6 +11993,7 @@ html[data-pls=solid]{--dtc:#ffffffe6;--dtr:#00000026;--dta:#0d0e13;--dtf:none;--
 .vc .cb .i{width:28px;height:28px}.vc .cb.big .i{width:34px;height:34px}
 .vc .sk{position:absolute;left:calc(10px + var(--lft));right:calc(10px + var(--rgt));bottom:calc(8px + var(--bot));display:flex;align-items:center;gap:10px;background:#000b;border-radius:14px;padding:8px 12px;font-size:12px;color:#ddd;font-variant-numeric:tabular-nums}
 .vc .sk input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;z-index:3}
+.vc .sk input{-webkit-appearance:none;appearance:none;background:transparent}.vc .sk input::-webkit-slider-runnable-track{height:100%;background:transparent}.vc .sk input::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:0;height:0;border:0}.vc .sk input::-moz-range-track{background:transparent;height:100%}.vc .sk input::-moz-range-thumb{width:0;height:0;border:0}  /* невидимий повзунок без «ручки»: інакше клік у точку X давав зсув до ~13px (3:30 → 3:23) */
 .vc .sk .tr{position:relative;flex:1;min-width:0;height:24px}
 .vc .sk .tr .tbar{position:absolute;left:0;right:0;top:10px;height:4px;border-radius:2px;background:#ffffff33;overflow:hidden}
 .vc .sk .tr .tfill{position:absolute;left:0;top:0;bottom:0;width:0;background:var(--ac)}
@@ -16495,11 +16496,12 @@ function volPaint() {
 function vvPlace() {  // вікно гучності стоїть над кнопкою гучності, не виходячи за краї екрана
   const v = $('#vvp'), b = $('#vvol'); if (!v || !b) return;
   const pr = $('#player').getBoundingClientRect(), br = b.getBoundingClientRect(), w = v.offsetWidth;
+  if (!pr.width || !br.width) { v.classList.add('hide'); return; }
   const lo = 10 + (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--lft')) || 0), hi = pr.width - w - 10 - (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--rgt')) || 0);
   v.style.left = Math.max(lo, Math.min(hi, br.left - pr.left + br.width / 2 - w / 2)) + 'px';
   v.style.bottom = Math.max(10, pr.bottom - br.top + 8) + 'px';
 }
-$('#vvol').addEventListener('click', ev => { ev.stopPropagation(); const v = $('#vvp'); v.classList.toggle('hide'); if (!v.classList.contains('hide')) { volPaint(); vvPlace(); } vcShow(); });
+$('#vvol').addEventListener('click', ev => { ev.stopPropagation(); if (Date.now() < VVLOCK) return; const v = $('#vvp'); v.classList.toggle('hide'); if (!v.classList.contains('hide')) { volPaint(); vvPlace(); } vcShow(); });
 ['pointerdown', 'touchstart', 'touchend', 'pointerup', 'mousedown'].forEach(e => $('#vvr').addEventListener(e, volWake, {passive: true}));
 $('#vvr').addEventListener('input', () => {
   const r = $('#vvr'); let p = parseInt(r.value, 10);
@@ -16580,7 +16582,7 @@ async function play(id, n, startT, _retry) {
   S.cur = {id, n}; PLAYS++;
   const e = it.episodes.find(x => x.n === n);
   $('#player').classList.remove('hide'); vcIcon(); VC.classList.remove('off');
-  { const vb = $('#vvol'); if (vb) vb.classList.toggle('hide', !ownVol()); if (!ownVol()) $('#vvp').classList.add('hide'); }
+  seeking = false; { const vb = $('#vvol'); if (vb) vb.classList.toggle('hide', !ownVol()); $('#vvp').classList.add('hide'); VVLOCK = Date.now() + 700; }  // при відкритті плеєра повзунок гучності закритий; «крізь-клік» від картки серії його не відкриває
   lockScroll(true); document.body.classList.add('pl');
   try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (er) {}  // Web Audio (власна гучність) інакше глухне при вимкненому звуку/на iPad
   if (IOS_APP && !_retry) { try { const r = await api('/api/net'); setMirror(!!r.captured); } catch (er) {} }  // свіжа перевірка трансляції перед стартом, щоб не відкрити системний плеєр
@@ -17212,7 +17214,7 @@ window.addEventListener('pageshow', audRescue);
 window.addEventListener('focus', () => { if (S.cur && !V.paused) audRescue(); });
 V.addEventListener('webkitendfullscreen', () => { vcShow(); setTimeout(() => { zmApply(false); uiStuck(); }, 120); });
 /* ---------- власні елементи керування ---------- */
-const VC = $('#vc'), VS = $('#vseek'); let vcT = 0, seeking = false;
+const VC = $('#vc'), VS = $('#vseek'); let vcT = 0, seeking = false, seekAt = 0, VVLOCK = 0;
 function vcShow() {
   VC.classList.remove('off'); clearTimeout(vcT);
   if (PCPIP.hooked || pipOn()) return;  // поки працює PiP, інтерфейс плеєра не ховаємо
@@ -17222,6 +17224,7 @@ function vcShow() {
   }, 3000);
 }
 function vcSync() {
+  if (seeking && Date.now() - seekAt > 1500) seeking = false;  // «застряглий» режим перемотки (жест перервали, change не прийшов) більше не заморожує повзунок часу
   const d = V.duration || 0, t = V.currentTime || 0;
   if (!seeking) VS.value = d ? Math.round(t / d * 100000) : 0;
   $('#vcur').textContent = fmtT(seeking ? VS.value / 100000 * d : t);
@@ -17309,7 +17312,8 @@ function dtFlash(side, acc, ev) { dtFlashX($('#stage'), side, acc, ev); clearTim
 $('#vpp').addEventListener('click', () => { V.paused ? V.play().catch(() => {}) : V.pause(); });
 $('#vback').addEventListener('click', () => { V.currentTime = Math.max(0, V.currentTime - seekStep()); vcSync(); });
 $('#vfwd').addEventListener('click', () => { V.currentTime = Math.min(V.duration || 1e9, V.currentTime + seekStep()); vcSync(); });
-VS.addEventListener('input', () => { seeking = true; vcSync(); clearTimeout(vcT); });
+VS.addEventListener('input', () => { seeking = true; seekAt = Date.now(); vcSync(); clearTimeout(vcT); });
+['pointerup', 'pointercancel', 'touchend', 'touchcancel'].forEach(n => VS.addEventListener(n, () => setTimeout(() => { if (seeking) { seeking = false; vcSync(); } }, 250)));
 VS.addEventListener('change', () => { if (V.duration) V.currentTime = VS.value / 100000 * V.duration; seeking = false; vcSync(); vcShow(); });
 ['play', 'pause', 'playing'].forEach(e => V.addEventListener(e, () => { vcIcon(); vcShow(); }));
 V.addEventListener('timeupdate', () => { vcSync(); skipTick(); });
@@ -17735,7 +17739,7 @@ async function throwTo(pid, mode, extra) {
   const p = peerOf(pid); if (!p) return;
   const r = route(), b = {peer: pid, mode, hash: location.hash, scroll: window.scrollY, search: r.name === 'search' ? (S.search.q || '') : ''};
   if (extra) { Object.assign(b, extra); }
-  else if (S.cur) { b.id = S.cur.id; b.play = {n: S.cur.n, t: V.currentTime || P.good || 0, paused: V.paused}; }
+  else if (S.cur) { b.id = S.cur.id; b.play = {n: S.cur.n, t: V.currentTime || P.good || 0, paused: V.paused}; const ci = item(S.cur.id); if (ci) b.open = {url: ci.url, title: lname(ci), explicit: false, srcs: [{url: ci.url, title: lname(ci)}]}; }  // запасний шлях: якщо аніме немає на іншому пристрої — відкриється за посиланням
   else if (r.name === 'detail') b.id = r.id;
   try {
     await api('/api/sync_cast', b);
@@ -17762,8 +17766,19 @@ async function applyHandoff(h) {
     if (h.search && /^#\/search/.test(h.hash || '')) setTimeout(() => A.dosearch(), 250);
     const y = h.scroll || 0;
     if (y > 0) [300, 800, 1600].forEach(t => setTimeout(() => { if (!S.cur) window.scrollTo(0, y); }, t));
-    if (h.open && h.open.url) openAnime(h.open.url, h.open.title, !!h.open.explicit, h.open.srcs || [{url: h.open.url, title: h.open.title}]);
-    if (h.play && h.kid && item(h.kid)) setTimeout(() => play(h.kid, h.play.n, h.play.t), 350);
+    if (h.play && h.kid) {  // серія: під плеєром відкриваємо сторінку цього аніме, щоб після виходу з плеєра бути в ньому
+      let it = item(h.kid);
+      if (!it) { try { await loadLib(true); } catch (e) {} it = item(h.kid); }
+      if (!it && h.open && h.open.url) {  // аніме немає в цій бібліотеці — відкриваємо його за посиланням (тимчасовий перегляд)
+        try { await openAnime(h.open.url, h.open.title, !!h.open.explicit, h.open.srcs || [{url: h.open.url, title: h.open.title}]); await loadLib(true); } catch (e) {}
+        const m = (location.hash.match(/^#\/a\/(.+)$/) || [])[1];
+        it = (m && item(decodeURIComponent(m))) || [...S.items, ...S.tmp].find(x => x.url === h.open.url);
+      }
+      if (it) {
+        if (location.hash !== '#/a/' + it.id) location.hash = '#/a/' + it.id;
+        setTimeout(() => play(it.id, h.play.n, h.play.t), 450);
+      } else toast('Не вдалося відкрити це аніме на цьому пристрої', true);
+    } else if (h.open && h.open.url) openAnime(h.open.url, h.open.title, !!h.open.explicit, h.open.srcs || [{url: h.open.url, title: h.open.title}]);
     await new Promise(r => setTimeout(r, 120));  // даємо новій вкладці намалюватись під розмиттям
   });
 }
